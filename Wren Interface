@@ -1,0 +1,987 @@
+import { useState, useReducer, useCallback, useRef, useEffect } from "react";
+
+/* ─── FONTS & GLOBAL STYLES ─────────────────────────────────────────────── */
+const injectStyles = () => {
+  if (document.getElementById("wren-styles")) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;1,400&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap";
+  document.head.appendChild(link);
+
+  const style = document.createElement("style");
+  style.id = "wren-styles";
+  style.textContent = `
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #F5F3EE;
+      --bg2: #ECEAE4;
+      --surface: #FAFAF8;
+      --surface2: #F0EEE9;
+      --border: #E2DFD8;
+      --border2: #D4D0C7;
+      --text: #1C1B18;
+      --text2: #6B6760;
+      --text3: #A8A49B;
+      --accent: #3D6B52;
+      --accent-lt: #EAF2ED;
+      --accent-dk: #2E5240;
+      --amber: #C47A1A;
+      --amber-lt: #FEF0D6;
+      --red: #C0392B;
+      --red-lt: #FDECEA;
+      --blue: #2563EB;
+      --blue-lt: #EFF6FF;
+      --purple: #7C3AED;
+      --purple-lt: #F3EEFF;
+      --r: 6px;
+      --r-lg: 10px;
+      --sh: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+      --sh-md: 0 4px 20px rgba(0,0,0,.08), 0 1px 4px rgba(0,0,0,.04);
+      --sh-lg: 0 16px 48px rgba(0,0,0,.13), 0 2px 8px rgba(0,0,0,.06);
+      --sidebar: 216px;
+      --font-serif: 'Lora', Georgia, serif;
+      --font-sans: 'DM Sans', system-ui, sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); font-size: 14px; -webkit-font-smoothing: antialiased; }
+    button { font-family: var(--font-sans); cursor: pointer; }
+    input, textarea, select { font-family: var(--font-sans); }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 10px; }
+
+    /* ── Layout ── */
+    .w-layout { display: flex; height: 100vh; overflow: hidden; background: var(--bg); }
+    .w-main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+
+    /* ── Sidebar ── */
+    .w-sidebar { width: var(--sidebar); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+    .w-logo { padding: 18px 14px 14px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--border); }
+    .w-logo-mark { width: 30px; height: 30px; background: var(--text); border-radius: var(--r); display: grid; place-items: center; flex-shrink: 0; }
+    .w-logo-mark svg { color: white; }
+    .w-logo-name { font-family: var(--font-serif); font-size: 18px; color: var(--text); letter-spacing: -.01em; }
+    .w-logo-sub { font-size: 10px; color: var(--text3); letter-spacing: .04em; margin-top: -2px; }
+    .w-nav { flex: 1; padding: 10px 8px; overflow-y: auto; }
+    .w-nav-section { margin-bottom: 4px; }
+    .w-nav-label { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text3); padding: 10px 8px 4px; }
+    .w-nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--r); cursor: pointer; font-size: 13px; color: var(--text2); transition: all .13s; user-select: none; }
+    .w-nav-item:hover { background: var(--bg2); color: var(--text); }
+    .w-nav-item.active { background: var(--accent-lt); color: var(--accent); font-weight: 500; }
+    .w-nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
+    .w-nav-badge { margin-left: auto; background: var(--border); color: var(--text2); font-size: 10px; font-weight: 600; border-radius: 20px; padding: 1px 6px; }
+    .w-sidebar-footer { padding: 12px; border-top: 1px solid var(--border); }
+    .w-agent-key { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 10px; }
+    .w-agent-key-label { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); margin-bottom: 5px; }
+    .w-agent-key-val { font-family: var(--font-mono); font-size: 10px; color: var(--text2); word-break: break-all; line-height: 1.5; }
+    .w-key-copy { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+
+    /* ── Page ── */
+    .w-page { padding: 28px 36px; max-width: 1280px; margin: 0 auto; width: 100%; flex: 1; }
+    .w-page-hd { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 24px; gap: 12px; }
+    .w-page-title { font-family: var(--font-serif); font-size: 24px; color: var(--text); font-weight: 400; }
+    .w-page-sub { font-size: 12px; color: var(--text3); margin-top: 3px; }
+
+    /* ── Buttons ── */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: var(--r); font-size: 13px; font-weight: 500; border: none; transition: all .13s; white-space: nowrap; }
+    .btn-primary { background: var(--text); color: #fff; }
+    .btn-primary:hover { background: #333; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--bg2); border-color: var(--border2); }
+    .btn-ghost { background: transparent; color: var(--text2); padding: 6px 10px; }
+    .btn-ghost:hover { background: var(--bg2); color: var(--text); }
+    .btn-accent { background: var(--accent); color: #fff; }
+    .btn-accent:hover { background: var(--accent-dk); }
+    .btn-sm { padding: 5px 10px; font-size: 12px; }
+    .btn-danger { background: var(--red-lt); color: var(--red); border: 1px solid #f5c6c2; }
+
+    /* ── Tags / Badges ── */
+    .badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 500; padding: 2px 7px; border-radius: 20px; gap: 4px; }
+    .badge-high { background: var(--red-lt); color: var(--red); }
+    .badge-medium { background: var(--amber-lt); color: var(--amber); }
+    .badge-low { background: var(--accent-lt); color: var(--accent); }
+    .badge-todo { background: var(--bg2); color: var(--text2); border: 1px solid var(--border); }
+    .badge-in_progress { background: var(--blue-lt); color: var(--blue); }
+    .badge-done { background: var(--accent-lt); color: var(--accent); }
+    .badge-idea { background: var(--purple-lt); color: var(--purple); }
+    .badge-draft { background: var(--amber-lt); color: var(--amber); }
+    .badge-published { background: var(--accent-lt); color: var(--accent); }
+    .badge-active { background: var(--accent-lt); color: var(--accent); }
+    .badge-archived { background: var(--bg2); color: var(--text3); }
+    .badge-agent { background: var(--purple-lt); color: var(--purple); }
+    .badge-manual { background: var(--bg2); color: var(--text2); border: 1px solid var(--border); }
+    .badge-tag { background: var(--surface2); color: var(--text2); border: 1px solid var(--border); }
+    .badge-notion { background: #F7F6F3; color: #37352F; border: 1px solid #e3e2dc; }
+    .badge-url { background: var(--blue-lt); color: var(--blue); }
+    .badge-internal { background: var(--amber-lt); color: var(--amber); }
+
+    /* ── Kanban ── */
+    .kanban { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
+    .k-col { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; transition: border-color .15s, background .15s; }
+    .k-col.drag-over { border-color: var(--accent); background: var(--accent-lt); }
+    .k-col-hd { padding: 12px 14px 10px; display: flex; align-items: center; justify-content: space-between; }
+    .k-col-title { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--text2); display: flex; align-items: center; gap: 7px; }
+    .k-col-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-todo { background: var(--text3); }
+    .dot-in_progress { background: var(--blue); }
+    .dot-done { background: var(--accent); }
+    .k-col-count { font-size: 11px; font-weight: 600; background: var(--border); color: var(--text2); border-radius: 20px; padding: 1px 7px; }
+    .k-body { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 6px; min-height: 100px; }
+    .k-empty { padding: 20px; text-align: center; color: var(--text3); font-size: 12px; font-style: italic; }
+
+    /* ── Task Card ── */
+    .task-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 11px 12px; cursor: pointer; transition: all .13s; user-select: none; }
+    .task-card:hover { border-color: var(--border2); box-shadow: var(--sh); transform: translateY(-1px); }
+    .task-card.dragging { opacity: .35; transform: scale(.97); }
+    .task-card-title { font-size: 13px; font-weight: 500; line-height: 1.45; color: var(--text); margin-bottom: 9px; }
+    .task-card-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+    .task-due { font-size: 11px; color: var(--text3); display: flex; align-items: center; gap: 3px; }
+    .task-due.overdue { color: var(--red); }
+    .task-card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+
+    /* ── Drawer ── */
+    .drawer-overlay { position: fixed; inset: 0; background: rgba(28,27,24,.2); z-index: 100; animation: fadeIn .18s; }
+    .drawer { position: fixed; right: 0; top: 0; bottom: 0; width: 500px; background: var(--surface); box-shadow: var(--sh-lg); z-index: 101; overflow-y: auto; display: flex; flex-direction: column; animation: slideIn .2s cubic-bezier(.22,.68,0,1.2); }
+    @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+    @keyframes slideIn { from { transform: translateX(32px); opacity:0 } to { transform:translateX(0); opacity:1 } }
+    .drawer-hd { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 10px; }
+    .drawer-title { font-family: var(--font-serif); font-size: 19px; color: var(--text); flex: 1; line-height: 1.35; }
+    .drawer-body { padding: 18px 20px; flex: 1; }
+    .drawer-section { margin-bottom: 20px; }
+    .drawer-section-title { font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+    .drawer-section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+    .drawer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .drawer-field { }
+    .drawer-field-label { font-size: 11px; color: var(--text3); margin-bottom: 3px; font-weight: 500; }
+    .drawer-field-val { font-size: 13px; color: var(--text); }
+    .drawer-desc { font-size: 13px; color: var(--text2); line-height: 1.6; white-space: pre-wrap; }
+    .drawer-link { font-size: 12px; color: var(--blue); text-decoration: none; display: flex; align-items: center; gap: 4px; padding: 4px 0; }
+    .drawer-link:hover { text-decoration: underline; }
+    .close-btn { background: none; border: none; color: var(--text3); font-size: 18px; padding: 3px 5px; border-radius: 4px; line-height: 1; transition: .13s; display: flex; align-items: center; }
+    .close-btn:hover { color: var(--text); background: var(--bg2); }
+
+    /* ── Activity ── */
+    .activity-list { display: flex; flex-direction: column; }
+    .activity-item { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-dot-wrap { display: flex; flex-direction: column; align-items: center; gap: 0; flex-shrink: 0; padding-top: 4px; }
+    .activity-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border2); flex-shrink: 0; }
+    .activity-dot.fresh { background: var(--accent); }
+    .activity-content { flex: 1; }
+    .activity-text { font-size: 12.5px; color: var(--text2); line-height: 1.5; }
+    .activity-text strong { color: var(--text); font-weight: 500; }
+    .activity-time { font-size: 11px; color: var(--text3); margin-top: 2px; font-family: var(--font-mono); }
+
+    /* ── Modal ── */
+    .modal-bg { position: fixed; inset: 0; background: rgba(28,27,24,.35); z-index: 200; display: flex; align-items: center; justify-content: center; animation: fadeIn .15s; padding: 20px; }
+    .modal { background: var(--surface); border-radius: var(--r-lg); padding: 26px; width: 500px; max-width: 100%; box-shadow: var(--sh-lg); animation: popIn .18s cubic-bezier(.22,.68,0,1.1); max-height: 90vh; overflow-y: auto; }
+    @keyframes popIn { from { transform: scale(.95); opacity:0 } to { transform:scale(1); opacity:1 } }
+    .modal-title { font-family: var(--font-serif); font-size: 20px; margin-bottom: 20px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+    /* ── Form ── */
+    .fg { margin-bottom: 14px; }
+    .fg-label { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 5px; display: block; letter-spacing: .02em; }
+    .fg-input { width: 100%; padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--r); font-size: 13px; color: var(--text); background: var(--bg); outline: none; transition: .13s; }
+    .fg-input:focus { border-color: var(--accent); background: #fff; }
+    .fg-select { width: 100%; padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--r); font-size: 13px; color: var(--text); background: var(--bg); outline: none; cursor: pointer; }
+    .fg-textarea { width: 100%; padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--r); font-size: 13px; color: var(--text); background: var(--bg); outline: none; resize: vertical; min-height: 72px; line-height: 1.5; }
+    .fg-textarea:focus { border-color: var(--accent); background: #fff; }
+    .fg-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    /* ── Table ── */
+    .w-table { width: 100%; border-collapse: collapse; }
+    .w-table th { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text3); padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); background: var(--surface2); }
+    .w-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text); vertical-align: middle; }
+    .w-table tr:last-child td { border-bottom: none; }
+    .w-table tr:hover td { background: var(--bg2); cursor: pointer; }
+    .w-table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--sh); }
+
+    /* ── Cards ── */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    .w-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; cursor: pointer; transition: all .13s; }
+    .w-card:hover { border-color: var(--border2); box-shadow: var(--sh-md); transform: translateY(-1px); }
+    .w-card-title { font-family: var(--font-serif); font-size: 16px; color: var(--text); margin-bottom: 6px; font-weight: 400; }
+    .w-card-desc { font-size: 12.5px; color: var(--text2); line-height: 1.5; margin-bottom: 12px; }
+    .w-card-footer { display: flex; align-items: center; justify-content: space-between; }
+
+    /* ── Stats ── */
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; }
+    .stat-val { font-family: var(--font-serif); font-size: 30px; color: var(--text); line-height: 1; margin-bottom: 4px; }
+    .stat-label { font-size: 11px; color: var(--text3); font-weight: 500; letter-spacing: .04em; }
+
+    /* ── Misc ── */
+    .divider { height: 1px; background: var(--border); margin: 16px 0; }
+    .empty-state { text-align: center; padding: 48px 20px; color: var(--text3); }
+    .empty-state-icon { font-size: 36px; margin-bottom: 10px; opacity: .5; }
+    .empty-state-text { font-size: 13px; }
+    .tag-input-wrap { display: flex; flex-wrap: wrap; gap: 5px; padding: 7px 9px; border: 1px solid var(--border); border-radius: var(--r); background: var(--bg); min-height: 38px; align-items: center; cursor: text; }
+    .tag-input-wrap:focus-within { border-color: var(--accent); background: #fff; }
+    .tag-pill { background: var(--surface2); border: 1px solid var(--border2); border-radius: 20px; font-size: 11px; color: var(--text2); padding: 2px 6px; display: flex; align-items: center; gap: 3px; }
+    .tag-pill button { background: none; border: none; color: var(--text3); font-size: 12px; line-height: 1; padding: 0 1px; cursor: pointer; }
+    .tag-pill button:hover { color: var(--red); }
+    .tag-input { border: none; outline: none; background: transparent; font-size: 12px; font-family: var(--font-sans); color: var(--text); min-width: 80px; flex: 1; }
+    .api-key-box { font-family: var(--font-mono); font-size: 12px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 10px 12px; color: var(--text2); word-break: break-all; line-height: 1.6; }
+    .copied-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text); color: #fff; padding: 8px 18px; border-radius: 20px; font-size: 13px; z-index: 999; animation: toastIn .2s; }
+    @keyframes toastIn { from { opacity:0; transform: translateX(-50%) translateY(8px) } to { opacity:1; transform: translateX(-50%) translateY(0) } }
+    .progress-bar { height: 4px; background: var(--border); border-radius: 20px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--accent); border-radius: 20px; transition: width .3s; }
+  `;
+  document.head.appendChild(style);
+};
+injectStyles();
+
+/* ─── CONSTANTS ─────────────────────────────────────────────────────────── */
+const AGENT_KEY = "wren_sk_" + "7f3a9c2e1b8d4f6a0e5c3b7d9a2f4e8c1b6d3a7f9e2c5b8d1a4f7e0c3b6d9a2f";
+const WS_ID = "ws_brian_01";
+
+const now = () => new Date().toISOString();
+const fmtDate = (iso) => { if (!iso) return "—"; const d = new Date(iso); return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }); };
+const fmtTime = (iso) => { const d = new Date(iso); const diff = Date.now() - d.getTime(); if (diff < 60000) return "just now"; if (diff < 3600000) return `${Math.floor(diff/60000)}m ago`; if (diff < 86400000) return `${Math.floor(diff/3600000)}h ago`; return fmtDate(iso); };
+const isOverdue = (iso) => iso && new Date(iso) < new Date();
+const slug = (s) => s.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "").slice(0, 20);
+
+/* ─── SEED DATA ──────────────────────────────────────────────────────────── */
+const SEED = {
+  tasks: [
+    { _id: "t1", workspaceId: WS_ID, title: "Set up n8n webhook for Saka Wera job ingestion", description: "Configure the incoming webhook node and map payload fields to the job schema.", status: "in_progress", priority: "high", dueDate: new Date(Date.now() + 86400000).toISOString(), tags: ["n8n", "saka-wera"], projectId: "p1", source: "agent", externalLinks: ["https://github.com/brian/saka-wera"], createdAt: new Date(Date.now() - 172800000).toISOString(), updatedAt: now() },
+    { _id: "t2", workspaceId: WS_ID, title: "Write Fiverr gig description for automation services", description: "Draft 3 tiers: basic scraper, advanced workflow, full automation stack.", status: "todo", priority: "medium", dueDate: new Date(Date.now() + 172800000).toISOString(), tags: ["fiverr", "freelance"], projectId: "p2", source: "manual", externalLinks: [], createdAt: new Date(Date.now() - 86400000).toISOString(), updatedAt: now() },
+    { _id: "t3", workspaceId: WS_ID, title: "Integrate Pesapal payment gateway", description: "Add payment flow to Saka Wera landing page. Handle IPN callbacks.", status: "todo", priority: "high", dueDate: new Date(Date.now() - 86400000).toISOString(), tags: ["payments", "saka-wera"], projectId: "p1", source: "manual", externalLinks: [], createdAt: new Date(Date.now() - 259200000).toISOString(), updatedAt: now() },
+    { _id: "t4", workspaceId: WS_ID, title: "Deploy Wren OS to Render", description: "Build React app, push to GitHub, connect Render static site.", status: "todo", priority: "medium", dueDate: null, tags: ["wren-os", "deploy"], projectId: "p3", source: "manual", externalLinks: [], createdAt: now(), updatedAt: now() },
+    { _id: "t5", workspaceId: WS_ID, title: "Research Kenyan job boards for Saka Wera expansion", description: "Identify 5 additional job boards beyond BrighterMonday and MyJobMag.", status: "done", priority: "low", dueDate: null, tags: ["research", "saka-wera"], projectId: "p1", source: "agent", externalLinks: [], createdAt: new Date(Date.now() - 432000000).toISOString(), updatedAt: now() },
+    { _id: "t6", workspaceId: WS_ID, title: "Configure OpenClaw Guardian automation", description: "Set up 30-min email + calendar + infra monitoring loop.", status: "done", priority: "high", dueDate: null, tags: ["openclaw", "automation"], projectId: null, source: "manual", externalLinks: [], createdAt: new Date(Date.now() - 604800000).toISOString(), updatedAt: now() },
+  ],
+  projects: [
+    { _id: "p1", workspaceId: WS_ID, name: "Saka Wera", description: "Automated Kenyan job search service built on n8n.", status: "active", createdAt: new Date(Date.now() - 2592000000).toISOString(), updatedAt: now() },
+    { _id: "p2", workspaceId: WS_ID, name: "Freelance Pipeline", description: "Fiverr gig + portfolio + client acquisition systems.", status: "active", createdAt: new Date(Date.now() - 1296000000).toISOString(), updatedAt: now() },
+    { _id: "p3", workspaceId: WS_ID, name: "Wren OS", description: "AI agent management dashboard.", status: "active", createdAt: new Date(Date.now() - 259200000).toISOString(), updatedAt: now() },
+  ],
+  contentItems: [
+    { _id: "c1", workspaceId: WS_ID, title: "How I built an automated job search service for Kenya", platform: "linkedin", status: "draft", hook: "I got tired of refreshing job boards. So I automated it.", brief: "Story of building Saka Wera — problem, solution, tech stack.", draft: "", link: "", tags: ["saka-wera", "automation"], createdAt: new Date(Date.now() - 86400000).toISOString(), updatedAt: now() },
+    { _id: "c2", workspaceId: WS_ID, title: "5 n8n automations every freelancer should have", platform: "twitter", status: "idea", hook: "You're leaving money on the table without these 5 automations.", brief: "", draft: "", link: "", tags: ["n8n", "freelance"], createdAt: now(), updatedAt: now() },
+    { _id: "c3", workspaceId: WS_ID, title: "Getting started with OpenClaw on Windows", platform: "blog", status: "idea", hook: "The setup is trickier than it looks. Here's what actually works.", brief: "", draft: "", link: "", tags: ["openclaw", "tutorial"], createdAt: now(), updatedAt: now() },
+  ],
+  documents: [
+    { _id: "d1", workspaceId: WS_ID, title: "Saka Wera Product Spec", kind: "notion", url: "https://notion.so/saka-wera-spec", body: "", tags: ["saka-wera", "spec"], createdAt: new Date(Date.now() - 604800000).toISOString(), updatedAt: now() },
+    { _id: "d2", workspaceId: WS_ID, title: "OpenClaw Setup Notes", kind: "internal", url: "", body: "Gateway mode must be set to local. Token auth required even for loopback. Sessions folder must exist at ~/.openclaw/agents/main/sessions", tags: ["openclaw"], createdAt: new Date(Date.now() - 172800000).toISOString(), updatedAt: now() },
+    { _id: "d3", workspaceId: WS_ID, title: "Render Deployment Guide", kind: "url", url: "https://render.com/docs/static-sites", body: "", tags: ["deploy", "wren-os"], createdAt: now(), updatedAt: now() },
+  ],
+  activityEvents: [
+    { _id: "a1", workspaceId: WS_ID, entityType: "task", entityId: "t5", eventType: "task_status_changed", payload: { from: "in_progress", to: "done" }, createdAt: new Date(Date.now() - 7200000).toISOString() },
+    { _id: "a2", workspaceId: WS_ID, entityType: "task", entityId: "t6", eventType: "task_status_changed", payload: { from: "in_progress", to: "done" }, createdAt: new Date(Date.now() - 14400000).toISOString() },
+    { _id: "a3", workspaceId: WS_ID, entityType: "task", entityId: "t1", eventType: "task_created", payload: { source: "agent" }, createdAt: new Date(Date.now() - 172800000).toISOString() },
+    { _id: "a4", workspaceId: WS_ID, entityType: "project", entityId: "p3", eventType: "project_created", payload: {}, createdAt: new Date(Date.now() - 259200000).toISOString() },
+    { _id: "a5", workspaceId: WS_ID, entityType: "content", entityId: "c1", eventType: "content_created", payload: { platform: "linkedin" }, createdAt: new Date(Date.now() - 86400000).toISOString() },
+  ],
+};
+
+/* ─── REDUCER ────────────────────────────────────────────────────────────── */
+const uid = () => Math.random().toString(36).slice(2, 10);
+
+function reducer(state, action) {
+  const ts = now();
+  switch (action.type) {
+    case "MOVE_TASK": {
+      const { id, status } = action;
+      const task = state.tasks.find(t => t._id === id);
+      if (!task || task.status === status) return state;
+      const event = { _id: uid(), workspaceId: WS_ID, entityType: "task", entityId: id, eventType: "task_status_changed", payload: { from: task.status, to: status }, createdAt: ts };
+      return { ...state, tasks: state.tasks.map(t => t._id === id ? { ...t, status, updatedAt: ts } : t), activityEvents: [event, ...state.activityEvents] };
+    }
+    case "CREATE_TASK": {
+      const task = { _id: uid(), workspaceId: WS_ID, ...action.payload, createdAt: ts, updatedAt: ts };
+      const event = { _id: uid(), workspaceId: WS_ID, entityType: "task", entityId: task._id, eventType: "task_created", payload: { source: task.source }, createdAt: ts };
+      return { ...state, tasks: [...state.tasks, task], activityEvents: [event, ...state.activityEvents] };
+    }
+    case "UPDATE_TASK": {
+      const event = { _id: uid(), workspaceId: WS_ID, entityType: "task", entityId: action.id, eventType: "task_updated", payload: {}, createdAt: ts };
+      return { ...state, tasks: state.tasks.map(t => t._id === action.id ? { ...t, ...action.payload, updatedAt: ts } : t), activityEvents: [event, ...state.activityEvents] };
+    }
+    case "DELETE_TASK":
+      return { ...state, tasks: state.tasks.filter(t => t._id !== action.id) };
+    case "CREATE_PROJECT": {
+      const project = { _id: uid(), workspaceId: WS_ID, ...action.payload, createdAt: ts, updatedAt: ts };
+      const event = { _id: uid(), workspaceId: WS_ID, entityType: "project", entityId: project._id, eventType: "project_created", payload: {}, createdAt: ts };
+      return { ...state, projects: [...state.projects, project], activityEvents: [event, ...state.activityEvents] };
+    }
+    case "CREATE_CONTENT": {
+      const item = { _id: uid(), workspaceId: WS_ID, ...action.payload, createdAt: ts, updatedAt: ts };
+      const event = { _id: uid(), workspaceId: WS_ID, entityType: "content", entityId: item._id, eventType: "content_created", payload: { platform: item.platform }, createdAt: ts };
+      return { ...state, contentItems: [...state.contentItems, item], activityEvents: [event, ...state.activityEvents] };
+    }
+    case "UPDATE_CONTENT": {
+      return { ...state, contentItems: state.contentItems.map(c => c._id === action.id ? { ...c, ...action.payload, updatedAt: ts } : c) };
+    }
+    case "CREATE_DOCUMENT": {
+      const doc = { _id: uid(), workspaceId: WS_ID, ...action.payload, createdAt: ts, updatedAt: ts };
+      const event = { _id: uid(), workspaceId: WS_ID, entityType: "document", entityId: doc._id, eventType: "document_created", payload: {}, createdAt: ts };
+      return { ...state, documents: [...state.documents, doc], activityEvents: [event, ...state.activityEvents] };
+    }
+    default: return state;
+  }
+}
+
+/* ─── ACTIVITY SUMMARY ───────────────────────────────────────────────────── */
+function summarizeEvent(event, state) {
+  const { eventType, entityType, payload, entityId } = event;
+  const task = state.tasks.find(t => t._id === entityId);
+  const project = state.projects.find(p => p._id === entityId);
+  const content = state.contentItems.find(c => c._id === entityId);
+  const name = task?.title || project?.name || content?.title || entityId;
+  const short = name?.length > 40 ? name.slice(0, 40) + "…" : name;
+  switch (eventType) {
+    case "task_status_changed": return <span>Task <strong>"{short}"</strong> moved from <span className={`badge badge-${payload.from}`}>{payload.from.replace("_", " ")}</span> to <span className={`badge badge-${payload.to}`}>{payload.to.replace("_", " ")}</span></span>;
+    case "task_created": return <span>Task <strong>"{short}"</strong> created via <span className={`badge badge-${payload.source}`}>{payload.source}</span></span>;
+    case "task_updated": return <span>Task <strong>"{short}"</strong> was updated</span>;
+    case "project_created": return <span>Project <strong>"{short}"</strong> created</span>;
+    case "content_created": return <span>Content idea <strong>"{short}"</strong> added for <span className="badge badge-tag">{payload.platform}</span></span>;
+    case "document_created": return <span>Document <strong>"{short}"</strong> added</span>;
+    default: return <span>{eventType} on {entityType}</span>;
+  }
+}
+
+/* ─── TAG INPUT ──────────────────────────────────────────────────────────── */
+function TagInput({ value = [], onChange }) {
+  const [input, setInput] = useState("");
+  const addTag = (tag) => { const t = tag.trim().toLowerCase(); if (t && !value.includes(t)) onChange([...value, t]); setInput(""); };
+  return (
+    <div className="tag-input-wrap" onClick={e => e.currentTarget.querySelector("input")?.focus()}>
+      {value.map(t => (
+        <span key={t} className="tag-pill">{t}<button onClick={() => onChange(value.filter(x => x !== t))}>×</button></span>
+      ))}
+      <input className="tag-input" placeholder="Add tag…" value={input}
+        onChange={e => setInput(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addTag(input); } if (e.key === "Backspace" && !input && value.length) onChange(value.slice(0, -1)); }} />
+    </div>
+  );
+}
+
+/* ─── TOAST ──────────────────────────────────────────────────────────────── */
+function Toast({ msg }) {
+  return msg ? <div className="copied-toast">{msg}</div> : null;
+}
+
+/* ─── TASK DRAWER ────────────────────────────────────────────────────────── */
+function TaskDrawer({ task, projects, activityEvents, onClose, onUpdate, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(task);
+  useEffect(() => { setForm(task); setEditing(false); }, [task]);
+  const taskActivity = activityEvents.filter(e => e.entityId === task._id).slice(0, 10);
+  const proj = projects.find(p => p._id === task.projectId);
+
+  return (
+    <>
+      <div className="drawer-overlay" onClick={onClose} />
+      <div className="drawer">
+        <div className="drawer-hd">
+          <div style={{ flex: 1 }}>
+            {editing ? (
+              <input className="fg-input" style={{ fontSize: 16, fontFamily: "var(--font-serif)", fontWeight: 400 }} value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} />
+            ) : (
+              <div className="drawer-title">{task.title}</div>
+            )}
+            <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+              <span className={`badge badge-${task.status}`}>{task.status.replace("_", " ")}</span>
+              <span className={`badge badge-${task.priority}`}>{task.priority}</span>
+              <span className={`badge badge-${task.source}`}>{task.source}</span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+            {editing ? (
+              <>
+                <button className="btn btn-accent btn-sm" onClick={() => { onUpdate(task._id, form); setEditing(false); }}>Save</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => { setEditing(false); setForm(task); }}>Cancel</button>
+              </>
+            ) : (
+              <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>Edit</button>
+            )}
+            <button className="close-btn" onClick={onClose}>✕</button>
+          </div>
+        </div>
+
+        <div className="drawer-body">
+          {editing ? (
+            <>
+              <div className="fg"><label className="fg-label">Description</label><textarea className="fg-textarea" value={form.description || ""} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+              <div className="fg-row">
+                <div className="fg"><label className="fg-label">Status</label><select className="fg-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="done">Done</option></select></div>
+                <div className="fg"><label className="fg-label">Priority</label><select className="fg-select" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+              </div>
+              <div className="fg"><label className="fg-label">Due Date</label><input type="date" className="fg-input" value={form.dueDate ? form.dueDate.slice(0, 10) : ""} onChange={e => setForm({ ...form, dueDate: e.target.value ? new Date(e.target.value).toISOString() : null })} /></div>
+              <div className="fg"><label className="fg-label">Tags</label><TagInput value={form.tags || []} onChange={tags => setForm({ ...form, tags })} /></div>
+              <div className="fg"><label className="fg-label">Project</label><select className="fg-select" value={form.projectId || ""} onChange={e => setForm({ ...form, projectId: e.target.value || null })}><option value="">No Project</option>{projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}</select></div>
+              <div className="fg"><label className="fg-label">External Links (one per line)</label><textarea className="fg-textarea" value={(form.externalLinks || []).join("\n")} onChange={e => setForm({ ...form, externalLinks: e.target.value.split("\n").filter(Boolean) })} style={{ minHeight: 56 }} /></div>
+              <div style={{ marginTop: 12 }}><button className="btn btn-danger btn-sm" onClick={() => { if (confirm("Delete this task?")) { onDelete(task._id); onClose(); } }}>Delete Task</button></div>
+            </>
+          ) : (
+            <>
+              <div className="drawer-section">
+                <div className="drawer-section-title">Details</div>
+                <div className="drawer-grid">
+                  <div className="drawer-field"><div className="drawer-field-label">Project</div><div className="drawer-field-val">{proj?.name || "—"}</div></div>
+                  <div className="drawer-field"><div className="drawer-field-label">Due Date</div><div className={`drawer-field-val ${isOverdue(task.dueDate) && task.status !== "done" ? "task-due overdue" : ""}`}>{fmtDate(task.dueDate)}</div></div>
+                  <div className="drawer-field"><div className="drawer-field-label">Created</div><div className="drawer-field-val">{fmtDate(task.createdAt)}</div></div>
+                  <div className="drawer-field"><div className="drawer-field-label">Updated</div><div className="drawer-field-val">{fmtTime(task.updatedAt)}</div></div>
+                </div>
+              </div>
+              {task.description && (
+                <div className="drawer-section">
+                  <div className="drawer-section-title">Description</div>
+                  <div className="drawer-desc">{task.description}</div>
+                </div>
+              )}
+              {task.tags?.length > 0 && (
+                <div className="drawer-section">
+                  <div className="drawer-section-title">Tags</div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{task.tags.map(t => <span key={t} className="badge badge-tag">{t}</span>)}</div>
+                </div>
+              )}
+              {task.externalLinks?.length > 0 && (
+                <div className="drawer-section">
+                  <div className="drawer-section-title">Links</div>
+                  {task.externalLinks.map(l => <a key={l} href={l} target="_blank" rel="noreferrer" className="drawer-link">🔗 {l}</a>)}
+                </div>
+              )}
+              <div className="drawer-section">
+                <div className="drawer-section-title">Activity</div>
+                {taskActivity.length === 0 ? <div style={{ color: "var(--text3)", fontSize: 12 }}>No activity yet</div> : (
+                  <div className="activity-list">
+                    {taskActivity.map((e, i) => (
+                      <div key={e._id} className="activity-item">
+                        <div className="activity-dot-wrap"><div className={`activity-dot ${i === 0 ? "fresh" : ""}`} /></div>
+                        <div className="activity-content">
+                          <div className="activity-text">{summarizeEvent(e, { tasks: [], projects: [], contentItems: [] })}</div>
+                          <div className="activity-time">{fmtTime(e.createdAt)}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ─── CREATE TASK MODAL ──────────────────────────────────────────────────── */
+function CreateTaskModal({ projects, onClose, onCreate, defaultStatus = "todo" }) {
+  const [form, setForm] = useState({ title: "", description: "", status: defaultStatus, priority: "medium", dueDate: null, tags: [], projectId: "", source: "manual", externalLinks: [] });
+  const valid = form.title.trim().length > 0;
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-title">New Task</div>
+        <div className="fg"><label className="fg-label">Title *</label><input className="fg-input" placeholder="What needs to be done?" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} autoFocus /></div>
+        <div className="fg"><label className="fg-label">Description</label><textarea className="fg-textarea" placeholder="Optional details…" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+        <div className="fg-row">
+          <div className="fg"><label className="fg-label">Status</label><select className="fg-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="todo">To Do</option><option value="in_progress">In Progress</option><option value="done">Done</option></select></div>
+          <div className="fg"><label className="fg-label">Priority</label><select className="fg-select" value={form.priority} onChange={e => setForm({ ...form, priority: e.target.value })}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></div>
+        </div>
+        <div className="fg-row">
+          <div className="fg"><label className="fg-label">Due Date</label><input type="date" className="fg-input" value={form.dueDate || ""} onChange={e => setForm({ ...form, dueDate: e.target.value || null })} /></div>
+          <div className="fg"><label className="fg-label">Project</label><select className="fg-select" value={form.projectId} onChange={e => setForm({ ...form, projectId: e.target.value })}><option value="">No Project</option>{projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}</select></div>
+        </div>
+        <div className="fg"><label className="fg-label">Tags</label><TagInput value={form.tags} onChange={tags => setForm({ ...form, tags })} /></div>
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={!valid} onClick={() => { if (valid) { onCreate({ ...form, projectId: form.projectId || null, dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : null, externalLinks: [] }); onClose(); } }}>Create Task</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── DASHBOARD (KANBAN) ─────────────────────────────────────────────────── */
+const COLS = [
+  { id: "todo", label: "To Do", dot: "dot-todo" },
+  { id: "in_progress", label: "In Progress", dot: "dot-in_progress" },
+  { id: "done", label: "Done", dot: "dot-done" },
+];
+
+function Dashboard({ state, dispatch, projects }) {
+  const [dragging, setDragging] = useState(null);
+  const [dragOver, setDragOver] = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [showCreate, setShowCreate] = useState(null);
+
+  const tasksByStatus = (status) => state.tasks.filter(t => t.workspaceId === WS_ID && t.status === status);
+  const proj = (id) => projects.find(p => p._id === id);
+
+  const todo = tasksByStatus("todo").length;
+  const inProg = tasksByStatus("in_progress").length;
+  const done = tasksByStatus("done").length;
+  const overdue = state.tasks.filter(t => isOverdue(t.dueDate) && t.status !== "done").length;
+
+  return (
+    <div className="w-page">
+      <div className="w-page-hd">
+        <div><div className="w-page-title">Dashboard</div><div className="w-page-sub">Drag tasks between columns to update status</div></div>
+        <button className="btn btn-primary" onClick={() => setShowCreate("todo")}>+ New Task</button>
+      </div>
+
+      <div className="stats-row">
+        <div className="stat-card"><div className="stat-val">{todo}</div><div className="stat-label">To Do</div></div>
+        <div className="stat-card"><div className="stat-val" style={{ color: "var(--blue)" }}>{inProg}</div><div className="stat-label">In Progress</div></div>
+        <div className="stat-card"><div className="stat-val" style={{ color: "var(--accent)" }}>{done}</div><div className="stat-label">Done</div></div>
+        <div className="stat-card"><div className="stat-val" style={{ color: overdue ? "var(--red)" : "var(--text3)" }}>{overdue}</div><div className="stat-label">Overdue</div></div>
+      </div>
+
+      <div className="kanban">
+        {COLS.map(col => {
+          const tasks = tasksByStatus(col.id);
+          return (
+            <div key={col.id} className={`k-col ${dragOver === col.id ? "drag-over" : ""}`}
+              onDragOver={e => { e.preventDefault(); setDragOver(col.id); }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={() => { if (dragging && dragging !== col.id) dispatch({ type: "MOVE_TASK", id: dragging, status: col.id }); setDragging(null); setDragOver(null); }}>
+              <div className="k-col-hd">
+                <div className="k-col-title"><span className={`k-col-dot ${col.dot}`} />{col.label}</div>
+                <div className="k-col-count">{tasks.length}</div>
+              </div>
+              <div className="k-body">
+                {tasks.length === 0 && <div className="k-empty">Drop tasks here</div>}
+                {tasks.map(task => (
+                  <div key={task._id} className={`task-card ${dragging === task._id ? "dragging" : ""}`}
+                    draggable onDragStart={() => setDragging(task._id)} onDragEnd={() => { setDragging(null); setDragOver(null); }}
+                    onClick={() => setSelectedTask(task)}>
+                    <div className="task-card-title">{task.title}</div>
+                    <div className="task-card-meta">
+                      <span className={`badge badge-${task.priority}`}>{task.priority}</span>
+                      {task.tags?.slice(0, 2).map(t => <span key={t} className="badge badge-tag">{t}</span>)}
+                    </div>
+                    <div className="task-card-footer">
+                      <div className={`task-due ${isOverdue(task.dueDate) && task.status !== "done" ? "overdue" : ""}`}>
+                        {task.dueDate ? `📅 ${fmtDate(task.dueDate)}` : ""}
+                      </div>
+                      <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                        {proj(task.projectId) && <span className="badge badge-tag" style={{ fontSize: 10 }}>{proj(task.projectId).name}</span>}
+                        <span className={`badge badge-${task.source}`} style={{ fontSize: 10 }}>{task.source}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <button className="btn btn-ghost btn-sm" style={{ width: "100%", justifyContent: "center", marginTop: 4, color: "var(--text3)" }} onClick={() => setShowCreate(col.id)}>+ Add task</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {selectedTask && (
+        <TaskDrawer task={selectedTask} projects={projects} activityEvents={state.activityEvents}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={(id, payload) => { dispatch({ type: "UPDATE_TASK", id, payload }); setSelectedTask({ ...selectedTask, ...payload }); }}
+          onDelete={(id) => dispatch({ type: "DELETE_TASK", id })} />
+      )}
+      {showCreate && (
+        <CreateTaskModal projects={projects} defaultStatus={showCreate} onClose={() => setShowCreate(null)}
+          onCreate={(payload) => dispatch({ type: "CREATE_TASK", payload })} />
+      )}
+    </div>
+  );
+}
+
+/* ─── PROJECTS ───────────────────────────────────────────────────────────── */
+function Projects({ state, dispatch }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ name: "", description: "", status: "active" });
+  const [selected, setSelected] = useState(null);
+
+  const projects = state.projects.filter(p => p.workspaceId === WS_ID);
+  const taskCount = (pid) => state.tasks.filter(t => t.projectId === pid).length;
+  const doneCount = (pid) => state.tasks.filter(t => t.projectId === pid && t.status === "done").length;
+
+  if (selected) {
+    const proj = projects.find(p => p._id === selected);
+    const tasks = state.tasks.filter(t => t.projectId === selected);
+    return (
+      <div className="w-page">
+        <div className="w-page-hd">
+          <div>
+            <button className="btn btn-ghost btn-sm" style={{ marginBottom: 8, paddingLeft: 4 }} onClick={() => setSelected(null)}>← All Projects</button>
+            <div className="w-page-title">{proj.name}</div>
+            <div className="w-page-sub">{proj.description}</div>
+          </div>
+          <span className={`badge badge-${proj.status}`}>{proj.status}</span>
+        </div>
+        <div className="w-table-wrap">
+          <table className="w-table">
+            <thead><tr><th>Task</th><th>Status</th><th>Priority</th><th>Due</th></tr></thead>
+            <tbody>
+              {tasks.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>No tasks in this project</td></tr>}
+              {tasks.map(t => (
+                <tr key={t._id}><td style={{ fontWeight: 500 }}>{t.title}</td><td><span className={`badge badge-${t.status}`}>{t.status.replace("_", " ")}</span></td><td><span className={`badge badge-${t.priority}`}>{t.priority}</span></td><td className={isOverdue(t.dueDate) && t.status !== "done" ? "task-due overdue" : "task-due"}>{fmtDate(t.dueDate)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-page">
+      <div className="w-page-hd">
+        <div><div className="w-page-title">Projects</div><div className="w-page-sub">{projects.length} active workstreams</div></div>
+        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ New Project</button>
+      </div>
+      <div className="card-grid">
+        {projects.map(p => {
+          const total = taskCount(p._id), done = doneCount(p._id);
+          const pct = total ? Math.round((done / total) * 100) : 0;
+          return (
+            <div key={p._id} className="w-card" onClick={() => setSelected(p._id)}>
+              <div className="w-card-title">{p.name}</div>
+              <div className="w-card-desc">{p.description || "No description"}</div>
+              <div className="progress-bar" style={{ marginBottom: 10 }}><div className="progress-fill" style={{ width: pct + "%" }} /></div>
+              <div className="w-card-footer">
+                <span className={`badge badge-${p.status}`}>{p.status}</span>
+                <span style={{ fontSize: 12, color: "var(--text3)" }}>{done}/{total} tasks · {pct}%</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {showCreate && (
+        <div className="modal-bg" onClick={() => setShowCreate(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">New Project</div>
+            <div className="fg"><label className="fg-label">Name *</label><input className="fg-input" placeholder="Project name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} autoFocus /></div>
+            <div className="fg"><label className="fg-label">Description</label><textarea className="fg-textarea" placeholder="What is this project about?" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></div>
+            <div className="fg"><label className="fg-label">Status</label><select className="fg-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="active">Active</option><option value="archived">Archived</option></select></div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn btn-primary" disabled={!form.name.trim()} onClick={() => { dispatch({ type: "CREATE_PROJECT", payload: { ...form } }); setShowCreate(false); setForm({ name: "", description: "", status: "active" }); }}>Create Project</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── CONTENT QUEUE ──────────────────────────────────────────────────────── */
+const CONTENT_STAGES = ["idea", "draft", "published"];
+const PLATFORM_ICON = { twitter: "𝕏", linkedin: "in", blog: "✍️", other: "•" };
+
+function ContentQueue({ state, dispatch }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState({ title: "", platform: "twitter", status: "idea", hook: "", brief: "", draft: "", link: "", tags: [] });
+
+  const items = state.contentItems.filter(c => c.workspaceId === WS_ID);
+
+  return (
+    <div className="w-page">
+      <div className="w-page-hd">
+        <div><div className="w-page-title">Content Queue</div><div className="w-page-sub">{items.length} items across all stages</div></div>
+        <button className="btn btn-primary" onClick={() => { setForm({ title: "", platform: "twitter", status: "idea", hook: "", brief: "", draft: "", link: "", tags: [] }); setShowCreate(true); }}>+ New Idea</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
+        {CONTENT_STAGES.map(stage => {
+          const stageItems = items.filter(c => c.status === stage);
+          return (
+            <div key={stage} className="k-col">
+              <div className="k-col-hd">
+                <div className="k-col-title"><span className={`k-col-dot ${stage === "idea" ? "dot-todo" : stage === "draft" ? "dot-in_progress" : "dot-done"}`} />{stage.charAt(0).toUpperCase() + stage.slice(1)}</div>
+                <div className="k-col-count">{stageItems.length}</div>
+              </div>
+              <div className="k-body">
+                {stageItems.length === 0 && <div className="k-empty">Nothing here yet</div>}
+                {stageItems.map(item => (
+                  <div key={item._id} className="task-card" onClick={() => { setEditing(item); setForm(item); setShowCreate(true); }}>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text3)" }}>{PLATFORM_ICON[item.platform]}</span>
+                      <span className="badge badge-tag" style={{ fontSize: 10, textTransform: "capitalize" }}>{item.platform}</span>
+                    </div>
+                    <div className="task-card-title">{item.title}</div>
+                    {item.hook && <div style={{ fontSize: 12, color: "var(--text3)", fontStyle: "italic", marginBottom: 6, lineHeight: 1.4 }}>"{item.hook}"</div>}
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{item.tags?.slice(0, 2).map(t => <span key={t} className="badge badge-tag">{t}</span>)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {showCreate && (
+        <div className="modal-bg" onClick={() => { setShowCreate(false); setEditing(null); }}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">{editing ? "Edit Content" : "New Content Idea"}</div>
+            <div className="fg"><label className="fg-label">Title *</label><input className="fg-input" placeholder="What's this piece about?" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} autoFocus /></div>
+            <div className="fg-row">
+              <div className="fg"><label className="fg-label">Platform</label><select className="fg-select" value={form.platform} onChange={e => setForm({ ...form, platform: e.target.value })}><option value="twitter">Twitter / X</option><option value="linkedin">LinkedIn</option><option value="blog">Blog</option><option value="other">Other</option></select></div>
+              <div className="fg"><label className="fg-label">Status</label><select className="fg-select" value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}><option value="idea">Idea</option><option value="draft">Draft</option><option value="published">Published</option></select></div>
+            </div>
+            <div className="fg"><label className="fg-label">Hook</label><input className="fg-input" placeholder="Opening line or angle" value={form.hook} onChange={e => setForm({ ...form, hook: e.target.value })} /></div>
+            <div className="fg"><label className="fg-label">Brief / Notes</label><textarea className="fg-textarea" placeholder="Key points, outline, research notes…" value={form.brief} onChange={e => setForm({ ...form, brief: e.target.value })} /></div>
+            {form.status === "published" && <div className="fg"><label className="fg-label">Published Link</label><input className="fg-input" placeholder="https://…" value={form.link} onChange={e => setForm({ ...form, link: e.target.value })} /></div>}
+            <div className="fg"><label className="fg-label">Tags</label><TagInput value={form.tags} onChange={tags => setForm({ ...form, tags })} /></div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => { setShowCreate(false); setEditing(null); }}>Cancel</button>
+              <button className="btn btn-primary" disabled={!form.title.trim()} onClick={() => {
+                if (editing) dispatch({ type: "UPDATE_CONTENT", id: editing._id, payload: form });
+                else dispatch({ type: "CREATE_CONTENT", payload: form });
+                setShowCreate(false); setEditing(null);
+              }}>{editing ? "Save Changes" : "Add to Queue"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── DOCUMENTS ──────────────────────────────────────────────────────────── */
+function Documents({ state, dispatch }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [form, setForm] = useState({ title: "", kind: "url", url: "", body: "", tags: [] });
+  const [view, setView] = useState(null);
+
+  const docs = state.documents.filter(d => d.workspaceId === WS_ID);
+  const KIND_ICON = { notion: "📄", url: "🔗", internal: "📝" };
+
+  return (
+    <div className="w-page">
+      <div className="w-page-hd">
+        <div><div className="w-page-title">Documents</div><div className="w-page-sub">Notion links, URLs, and internal notes</div></div>
+        <button className="btn btn-primary" onClick={() => { setForm({ title: "", kind: "url", url: "", body: "", tags: [] }); setShowCreate(true); }}>+ Add Document</button>
+      </div>
+      <div className="w-table-wrap">
+        <table className="w-table">
+          <thead><tr><th>Title</th><th>Type</th><th>Tags</th><th>Updated</th></tr></thead>
+          <tbody>
+            {docs.length === 0 && <tr><td colSpan={4} style={{ textAlign: "center", color: "var(--text3)", padding: 32 }}>No documents yet</td></tr>}
+            {docs.map(d => (
+              <tr key={d._id} onClick={() => setView(d)}>
+                <td><span style={{ marginRight: 6 }}>{KIND_ICON[d.kind]}</span><span style={{ fontWeight: 500 }}>{d.title}</span></td>
+                <td><span className={`badge badge-${d.kind}`}>{d.kind}</span></td>
+                <td><div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>{d.tags?.slice(0, 3).map(t => <span key={t} className="badge badge-tag">{t}</span>)}</div></td>
+                <td style={{ color: "var(--text3)", fontSize: 12, fontFamily: "var(--font-mono)" }}>{fmtTime(d.updatedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {view && (
+        <>
+          <div className="drawer-overlay" onClick={() => setView(null)} />
+          <div className="drawer">
+            <div className="drawer-hd">
+              <div className="drawer-title">{view.title}</div>
+              <button className="close-btn" onClick={() => setView(null)}>✕</button>
+            </div>
+            <div className="drawer-body">
+              <div className="drawer-grid" style={{ marginBottom: 16 }}>
+                <div className="drawer-field"><div className="drawer-field-label">Type</div><span className={`badge badge-${view.kind}`}>{view.kind}</span></div>
+                <div className="drawer-field"><div className="drawer-field-label">Updated</div><div className="drawer-field-val">{fmtTime(view.updatedAt)}</div></div>
+              </div>
+              {view.url && <div style={{ marginBottom: 16 }}><a href={view.url} target="_blank" rel="noreferrer" className="drawer-link">🔗 Open link</a></div>}
+              {view.body && <div className="drawer-desc" style={{ marginBottom: 16 }}>{view.body}</div>}
+              {view.tags?.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>{view.tags.map(t => <span key={t} className="badge badge-tag">{t}</span>)}</div>}
+            </div>
+          </div>
+        </>
+      )}
+
+      {showCreate && (
+        <div className="modal-bg" onClick={() => setShowCreate(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Add Document</div>
+            <div className="fg"><label className="fg-label">Title *</label><input className="fg-input" placeholder="Document name" value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} autoFocus /></div>
+            <div className="fg"><label className="fg-label">Type</label><select className="fg-select" value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}><option value="notion">Notion</option><option value="url">URL</option><option value="internal">Internal Note</option></select></div>
+            {(form.kind === "notion" || form.kind === "url") && <div className="fg"><label className="fg-label">URL</label><input className="fg-input" placeholder="https://…" value={form.url} onChange={e => setForm({ ...form, url: e.target.value })} /></div>}
+            {form.kind === "internal" && <div className="fg"><label className="fg-label">Content</label><textarea className="fg-textarea" style={{ minHeight: 100 }} placeholder="Write your note…" value={form.body} onChange={e => setForm({ ...form, body: e.target.value })} /></div>}
+            <div className="fg"><label className="fg-label">Tags</label><TagInput value={form.tags} onChange={tags => setForm({ ...form, tags })} /></div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn btn-primary" disabled={!form.title.trim()} onClick={() => { dispatch({ type: "CREATE_DOCUMENT", payload: form }); setShowCreate(false); }}>Add Document</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── ACTIVITY FEED ──────────────────────────────────────────────────────── */
+function ActivityFeed({ state }) {
+  const events = [...state.activityEvents].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return (
+    <div className="w-page">
+      <div className="w-page-hd">
+        <div><div className="w-page-title">Activity</div><div className="w-page-sub">Global event log — newest first</div></div>
+      </div>
+      <div className="w-table-wrap" style={{ padding: "0 16px" }}>
+        {events.length === 0 && <div className="empty-state"><div className="empty-state-icon">📭</div><div className="empty-state-text">No activity yet</div></div>}
+        <div className="activity-list">
+          {events.map((e, i) => (
+            <div key={e._id} className="activity-item">
+              <div className="activity-dot-wrap"><div className={`activity-dot ${i < 3 ? "fresh" : ""}`} /></div>
+              <div className="activity-content">
+                <div className="activity-text">{summarizeEvent(e, state)}</div>
+                <div className="activity-time">{fmtTime(e.createdAt)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── AGENT API DOCS ─────────────────────────────────────────────────────── */
+function AgentAPI({ toast, setToast }) {
+  const copy = (text) => { navigator.clipboard.writeText(text); setToast("Copied!"); setTimeout(() => setToast(""), 2000); };
+  const endpoints = [
+    { method: "POST", path: "/api/agent/listTasks", desc: "List all tasks for workspace" },
+    { method: "POST", path: "/api/agent/createTask", desc: "Create a new task" },
+    { method: "POST", path: "/api/agent/updateTask", desc: "Update task fields" },
+    { method: "POST", path: "/api/agent/moveTaskStatus", desc: "Move task + write activity event" },
+    { method: "POST", path: "/api/agent/createContentIdea", desc: "Add to content queue" },
+    { method: "POST", path: "/api/agent/updateContentItem", desc: "Update content item" },
+    { method: "POST", path: "/api/agent/createDocumentLink", desc: "Add document or link" },
+    { method: "POST", path: "/api/agent/attachDocumentToTask", desc: "Link document to task" },
+    { method: "POST", path: "/api/agent/appendActivityEvent", desc: "Log a custom event" },
+  ];
+
+  return (
+    <div className="w-page">
+      <div className="w-page-hd">
+        <div><div className="w-page-title">Agent API</div><div className="w-page-sub">HTTP endpoints for OpenClaw and external agents</div></div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 }}>
+        <div className="stat-card">
+          <div className="w-agent-key-label" style={{ marginBottom: 8 }}>Agent API Key</div>
+          <div className="api-key-box">{AGENT_KEY}</div>
+          <button className="btn btn-secondary btn-sm" style={{ marginTop: 10 }} onClick={() => copy(AGENT_KEY)}>Copy Key</button>
+        </div>
+        <div className="stat-card">
+          <div className="w-agent-key-label" style={{ marginBottom: 8 }}>Auth Header</div>
+          <div className="api-key-box">Authorization: Bearer {AGENT_KEY.slice(0, 24)}…</div>
+          <div style={{ marginTop: 10, fontSize: 12, color: "var(--text3)" }}>All requests require this header. 401 on failure.</div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 18 }}>
+        <div className="w-agent-key-label" style={{ marginBottom: 10, fontSize: 11, fontWeight: 600, color: "var(--text3)", letterSpacing: ".06em", textTransform: "uppercase" }}>Response Shape</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div><div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 4 }}>Success</div><div className="api-key-box">{"{ \"ok\": true, \"data\": {} }"}</div></div>
+          <div><div style={{ fontSize: 11, color: "var(--text3)", marginBottom: 4 }}>Error</div><div className="api-key-box">{"{ \"ok\": false, \"error\": { \"code\": \"\", \"message\": \"\" } }"}</div></div>
+        </div>
+      </div>
+
+      <div className="w-table-wrap">
+        <table className="w-table">
+          <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th><th></th></tr></thead>
+          <tbody>
+            {endpoints.map(ep => (
+              <tr key={ep.path}>
+                <td><span className="badge badge-in_progress" style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}>{ep.method}</span></td>
+                <td><span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text)" }}>{ep.path}</span></td>
+                <td style={{ color: "var(--text2)" }}>{ep.desc}</td>
+                <td><button className="btn btn-ghost btn-sm" onClick={() => copy(ep.path)}>Copy</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginTop: 20, padding: 16, background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "var(--r-lg)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text3)", letterSpacing: ".06em", textTransform: "uppercase", marginBottom: 10 }}>OpenClaw Integration — Add to your prompt</div>
+        <div className="api-key-box" style={{ cursor: "pointer" }} onClick={() => copy(`openclaw config set agent.apiKey ${AGENT_KEY}\nopenclaw config set agent.apiBase https://wren-os.onrender.com`)}>
+          {`openclaw config set agent.apiKey ${AGENT_KEY}\nopenclaw config set agent.apiBase https://wren-os.onrender.com`}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--text3)", marginTop: 6 }}>Click to copy both commands</div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── SIDEBAR ────────────────────────────────────────────────────────────── */
+const NAV = [
+  { id: "dashboard", icon: "⊞", label: "Dashboard" },
+  { id: "projects", icon: "◫", label: "Projects" },
+  { id: "content", icon: "✦", label: "Content Queue" },
+  { id: "documents", icon: "◻", label: "Documents" },
+  { id: "activity", icon: "◎", label: "Activity" },
+  { id: "api", icon: "⌁", label: "Agent API" },
+];
+
+/* ─── ROOT ───────────────────────────────────────────────────────────────── */
+export default function WrenOS() {
+  const [state, dispatch] = useReducer(reducer, SEED);
+  const [page, setPage] = useState("dashboard");
+  const [toast, setToast] = useState("");
+
+  const projects = state.projects.filter(p => p.workspaceId === WS_ID);
+  const taskCount = (nav) => {
+    if (nav === "dashboard") return state.tasks.filter(t => t.status !== "done").length;
+    if (nav === "content") return state.contentItems.filter(c => c.status !== "published").length;
+    if (nav === "activity") return state.activityEvents.length;
+    return null;
+  };
+
+  const copy = (text) => { navigator.clipboard.writeText(text); setToast("Copied!"); setTimeout(() => setToast(""), 2000); };
+
+  return (
+    <div className="w-layout">
+      {/* Sidebar */}
+      <aside className="w-sidebar">
+        <div className="w-logo">
+          <div className="w-logo-mark">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 3h4v4H3zM9 3h4v4H9zM3 9h4v4H3zM11 9v6M8 12h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </div>
+          <div><div className="w-logo-name">Wren OS</div><div className="w-logo-sub">Agent Workspace</div></div>
+        </div>
+        <nav className="w-nav">
+          <div className="w-nav-section">
+            <div className="w-nav-label">Workspace</div>
+            {NAV.map(item => (
+              <div key={item.id} className={`w-nav-item ${page === item.id ? "active" : ""}`} onClick={() => setPage(item.id)}>
+                <span className="w-nav-icon">{item.icon}</span>
+                {item.label}
+                {taskCount(item.id) ? <span className="w-nav-badge">{taskCount(item.id)}</span> : null}
+              </div>
+            ))}
+          </div>
+          <div className="w-nav-section">
+            <div className="w-nav-label">Projects</div>
+            {projects.filter(p => p.status === "active").map(p => (
+              <div key={p._id} className="w-nav-item" onClick={() => setPage("projects")}>
+                <span className="w-nav-icon" style={{ fontSize: 10 }}>●</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+              </div>
+            ))}
+          </div>
+        </nav>
+        <div className="w-sidebar-footer">
+          <div className="w-agent-key">
+            <div className="w-agent-key-label">Agent Key</div>
+            <div className="w-agent-key-val">{AGENT_KEY.slice(0, 28)}…</div>
+            <button className="btn btn-ghost btn-sm" style={{ marginTop: 6, width: "100%", justifyContent: "center" }} onClick={() => copy(AGENT_KEY)}>Copy Key</button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main className="w-main">
+        {page === "dashboard" && <Dashboard state={state} dispatch={dispatch} projects={projects} />}
+        {page === "projects" && <Projects state={state} dispatch={dispatch} />}
+        {page === "content" && <ContentQueue state={state} dispatch={dispatch} />}
+        {page === "documents" && <Documents state={state} dispatch={dispatch} />}
+        {page === "activity" && <ActivityFeed state={state} />}
+        {page === "api" && <AgentAPI toast={toast} setToast={setToast} />}
+      </main>
+
+      <Toast msg={toast} />
+    </div>
+  );
+}
