@@ -1,0 +1,15 @@
+node_modules/
+dist/
+output/
+.codex/
+test-results/
+playwright-report/
+.env
+.env.local
+.env.*.local
+wren-os-dev*.log
+*.tsbuildinfo
+vite.config.d.ts
+vite.config.js
+
+.vercel

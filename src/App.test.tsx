@@ -1,0 +1,108 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
+import App from "./App";
+import { COMMAND_DECK_STORAGE_KEY } from "./store/commandDeck";
+
+describe("Wren OS command deck", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("boots a fresh dark command deck and ignores the old workspace seed", () => {
+    window.localStorage.setItem("wren-os.workspace.v1", JSON.stringify({ workspace: { name: "Mercer Ventures" } }));
+
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: /your command deck, live/i })).toBeInTheDocument();
+    expect(screen.queryByText("Mercer Ventures")).not.toBeInTheDocument();
+    expect(screen.getByText("8 GitHub repos imported from Glizocksama-2")).toBeInTheDocument();
+    expect(screen.getByText(/cloud auth: local fallback/i)).toBeInTheDocument();
+    expect(window.localStorage.getItem("wren-os.workspace.v1")).toBeNull();
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Operator");
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("EStarzFc");
+  });
+
+  it("adds and completes to do items", () => {
+    render(<App />);
+
+    clickNav("To Do");
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Secure morning plan" } });
+    fireEvent.change(screen.getByLabelText("Task priority"), { target: { value: "critical" } });
+    fireEvent.click(screen.getByRole("button", { name: /add task/i }));
+
+    expect(screen.getByText("Secure morning plan")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(within(screen.getByRole("heading", { name: "Done" }).closest(".deck-panel") as HTMLElement).getByText("Secure morning plan")).toBeInTheDocument();
+  });
+
+  it("tracks pending projects and moves them to done projects", () => {
+    render(<App />);
+
+    clickNav("Projects");
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Launch black deck" } });
+    fireEvent.change(screen.getByLabelText("Project objective"), { target: { value: "Rebuild Wren OS around life command." } });
+    fireEvent.change(screen.getByLabelText("Project next action"), { target: { value: "Finish UI pass" } });
+    fireEvent.click(screen.getByRole("button", { name: /add project/i }));
+
+    expect(screen.getByText("Launch black deck")).toBeInTheDocument();
+    fireEvent.click(within(screen.getByText("Launch black deck").closest(".project-row") as HTMLElement).getByRole("button", { name: "Complete" }));
+    expect(within(screen.getByText("Done Projects").closest(".deck-panel") as HTMLElement).getByText("Launch black deck")).toBeInTheDocument();
+    expect(screen.getByText("EStarzFc")).toBeInTheDocument();
+    expect(screen.getAllByText("GitHub").length).toBeGreaterThan(0);
+  });
+
+  it("adds calendar, workout, book, journal, and finance records", () => {
+    render(<App />);
+
+    clickNav("Calendar");
+    fireEvent.change(screen.getByLabelText("Calendar event title"), { target: { value: "Strategy block" } });
+    fireEvent.click(screen.getByRole("button", { name: /add event/i }));
+    expect(screen.getByText("Strategy block")).toBeInTheDocument();
+
+    clickNav("Workout");
+    fireEvent.change(screen.getByLabelText("Workout name"), { target: { value: "Push day" } });
+    fireEvent.change(screen.getByLabelText("Workout focus"), { target: { value: "Chest and triceps" } });
+    fireEvent.click(screen.getByRole("button", { name: /add workout/i }));
+    expect(screen.getByText("Push day")).toBeInTheDocument();
+
+    clickNav("Books");
+    fireEvent.change(screen.getByLabelText("Book title"), { target: { value: "Deep Work" } });
+    fireEvent.change(screen.getByLabelText("Book author"), { target: { value: "Cal Newport" } });
+    fireEvent.click(screen.getByRole("button", { name: /add book/i }));
+    expect(screen.getByText("Deep Work")).toBeInTheDocument();
+
+    clickNav("Journal");
+    fireEvent.change(screen.getByLabelText("Journal mood"), { target: { value: "Locked in" } });
+    fireEvent.change(screen.getByLabelText("Journal entry"), { target: { value: "Built the new operating base." } });
+    fireEvent.click(screen.getByRole("button", { name: /save entry/i }));
+    expect(screen.getByText("Locked in")).toBeInTheDocument();
+
+    clickNav("Finances");
+    fireEvent.change(screen.getByLabelText("Finance label"), { target: { value: "Client payment" } });
+    fireEvent.change(screen.getByLabelText("Finance type"), { target: { value: "income" } });
+    fireEvent.change(screen.getByLabelText("Finance amount"), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: /add finance/i }));
+    expect(screen.getByText("Client payment")).toBeInTheDocument();
+    expect(screen.getByText("$500")).toBeInTheDocument();
+  });
+
+  it("customizes callsign, accent, density, and resets the new deck", () => {
+    render(<App />);
+
+    clickNav("Customize");
+    fireEvent.change(screen.getByLabelText("Callsign"), { target: { value: "Ghost" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use Cyan accent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+
+    expect(screen.getByDisplayValue("Ghost")).toBeInTheDocument();
+    expect(document.querySelector(".deck-app")).toHaveAttribute("data-accent", "cyan");
+    expect(document.querySelector(".deck-app")).toHaveAttribute("data-density", "compact");
+
+    fireEvent.click(screen.getByRole("button", { name: /reset deck/i }));
+    expect(screen.getByDisplayValue("Operator")).toBeInTheDocument();
+  });
+});
+
+function clickNav(name: string) {
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name }));
+}
