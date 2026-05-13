@@ -18,7 +18,7 @@ import { formatRelativeTime, parseWorkspaceImport, serializeWorkspace } from "..
 import type { ProjectSourceProvider, WorkspaceAction, WorkspaceState } from "../types/workspace";
 import { ActionButton, Panel } from "./ui";
 
-const RESET_CONFIRMATION = "RESET WREN OS";
+const RESET_CONFIRMATION = "RESET NORTHWATCH";
 
 export function SettingsView({
   state,
@@ -292,7 +292,7 @@ export function SettingsView({
             placeholder="Paste GitHub/Vercel project snapshot JSON here"
           />
           <p className="settings-note">
-            Uses public GitHub reads in the browser and local CLI snapshots for private GitHub/Vercel data. No tokens are stored in Wren OS.
+            Uses public GitHub reads in the browser and local CLI snapshots for private GitHub/Vercel data. No tokens are stored in Northwatch.
           </p>
         </Panel>
 
@@ -314,7 +314,7 @@ export function SettingsView({
               setImportText(event.target.value);
               setImportPreview(null);
             }}
-            placeholder="Paste exported Wren OS JSON here"
+            placeholder="Paste exported Northwatch JSON here"
           />
           {importPreview ? (
             <div className="import-preview">
@@ -392,7 +392,7 @@ export function SettingsView({
               <FolderOpen size={18} />
               <strong>{state.obsidianVault.name ?? "No vault linked"}</strong>
             </div>
-            <p>Folder access needs your approval. Wren OS reads Markdown locally and keeps a local snapshot.</p>
+            <p>Folder access needs your approval. Northwatch reads Markdown locally and keeps a local snapshot.</p>
             <div className="vault-stats">
               <span>{state.obsidianVault.noteCount} notes</span>
               <span>{state.obsidianVault.projectCount} projects</span>

@@ -197,7 +197,7 @@ function createDocumentFromSource(
   const label = providerNames[source.provider];
   const identifier = source.repository ?? source.name;
   const details = [
-    `${label} project source synced into Wren OS.`,
+    `${label} project source synced into Northwatch.`,
     source.description ? `Description: ${source.description}` : "",
     source.url ? `Source: ${source.url}` : "",
     source.productionUrl ? `Production: ${source.productionUrl}` : "",
@@ -230,7 +230,7 @@ function createProjectFromSource(state: WorkspaceState, source: LinkedProjectSou
     health: source.status.toLowerCase().includes("fail") ? "at_risk" : "on_track",
     accent: providerAccents[source.provider],
     owner: source.owner ?? state.workspace.owner,
-    objective: source.productionUrl ? `Keep ${source.productionUrl} healthy and connected to Wren OS.` : `Track ${source.name} from ${providerNames[source.provider]}.`,
+    objective: source.productionUrl ? `Keep ${source.productionUrl} healthy and connected to Northwatch.` : `Track ${source.name} from ${providerNames[source.provider]}.`,
     tags: source.tags,
     risks: source.openIssues > 0 ? [`${source.openIssues} open GitHub issues need triage.`] : [],
     createdAt: syncedAt,

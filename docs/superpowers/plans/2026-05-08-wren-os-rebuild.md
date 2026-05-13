@@ -1,8 +1,8 @@
-# Wren OS Rebuild Implementation Plan
+# Northwatch Rebuild Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship Wren OS as a real local-first React command center with persistent workspace state and polished operational UI.
+**Goal:** Ship Northwatch as a real local-first React command center with persistent workspace state and polished operational UI.
 
 **Architecture:** Build a Vite + React + TypeScript app. Keep domain data and reducer logic testable outside React, then compose a dense app shell with feature screens and reusable panels.
 
@@ -33,7 +33,7 @@
 - Create: `src/store/workspace.ts`
 
 - [ ] Define workspace domain types for tasks, projects, actions, automations, content, docs, API providers, endpoints, and activity events.
-- [ ] Create rich Wren OS seed data for command-center workflows.
+- [ ] Create rich Northwatch seed data for command-center workflows.
 - [ ] Implement reducer actions for task creation, task movement, task update, agent decision, import, reset, and activity logging.
 - [ ] Implement selectors for command-center metrics and project health.
 - [ ] Implement `loadWorkspace`, `saveWorkspace`, `serializeWorkspace`, and `parseWorkspaceImport`.

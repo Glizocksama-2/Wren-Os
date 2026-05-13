@@ -6,18 +6,18 @@ const syncedAt = "2026-05-10T15:00:00.000Z";
 
 const vaultFiles = [
   {
-    path: "Projects/Wren OS.md",
-    name: "Wren OS.md",
+    path: "Projects/Northwatch.md",
+    name: "Northwatch.md",
     lastModified: "2026-05-10T14:50:00.000Z",
     content: [
       "---",
       "type: project",
       "status: active",
       "health: on_track",
-      "objective: Keep Wren OS tied to the real local workspace.",
-      "tags: [wren-os, local]",
+      "objective: Keep Northwatch tied to the real local workspace.",
+      "tags: [northwatch, local]",
       "---",
-      "# Wren OS",
+      "# Northwatch",
       "Project source note from Obsidian.",
       "- [ ] Draft vault launch plan",
       "- [x] Review exported data"
@@ -30,7 +30,7 @@ const vaultFiles = [
     content: [
       "---",
       "kind: runbook",
-      "project: Wren OS",
+      "project: Northwatch",
       "tags: codex, local",
       "---",
       "# Codex Bridge",
@@ -59,24 +59,24 @@ describe("Obsidian vault sync", () => {
       documentCount: 2,
       lastSyncedAt: syncedAt
     });
-    expect(synced.projects.find((project) => project.id === "obsidian-project-wren-os")).toMatchObject({
-      name: "Wren OS",
-      objective: "Keep Wren OS tied to the real local workspace.",
-      tags: ["wren-os", "local", "obsidian"]
+    expect(synced.projects.find((project) => project.id === "obsidian-project-northwatch")).toMatchObject({
+      name: "Northwatch",
+      objective: "Keep Northwatch tied to the real local workspace.",
+      tags: ["northwatch", "local", "obsidian"]
     });
-    expect(synced.documents.find((document) => document.id === "obsidian-doc-projects-wren-os")).toMatchObject({
-      title: "Wren OS",
-      url: "obsidian://open?vault=Founder%20Vault&file=Projects%2FWren%20OS",
-      projectId: "obsidian-project-wren-os"
+    expect(synced.documents.find((document) => document.id === "obsidian-doc-projects-northwatch")).toMatchObject({
+      title: "Northwatch",
+      url: "obsidian://open?vault=Founder%20Vault&file=Projects%2FNorthwatch",
+      projectId: "obsidian-project-northwatch"
     });
     expect(synced.documents.find((document) => document.id === "obsidian-doc-runbooks-codex-bridge")).toMatchObject({
       title: "Codex Bridge",
       kind: "runbook",
-      projectId: "obsidian-project-wren-os"
+      projectId: "obsidian-project-northwatch"
     });
     expect(synced.tasks.find((task) => task.title === "Draft vault launch plan")).toMatchObject({
-      id: "obsidian-task-projects-wren-os-10",
-      projectId: "obsidian-project-wren-os",
+      id: "obsidian-task-projects-northwatch-10",
+      projectId: "obsidian-project-northwatch",
       source: "manual",
       status: "todo"
     });

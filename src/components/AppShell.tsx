@@ -111,7 +111,7 @@ export function AppShell({
             <ShieldCheck size={22} />
           </div>
           <div>
-            <div className="brand-name">Wren OS</div>
+            <div className="brand-name">Northwatch</div>
             <div className="brand-subtitle">Agent Workspace</div>
           </div>
         </div>
@@ -148,7 +148,7 @@ export function AppShell({
             <strong>{state.workspace.name}</strong>
             <small>Local-first - all systems go</small>
           </div>
-          <div className="version-row">Wren OS v{state.workspace.version}</div>
+          <div className="version-row">Northwatch v{state.workspace.version}</div>
         </div>
       </aside>
 

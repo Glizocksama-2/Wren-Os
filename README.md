@@ -1,6 +1,6 @@
-# Wren OS
+# Northwatch
 
-Wren OS is a local-first AI agent command center for a solo operator. It brings projects, tasks, agent approvals, automations, content, knowledge, and API contracts into one serious operational dashboard.
+Northwatch is a local-first AI agent command center for a solo operator. It brings projects, tasks, agent approvals, automations, content, knowledge, and API contracts into one serious operational dashboard.
 
 ## What Is Included
 
@@ -41,7 +41,7 @@ npm run build
 
 ## Private Cloud Auth
 
-Wren OS can now run in two modes:
+Northwatch can now run in two modes:
 
 - Without Supabase env vars, it stays local-only and shows `Cloud auth: local fallback`.
 - With Supabase env vars, the app locks behind Supabase magic-link auth and syncs one private `command_decks` row per signed-in user.
@@ -57,13 +57,13 @@ Use the legacy `VITE_SUPABASE_ANON_KEY` only if your project has not moved to pu
 
 ## Local-first Data Warning
 
-Wren OS still stores an offline copy in the current browser's `localStorage`. With Supabase configured, that local copy is loaded into or replaced by the authenticated cloud row after sign-in. Export JSON before clearing browser data, switching profiles, using another device for the first time, or resetting the seed workspace.
+Northwatch still stores an offline copy in the current browser's `localStorage`. With Supabase configured, that local copy is loaded into or replaced by the authenticated cloud row after sign-in. Export JSON before clearing browser data, switching profiles, using another device for the first time, or resetting the seed workspace.
 
 The Codex Bridge is local-first handoff generation only. `/api/codex/handoff` is documented as a future/local contract, not a live hosted server endpoint.
 
-Obsidian vault sync also stays local. Wren OS can read Markdown only after you approve a folder picker prompt in the browser, and auto-sync runs only while the app tab is open.
+Obsidian vault sync also stays local. Northwatch can read Markdown only after you approve a folder picker prompt in the browser, and auto-sync runs only while the app tab is open.
 
-GitHub and Vercel linking is still metadata-only. Wren OS stores imported project metadata in the command deck; it does not store GitHub tokens, Vercel tokens, API secrets, or service keys.
+GitHub and Vercel linking is still metadata-only. Northwatch stores imported project metadata in the command deck; it does not store GitHub tokens, Vercel tokens, API secrets, or service keys.
 
 ## Pre-Vercel Checklist
 
@@ -72,7 +72,7 @@ GitHub and Vercel linking is still metadata-only. Wren OS stores imported projec
 - Open the app locally and export a workspace backup from Settings.
 - Reload and confirm the workspace persists.
 - Import the exported JSON through the preview/confirm flow.
-- Confirm the reset guard requires `RESET WREN OS`.
+- Confirm the reset guard requires `RESET NORTHWATCH`.
 - Run `npm run sources:snapshot`, import the snapshot in Settings, and confirm GitHub/Vercel source counts update.
 - Keep the first Vercel version private-use only.
 
@@ -80,7 +80,7 @@ GitHub and Vercel linking is still metadata-only. Wren OS stores imported projec
 
 Import the GitHub repo into Vercel as a Vite app. Use `npm run build` as the build command and `dist` as the output directory.
 
-Add the Supabase variables above to Vercel for Production and Preview before publishing a private cross-device build. Supabase Auth protects Wren OS data. To make the hosted URL itself private, also enable Vercel Deployment Protection for the project in Vercel settings.
+Add the Supabase variables above to Vercel for Production and Preview before publishing a private cross-device build. Supabase Auth protects Northwatch data. To make the hosted URL itself private, also enable Vercel Deployment Protection for the project in Vercel settings.
 
 After the first deployment, open the Vercel URL, sign in through Supabase Auth, add a test task, reload on another device, and confirm the same deck loads.
 

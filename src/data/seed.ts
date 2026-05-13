@@ -67,7 +67,7 @@ export const seedWorkspace: WorkspaceState = {
     {
       id: "p-wren",
       workspaceId,
-      name: "Wren OS",
+      name: "Northwatch",
       description: "Local-first AI command center for tasks, agents, automations, knowledge, and APIs.",
       status: "active",
       health: "at_risk",
@@ -144,7 +144,7 @@ export const seedWorkspace: WorkspaceState = {
     {
       id: "t-wren-shell",
       workspaceId,
-      title: "Rebuild Wren OS app shell",
+      title: "Rebuild Northwatch app shell",
       description: "Turn the single component prototype into a Vite React app with navigable product surfaces.",
       status: "done",
       priority: "high",
@@ -463,7 +463,7 @@ export const seedWorkspace: WorkspaceState = {
     ...Array.from({ length: 5 }, (_, index) => ({
       id: `content-review-${index + 1}`,
       workspaceId,
-      title: `Wren OS launch snippet ${index + 1}`,
+      title: `Northwatch launch snippet ${index + 1}`,
       stage: "review" as const,
       platform: "linkedin" as const,
       owner: "Alex Mercer",
@@ -501,10 +501,10 @@ export const seedWorkspace: WorkspaceState = {
     {
       id: "doc-framework",
       workspaceId,
-      title: "Wren OS Messaging Framework",
+      title: "Northwatch Messaging Framework",
       kind: "brief",
       url: "",
-      body: "Wren OS is the local-first command center for approving agent work and keeping projects moving.",
+      body: "Northwatch is the local-first command center for approving agent work and keeping projects moving.",
       tags: ["wren-os", "messaging"],
       projectId: "p-wren",
       updatedAt: isoOffset(-2)
@@ -676,7 +676,7 @@ export const seedWorkspace: WorkspaceState = {
       entityType: "task",
       entityId: "t-wren-shell",
       eventType: "task_status_changed",
-      message: "Wren OS app shell moved to done.",
+      message: "Northwatch app shell moved to done.",
       payload: { from: "review", to: "done" },
       createdAt: isoOffset(-1)
     },

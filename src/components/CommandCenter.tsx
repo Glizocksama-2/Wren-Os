@@ -308,7 +308,7 @@ export function CommandCenter({
                 </div>
               ))}
             </div>
-            <div className="panel-footline">Next up: Wren OS launch snippets scheduled this week</div>
+            <div className="panel-footline">Next up: Northwatch launch snippets scheduled this week</div>
           </Panel>
         )}
 

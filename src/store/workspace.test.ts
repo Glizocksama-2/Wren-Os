@@ -29,7 +29,7 @@ describe("workspace state", () => {
     const next = reduceWorkspace(seedWorkspace, {
       type: "task/create",
       payload: {
-        title: "Prepare Wren OS launch notes",
+        title: "Prepare Northwatch launch notes",
         description: "Summarize the rebuild into a customer-facing update.",
         priority: "high",
         dueDate: null,
@@ -39,7 +39,7 @@ describe("workspace state", () => {
       }
     });
 
-    const created = next.tasks.find((task) => task.title === "Prepare Wren OS launch notes");
+    const created = next.tasks.find((task) => task.title === "Prepare Northwatch launch notes");
     expect(created).toMatchObject({
       status: "todo",
       workspaceId: seedWorkspace.workspace.id,
@@ -115,7 +115,7 @@ describe("workspace state", () => {
 
     const prompt = createCodexTaskPrompt(seedWorkspace, task!);
 
-    expect(prompt).toContain("Project: Wren OS");
+    expect(prompt).toContain("Project: Northwatch");
     expect(prompt).toContain("Priority: medium");
     expect(prompt).toContain("Run the relevant tests");
   });
@@ -125,7 +125,7 @@ describe("workspace state", () => {
     const wren = summaries.find((summary) => summary.id === "p-wren");
 
     expect(wren).toMatchObject({
-      name: "Wren OS",
+      name: "Northwatch",
       totalTasks: 4,
       completedTasks: 1,
       riskCount: 2,
@@ -158,13 +158,13 @@ describe("workspace state", () => {
       id: "p-wren",
       payload: {
         health: "on_track",
-        objective: "Make Wren OS the daily execution system."
+        objective: "Make Northwatch the daily execution system."
       }
     });
 
     expect(next.projects.find((project) => project.id === "p-wren")).toMatchObject({
       health: "on_track",
-      objective: "Make Wren OS the daily execution system."
+      objective: "Make Northwatch the daily execution system."
     });
     expect(next.activityEvents[0]).toMatchObject({
       entityType: "project",

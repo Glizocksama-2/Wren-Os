@@ -1,6 +1,6 @@
-# Wren OS Rebuild Design
+# Northwatch Rebuild Design
 
-**Goal:** Rebuild Wren OS into a local-first AI agent command center for managing projects, tasks, automations, content, documents, agent approvals, and API operations from one polished workspace.
+**Goal:** Rebuild Northwatch into a local-first AI agent command center for managing projects, tasks, automations, content, documents, agent approvals, and API operations from one polished workspace.
 
 **Approved Direction:** Local-first operating system. The app should feel like serious founder/operator software today and keep clean seams for a later backend or real agent runtime.
 
@@ -8,9 +8,9 @@
 
 ## Product Shape
 
-Wren OS is not a landing page. The first screen is the product: a command-center dashboard with a left navigation rail, top command/search bar, dense operational grid, and a right-side inspector for the currently selected agent action.
+Northwatch is not a landing page. The first screen is the product: a command-center dashboard with a left navigation rail, top command/search bar, dense operational grid, and a right-side inspector for the currently selected agent action.
 
-The primary user is a solo operator running multiple workstreams such as Wren OS, Saka Wera, content production, and freelance/lead operations. The app should help them see what matters now, approve or reject agent actions, track project health, and keep tasks, automations, knowledge, content, and APIs organized.
+The primary user is a solo operator running multiple workstreams such as Northwatch, Saka Wera, content production, and freelance/lead operations. The app should help them see what matters now, approve or reject agent actions, track project health, and keep tasks, automations, knowledge, content, and APIs organized.
 
 ## Screens
 
@@ -51,9 +51,9 @@ The UI uses an operational product language:
 
 ## Data And Behavior
 
-Seed data must include real-looking Wren OS workstreams:
+Seed data must include real-looking Northwatch workstreams:
 
-- Projects: Wren OS, Saka Wera, Content Engine, Freelance Pipeline, Ops Automation.
+- Projects: Northwatch, Saka Wera, Content Engine, Freelance Pipeline, Ops Automation.
 - Tasks: priority, status, due date, tags, source, project linkage, activity.
 - Agent actions: pending, approved, denied, confidence, summary, files, suggested next steps.
 - Automations: status, cadence, last run, next run, duration, warnings.

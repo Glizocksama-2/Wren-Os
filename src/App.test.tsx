@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import App from "./App";
 import { COMMAND_DECK_STORAGE_KEY } from "./store/commandDeck";
 
-describe("Wren OS command deck", () => {
+describe("Northwatch command deck", () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -13,6 +13,7 @@ describe("Wren OS command deck", () => {
 
     render(<App />);
 
+    expect(screen.getByText("Northwatch Tactical Ledger")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /your command deck, live/i })).toBeInTheDocument();
     expect(screen.queryByText("Mercer Ventures")).not.toBeInTheDocument();
     expect(screen.getByText("8 GitHub repos imported from Glizocksama-2")).toBeInTheDocument();
@@ -40,7 +41,7 @@ describe("Wren OS command deck", () => {
 
     clickNav("Projects");
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Launch black deck" } });
-    fireEvent.change(screen.getByLabelText("Project objective"), { target: { value: "Rebuild Wren OS around life command." } });
+    fireEvent.change(screen.getByLabelText("Project objective"), { target: { value: "Rebuild Northwatch around life command." } });
     fireEvent.change(screen.getByLabelText("Project next action"), { target: { value: "Finish UI pass" } });
     fireEvent.click(screen.getByRole("button", { name: /add project/i }));
 

@@ -328,7 +328,7 @@ export default function App() {
   return (
     <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density}>
       <aside className="tactical-rail" aria-label="Primary">
-        <div className="rail-brand" aria-label="Wren OS">
+        <div className="rail-brand" aria-label="Northwatch">
           <Shield size={22} />
         </div>
         <nav className="rail-nav" aria-label="Primary">
@@ -414,7 +414,7 @@ function TopBar({
     <header className="deck-topbar">
       <div>
         <span className="micro-label">Hello {callsign}</span>
-        <strong>Wren OS Tactical Ledger</strong>
+        <strong>Northwatch Tactical Ledger</strong>
       </div>
       <form className="deck-search" onSubmit={submit}>
         <Gauge size={16} />
@@ -432,7 +432,7 @@ function TopBar({
           {cloudStatus.label}
         </span>
         {cloudStatus.userEmail && (
-          <button className="topbar-icon-button" type="button" aria-label="Sign out of Wren OS" onClick={onSignOut}>
+          <button className="topbar-icon-button" type="button" aria-label="Sign out of Northwatch" onClick={onSignOut}>
             <LogOut size={15} />
           </button>
         )}
@@ -451,7 +451,7 @@ function CloudBootScreen({ status }: { status: CloudStatus }) {
         <div className="auth-mark">
           <LockKeyhole size={24} />
         </div>
-        <span className="micro-label">Wren OS secure boot</span>
+        <span className="micro-label">Northwatch secure boot</span>
         <h1>Checking private access.</h1>
         <p>{status.detail}</p>
       </section>
@@ -477,7 +477,7 @@ function AuthGate({
     setIsSending(true);
     try {
       await onRequestMagicLink(email.trim());
-      setMessage("Magic link sent. Open it on this device to unlock Wren OS.");
+      setMessage("Magic link sent. Open it on this device to unlock Northwatch.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
@@ -492,7 +492,7 @@ function AuthGate({
           <LockKeyhole size={24} />
         </div>
         <span className="micro-label">Private command deck</span>
-        <h1>Wren OS is locked.</h1>
+        <h1>Northwatch is locked.</h1>
         <p>Sign in with Supabase Auth to sync your projects, tasks, journal, books, workouts, and finances across devices.</p>
         <form className="auth-form" onSubmit={submit}>
           <label>
@@ -1360,7 +1360,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
           <div>
             <span className="micro-label">Interface command</span>
             <h2>Interface Presets</h2>
-            <p>{enabledModules}/7 visible systems are active. Shape Wren OS around the day you actually run.</p>
+            <p>{enabledModules}/7 visible systems are active. Shape Northwatch around the day you actually run.</p>
           </div>
           <div className="theme-preview">
             <Palette size={22} />

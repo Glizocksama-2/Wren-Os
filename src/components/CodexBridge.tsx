@@ -38,7 +38,7 @@ export function CodexBridge({
       <div className="page-title-row">
         <div>
           <h1>Codex Bridge</h1>
-          <p>Connect Wren OS tasks to Codex with repo-aware handoff prompts and local workspace context.</p>
+          <p>Connect Northwatch tasks to Codex with repo-aware handoff prompts and local workspace context.</p>
         </div>
         <div className="title-actions">
           <ActionButton tone="primary" onClick={reconnect}>
@@ -77,7 +77,7 @@ export function CodexBridge({
           <div className="runbook-list">
             <div>
               <CheckCircle2 size={16} />
-              <span>Pick a live task from Wren OS.</span>
+              <span>Pick a live task from Northwatch.</span>
             </div>
             <div>
               <FolderGit2 size={16} />
