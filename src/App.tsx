@@ -16,16 +16,19 @@ import {
   GitBranch,
   Github,
   Grid2X2,
+  Eye,
   KeyRound,
   ListTodo,
   LockKeyhole,
   LogOut,
   Mail,
+  Newspaper,
   NotebookPen,
   Palette,
   PiggyBank,
   Plus,
   RotateCcw,
+  Search,
   Settings2,
   Shield,
   SlidersHorizontal,
@@ -47,6 +50,9 @@ import {
   type DeckSettings,
   type DeckView,
   type FinanceType,
+  type IntelItem,
+  type IntelKind,
+  type IntelSignal,
   type Priority,
   getDeckMetrics,
   loadCommandDeck,
@@ -58,6 +64,7 @@ const navItems: Array<{ view: DeckView; label: string; icon: ReactNode; terms: s
   { view: "dashboard", label: "Command", icon: <Grid2X2 size={18} />, terms: ["command", "dashboard", "home", "deck"] },
   { view: "todo", label: "To Do", icon: <ListTodo size={18} />, terms: ["todo", "task", "tasks", "list"] },
   { view: "projects", label: "Projects", icon: <Target size={18} />, terms: ["project", "projects", "pending", "done"] },
+  { view: "intel", label: "Intel", icon: <Newspaper size={18} />, terms: ["intel", "news", "stock", "stocks", "market", "watchlist", "invest", "investing"] },
   { view: "calendar", label: "Calendar", icon: <CalendarDays size={18} />, terms: ["calendar", "event", "schedule"] },
   { view: "workout", label: "Workout", icon: <Dumbbell size={18} />, terms: ["workout", "training", "gym"] },
   { view: "books", label: "Books", icon: <BookOpen size={18} />, terms: ["book", "books", "reading"] },
@@ -70,6 +77,8 @@ const navItems: Array<{ view: DeckView; label: string; icon: ReactNode; terms: s
 const priorityOptions: Priority[] = ["low", "medium", "high", "critical"];
 const financeTypes: FinanceType[] = ["income", "expense", "savings"];
 const eventTypes: CalendarEntry["type"][] = ["mission", "training", "finance", "personal"];
+const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
+const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
 const accentOptions: Array<{ value: Accent; label: string }> = [
   { value: "amber", label: "Amber" },
   { value: "cyan", label: "Cyan" },
@@ -347,6 +356,7 @@ export default function App() {
           {view === "dashboard" && <Dashboard state={state} metrics={metrics} dispatch={dispatch} setView={setView} setNotice={setNotice} />}
           {view === "todo" && <TodoModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "projects" && <ProjectsModule state={state} dispatch={dispatch} setNotice={setNotice} />}
+          {view === "intel" && <IntelModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "calendar" && <CalendarModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "workout" && <WorkoutModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "books" && <BooksModule state={state} dispatch={dispatch} setNotice={setNotice} />}
@@ -363,6 +373,8 @@ export default function App() {
 
 function isViewEnabled(view: DeckView, settings: DeckSettings): boolean {
   switch (view) {
+    case "intel":
+      return settings.showIntel;
     case "calendar":
       return settings.showCalendar;
     case "workout":
@@ -527,7 +539,7 @@ function Dashboard({
           <span className="system-dot">System operational</span>
           <h1>Your command deck, live. Built to keep you ready to move.</h1>
           <p>
-            A fresh local-first base for tasks, projects, training, reading, journal, calendar, and finances.
+            A fresh local-first base for tasks, projects, market intel, training, reading, journal, calendar, and finances.
           </p>
           <div className="hero-actions">
             <button type="button" onClick={() => setView("todo")}>Add to do</button>
@@ -614,6 +626,7 @@ function MetricGrid({ metrics }: { metrics: ReturnType<typeof getDeckMetrics> })
     ["Pending projects", metrics.pendingProjects],
     ["Done projects", metrics.doneProjects],
     ["GitHub progress", `${metrics.projectProgress}%`],
+    ["Intel", metrics.intelItems],
     ["Calendar", metrics.calendarEvents],
     ["Workouts done", metrics.workoutsDone],
     ["Reading", metrics.readingCount],
@@ -746,6 +759,177 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
           ))}
         </ItemList>
       </TwoColumn>
+    </ModuleShell>
+  );
+}
+
+function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
+  const [title, setTitle] = useState("");
+  const [symbol, setSymbol] = useState("");
+  const [kind, setKind] = useState<IntelKind>("stock");
+  const [signal, setSignal] = useState<IntelSignal>("watching");
+  const [thesis, setThesis] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const [note, setNote] = useState("");
+  const selected = state.intel.find((item) => item.id === selectedId) ?? state.intel[0] ?? null;
+  const signalCounts = intelSignals.map((item) => ({
+    signal: item,
+    count: state.intel.filter((entry) => entry.signal === item).length
+  }));
+  const researchQueue = state.intel
+    .filter((item) => item.signal === "researching" || item.signal === "high-priority")
+    .slice(0, 4);
+
+  useEffect(() => {
+    if (selectedId && state.intel.some((item) => item.id === selectedId)) return;
+    setSelectedId(state.intel[0]?.id ?? "");
+  }, [selectedId, state.intel]);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim()) return;
+    dispatch({
+      type: "intel/add",
+      title: title.trim(),
+      symbol: symbol.trim(),
+      kind,
+      signal,
+      thesis: thesis.trim(),
+      sourceUrl: sourceUrl.trim()
+    });
+    setTitle("");
+    setSymbol("");
+    setThesis("");
+    setSourceUrl("");
+    setNotice("Intel item added.");
+  };
+
+  const submitNote = (event: FormEvent) => {
+    event.preventDefault();
+    if (!selected || !note.trim()) return;
+    dispatch({ type: "intel/note", id: selected.id, body: note.trim() });
+    setNote("");
+    setNotice("Intel note logged.");
+  };
+
+  return (
+    <ModuleShell title="Market Intel" description="Track stocks, companies, trends, crypto, funds, and news topics without losing the thesis.">
+      <section className="life-layout intel-layout">
+        <article className="life-hero intel-hero">
+          <div>
+            <span className="micro-label">Research command</span>
+            <h2>Watchtower</h2>
+            <p>{state.intel.length === 0 ? "Build a watchlist before capital or attention moves." : `${state.intel.length} item${state.intel.length === 1 ? "" : "s"} under observation.`}</p>
+          </div>
+          <div className="intel-radar">
+            <Newspaper size={24} />
+            <strong>{state.intel.length}</strong>
+            <span>Tracked signals</span>
+          </div>
+        </article>
+        <section className="deck-panel life-panel">
+          <PanelHead title="Signal board" />
+          <div className="signal-grid compact">
+            {signalCounts.map((item) => (
+              <div className="signal-card" key={item.signal}>
+                <span>{item.signal}</span>
+                <strong>{item.count}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="deck-panel life-panel">
+          <PanelHead title="Research queue" />
+          <div className="timeline-list">
+            {researchQueue.length === 0 && <EmptyState>No high-signal research queued.</EmptyState>}
+            {researchQueue.map((item) => (
+              <div className="timeline-item" key={item.id}>
+                <strong>{item.symbol || item.kind}</strong>
+                <div>
+                  <span>{item.title}</span>
+                  <em>{item.signal}</em>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </section>
+
+      <form className="command-form intel-form" onSubmit={submit}>
+        <label><span>Name</span><input aria-label="Intel title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Company, stock, trend, or topic" /></label>
+        <label><span>Symbol</span><input aria-label="Ticker or topic" value={symbol} onChange={(event) => setSymbol(event.target.value)} placeholder="NVDA, BTC, AI" /></label>
+        <label>
+          <span>Type</span>
+          <select aria-label="Intel type" value={kind} onChange={(event) => setKind(event.target.value as IntelKind)}>
+            {intelKinds.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Signal</span>
+          <select aria-label="Intel signal" value={signal} onChange={(event) => setSignal(event.target.value as IntelSignal)}>
+            {intelSignals.map((item) => <option key={item}>{item}</option>)}
+          </select>
+        </label>
+        <label className="intel-wide"><span>Thesis</span><input aria-label="Intel thesis" value={thesis} onChange={(event) => setThesis(event.target.value)} placeholder="Why it matters" /></label>
+        <label><span>Source</span><input aria-label="Intel source URL" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://" /></label>
+        <button type="submit"><Plus size={16} /> Add intel</button>
+      </form>
+
+      <div className="intel-grid">
+        <section className="deck-panel">
+          <PanelHead title="Tracked watchlist" />
+          <div className="intel-list">
+            {state.intel.length === 0 && <EmptyState>No intel tracked yet.</EmptyState>}
+            {state.intel.map((item) => (
+              <div className={`intel-row ${selected?.id === item.id ? "active" : ""}`} key={item.id}>
+                <div>
+                  <strong>{item.title}</strong>
+                  <em>{[item.symbol, item.kind, item.signal].filter(Boolean).join(" - ")}</em>
+                  {item.thesis && <p>{item.thesis}</p>}
+                </div>
+                <button type="button" onClick={() => setSelectedId(item.id)}><Eye size={15} /> Focus</button>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="deck-panel">
+          <PanelHead title="Focused item" />
+          {!selected && <EmptyState>Select or add an intel item.</EmptyState>}
+          {selected && (
+            <div className="intel-focus">
+              <div className="intel-focus-head">
+                <span className="source-pill">{selected.kind}</span>
+                <h3>{selected.title}</h3>
+                <p>{selected.thesis || "No thesis recorded yet."}</p>
+              </div>
+              <div className="research-links">
+                <a href={getIntelNewsUrl(selected)} target="_blank" rel="noreferrer" aria-label={`News search for ${selected.title}`}>
+                  <Search size={15} /> News search
+                </a>
+                <a href={getIntelFinanceUrl(selected)} target="_blank" rel="noreferrer" aria-label={`Finance lookup for ${selected.title}`}>
+                  <ExternalLink size={15} /> Market lookup
+                </a>
+                {selected.sourceUrl && (
+                  <a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source for ${selected.title}`}>
+                    <ExternalLink size={15} /> Source
+                  </a>
+                )}
+              </div>
+              <form className="journal-form intel-note-form" onSubmit={submitNote}>
+                <label><span>Note</span><textarea aria-label="Intel note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Catalyst, risk, question, or update" /></label>
+                <button type="submit"><Plus size={16} /> Add note</button>
+              </form>
+              <ItemList empty="No notes logged.">
+                {selected.notes.map((entry) => (
+                  <ActionRow key={entry.id} title={entry.body} meta={formatDateTime(entry.createdAt)} />
+                ))}
+              </ItemList>
+            </div>
+          )}
+        </section>
+      </div>
     </ModuleShell>
   );
 }
@@ -1165,7 +1349,8 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
     state.settings.showWorkout,
     state.settings.showCalendar,
     state.settings.showBooks,
-    state.settings.showJournal
+    state.settings.showJournal,
+    state.settings.showIntel
   ].filter(Boolean).length;
 
   return (
@@ -1175,7 +1360,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
           <div>
             <span className="micro-label">Interface command</span>
             <h2>Interface Presets</h2>
-            <p>{enabledModules}/6 visible systems are active. Shape Wren OS around the day you actually run.</p>
+            <p>{enabledModules}/7 visible systems are active. Shape Wren OS around the day you actually run.</p>
           </div>
           <div className="theme-preview">
             <Palette size={22} />
@@ -1189,6 +1374,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
             <ToggleCard label="Calendar module" checked={state.settings.showCalendar} onChange={(checked) => dispatch({ type: "settings/update", payload: { showCalendar: checked } })} />
             <ToggleCard label="Books module" checked={state.settings.showBooks} onChange={(checked) => dispatch({ type: "settings/update", payload: { showBooks: checked } })} />
             <ToggleCard label="Journal module" checked={state.settings.showJournal} onChange={(checked) => dispatch({ type: "settings/update", payload: { showJournal: checked } })} />
+            <ToggleCard label="Intel module" checked={state.settings.showIntel} onChange={(checked) => dispatch({ type: "settings/update", payload: { showIntel: checked } })} />
           </div>
         </section>
         <section className="deck-panel life-panel">
@@ -1504,6 +1690,19 @@ function getDayDelta(value: string): number {
   const today = new Date(`${new Date().toISOString().slice(0, 10)}T12:00:00`).getTime();
   const target = new Date(`${value}T12:00:00`).getTime();
   return Math.round((target - today) / 86_400_000);
+}
+
+function getIntelQuery(item: IntelItem): string {
+  return encodeURIComponent(item.symbol || item.title);
+}
+
+function getIntelNewsUrl(item: IntelItem): string {
+  return `https://news.google.com/search?q=${getIntelQuery(item)}`;
+}
+
+function getIntelFinanceUrl(item: IntelItem): string {
+  if (item.symbol) return `https://finance.yahoo.com/quote/${encodeURIComponent(item.symbol)}`;
+  return `https://www.google.com/search?q=${getIntelQuery(item)}%20market%20research`;
 }
 
 function formatDate(value: string): string {

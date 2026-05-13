@@ -4,6 +4,7 @@ export type DeckView =
   | "dashboard"
   | "todo"
   | "projects"
+  | "intel"
   | "calendar"
   | "workout"
   | "books"
@@ -17,6 +18,8 @@ export type FinanceType = "income" | "expense" | "savings";
 export type Accent = "amber" | "cyan" | "green" | "red";
 export type Density = "comfortable" | "compact";
 export type ProjectSource = "manual" | "github";
+export type IntelKind = "stock" | "crypto" | "fund" | "company" | "trend" | "news";
+export type IntelSignal = "watching" | "researching" | "high-priority" | "on-hold";
 
 export interface CommandTask {
   id: string;
@@ -102,6 +105,25 @@ export interface FinanceEntry {
   status: "planned" | "cleared";
 }
 
+export interface IntelNote {
+  id: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface IntelItem {
+  id: string;
+  title: string;
+  symbol: string;
+  kind: IntelKind;
+  signal: IntelSignal;
+  thesis: string;
+  sourceUrl: string | null;
+  notes: IntelNote[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DeckSettings {
   callsign: string;
   accent: Accent;
@@ -112,6 +134,7 @@ export interface DeckSettings {
   showCalendar: boolean;
   showBooks: boolean;
   showJournal: boolean;
+  showIntel: boolean;
 }
 
 export interface CommandDeckState {
@@ -130,6 +153,7 @@ export interface CommandDeckState {
   books: BookEntry[];
   journal: JournalEntry[];
   finances: FinanceEntry[];
+  intel: IntelItem[];
   settings: DeckSettings;
 }
 
@@ -148,6 +172,8 @@ export type CommandDeckAction =
   | { type: "journal/add"; mood: string; body: string }
   | { type: "finance/add"; label: string; financeType: FinanceType; amount: number; date: string }
   | { type: "finance/toggle"; id: string }
+  | { type: "intel/add"; title: string; symbol: string; kind: IntelKind; signal: IntelSignal; thesis: string; sourceUrl: string }
+  | { type: "intel/note"; id: string; body: string }
   | { type: "settings/update"; payload: Partial<DeckSettings> }
   | { type: "deck/import"; deck: Partial<CommandDeckState> }
   | { type: "deck/reset" };
@@ -159,6 +185,8 @@ const SCHEMA_VERSION = 1;
 const nowIso = () => new Date().toISOString();
 const todayInput = () => new Date().toISOString().slice(0, 10);
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
+const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
 
 export const freshCommandDeck: CommandDeckState = {
   version: SCHEMA_VERSION,
@@ -172,6 +200,7 @@ export const freshCommandDeck: CommandDeckState = {
   books: [],
   journal: [],
   finances: [],
+  intel: [],
   settings: {
     callsign: "Operator",
     accent: "amber",
@@ -181,7 +210,8 @@ export const freshCommandDeck: CommandDeckState = {
     showWorkout: true,
     showCalendar: true,
     showBooks: true,
-    showJournal: true
+    showJournal: true,
+    showIntel: true
   }
 };
 
@@ -330,6 +360,40 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         )
       }, timestamp);
 
+    case "intel/add":
+      return touch({
+        ...state,
+        intel: [
+          {
+            id: makeId("intel"),
+            title: action.title,
+            symbol: action.symbol.trim().toUpperCase(),
+            kind: action.kind,
+            signal: action.signal,
+            thesis: action.thesis,
+            sourceUrl: action.sourceUrl.trim() || null,
+            notes: [],
+            createdAt: timestamp,
+            updatedAt: timestamp
+          },
+          ...state.intel
+        ]
+      }, timestamp);
+
+    case "intel/note":
+      return touch({
+        ...state,
+        intel: state.intel.map((item) =>
+          item.id === action.id
+            ? {
+                ...item,
+                notes: [{ id: makeId("intel-note"), body: action.body, createdAt: timestamp }, ...item.notes],
+                updatedAt: timestamp
+              }
+            : item
+        )
+      }, timestamp);
+
     case "settings/update":
       return touch({ ...state, settings: { ...state.settings, ...action.payload } }, timestamp);
 
@@ -369,7 +433,7 @@ export function getDeckMetrics(state: CommandDeckState) {
   const income = state.finances.filter((entry) => entry.type === "income").reduce((total, entry) => total + entry.amount, 0);
   const expenses = state.finances.filter((entry) => entry.type === "expense").reduce((total, entry) => total + entry.amount, 0);
   const savings = state.finances.filter((entry) => entry.type === "savings").reduce((total, entry) => total + entry.amount, 0);
-  const totalActions = state.tasks.length + state.projects.length + state.workouts.length + state.books.length + state.journal.length;
+  const totalActions = state.tasks.length + state.projects.length + state.workouts.length + state.books.length + state.journal.length + state.intel.length;
   const completedActions = doneTasks.length + doneProjects.length + state.workouts.filter((entry) => entry.status === "done").length;
   const projectProgress =
     state.projects.length === 0
@@ -385,6 +449,8 @@ export function getDeckMetrics(state: CommandDeckState) {
     workoutsDone: state.workouts.filter((entry) => entry.status === "done").length,
     readingCount: state.books.filter((book) => book.status === "reading").length,
     journalEntries: state.journal.length,
+    intelItems: state.intel.length,
+    intelResearching: state.intel.filter((item) => item.signal === "researching" || item.signal === "high-priority").length,
     netCash: income + savings - expenses,
     projectProgress,
     readiness:
@@ -411,6 +477,7 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     books: Array.isArray(value.books) ? value.books : [],
     journal: Array.isArray(value.journal) ? value.journal : [],
     finances: Array.isArray(value.finances) ? value.finances : [],
+    intel: Array.isArray(value.intel) ? value.intel.map(normalizeIntelItem) : [],
     settings: { ...fresh.settings, ...(value.settings ?? {}) },
     updatedAt: value.updatedAt ?? fresh.updatedAt
   };
@@ -429,12 +496,37 @@ function createFreshDeck(): CommandDeckState {
     workouts: [],
     books: [],
     journal: [],
-    finances: []
+    finances: [],
+    intel: []
   };
 }
 
 function touch(state: CommandDeckState, updatedAt: string): CommandDeckState {
   return { ...state, updatedAt };
+}
+
+function normalizeIntelItem(item: Partial<IntelItem>): IntelItem {
+  const timestamp = nowIso();
+  const kind = intelKinds.includes(item.kind as IntelKind) ? item.kind as IntelKind : "trend";
+  const signal = intelSignals.includes(item.signal as IntelSignal) ? item.signal as IntelSignal : "watching";
+  return {
+    id: item.id ?? makeId("intel"),
+    title: item.title ?? "Untitled intel",
+    symbol: (item.symbol ?? "").trim().toUpperCase(),
+    kind,
+    signal,
+    thesis: item.thesis ?? "",
+    sourceUrl: item.sourceUrl ?? null,
+    notes: Array.isArray(item.notes)
+      ? item.notes.map((note) => ({
+          id: note.id ?? makeId("intel-note"),
+          body: note.body ?? "",
+          createdAt: note.createdAt ?? timestamp
+        }))
+      : [],
+    createdAt: item.createdAt ?? timestamp,
+    updatedAt: item.updatedAt ?? timestamp
+  };
 }
 
 function clampProgress(progress: number): number {

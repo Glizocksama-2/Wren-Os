@@ -39,4 +39,26 @@ describe("command deck cloud import", () => {
     expect(next.tasks[0].title).toBe("Synced cloud task");
     expect(next.projects.some((project) => project.source === "github")).toBe(true);
   });
+
+  it("adds market intel items and research notes", () => {
+    const withIntel = reduceCommandDeck(freshCommandDeck, {
+      type: "intel/add",
+      title: "NVIDIA",
+      symbol: "NVDA",
+      kind: "stock",
+      signal: "researching",
+      thesis: "AI chips and data center demand.",
+      sourceUrl: "https://example.com/nvda"
+    });
+    const intelId = withIntel.intel[0].id;
+    const withNote = reduceCommandDeck(withIntel, {
+      type: "intel/note",
+      id: intelId,
+      body: "Check earnings call and margin trend."
+    });
+
+    expect(withNote.intel).toHaveLength(1);
+    expect(withNote.intel[0].symbol).toBe("NVDA");
+    expect(withNote.intel[0].notes[0].body).toBe("Check earnings call and margin trend.");
+  });
 });

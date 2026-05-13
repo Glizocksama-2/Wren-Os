@@ -1019,6 +1019,33 @@ p {
   font-size: 12px;
 }
 
+.intel-radar {
+  display: grid;
+  width: 170px;
+  height: 170px;
+  place-items: center;
+  align-content: center;
+  border: 1px solid rgb(var(--accent-rgb) / 0.36);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle, rgb(var(--accent-rgb) / 0.13), transparent 58%),
+    #070a09;
+  color: var(--accent);
+}
+
+.intel-radar strong {
+  margin-top: 10px;
+  color: var(--text);
+  font-size: 42px;
+  line-height: 1;
+}
+
+.intel-radar span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .money-grid,
 .account-status-grid {
   display: grid;
@@ -1165,6 +1192,14 @@ p {
   grid-template-columns: repeat(4, minmax(160px, 1fr)) auto;
 }
 
+.intel-form {
+  grid-template-columns: minmax(170px, 1fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(150px, 0.65fr) minmax(220px, 1.1fr) minmax(170px, 0.8fr) auto;
+}
+
+.intel-wide {
+  min-width: 0;
+}
+
 .command-form label,
 .journal-form label,
 .custom-card {
@@ -1238,6 +1273,92 @@ p {
   display: grid;
   gap: 8px;
   padding: 18px;
+}
+
+.intel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+  gap: 14px;
+}
+
+.intel-list {
+  display: grid;
+}
+
+.intel-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 15px 16px;
+}
+
+.intel-row:last-child {
+  border-bottom: 0;
+}
+
+.intel-row.active {
+  background: rgb(var(--accent-rgb) / 0.07);
+}
+
+.intel-row strong,
+.intel-focus-head h3 {
+  font-size: 20px;
+}
+
+.intel-row em {
+  display: block;
+  margin-top: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.intel-row p,
+.intel-focus-head p {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.intel-row button,
+.research-links a {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.36);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.1);
+  color: var(--accent);
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.intel-focus {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.intel-focus-head {
+  display: grid;
+  gap: 8px;
+}
+
+.research-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.intel-note-form {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .finance-summary span {
@@ -1338,6 +1459,7 @@ p {
   .hero-command,
   .dashboard-layout,
   .two-column,
+  .intel-grid,
   .life-layout,
   .account-layout {
     grid-template-columns: 1fr;
@@ -1362,6 +1484,7 @@ p {
 
   .command-form,
   .project-form,
+  .intel-form,
   .journal-form {
     grid-template-columns: 1fr 1fr;
   }
@@ -1416,6 +1539,7 @@ p {
   .deck-topbar,
   .deck-status-strip,
   .dashboard-layout,
+  .intel-grid,
   .module-shell,
   .hero-command,
   .orbit-wrap {
@@ -1451,12 +1575,15 @@ p {
   .account-status-grid,
   .command-form,
   .project-form,
+  .intel-form,
+  .intel-note-form,
   .journal-form,
   .auth-form {
     grid-template-columns: 1fr;
   }
 
-  .ops-row {
+  .ops-row,
+  .intel-row {
     grid-template-columns: 1fr;
   }
 

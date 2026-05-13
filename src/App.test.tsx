@@ -86,6 +86,34 @@ describe("Wren OS command deck", () => {
     expect(screen.getAllByText("$500").length).toBeGreaterThan(0);
   });
 
+  it("tracks market intel watchlist items and research notes", () => {
+    render(<App />);
+
+    clickNav("Intel");
+    expect(screen.getByRole("heading", { name: "Watchtower" })).toBeInTheDocument();
+    expect(screen.getByText("Signal board")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Intel title"), { target: { value: "NVIDIA" } });
+    fireEvent.change(screen.getByLabelText("Ticker or topic"), { target: { value: "NVDA" } });
+    fireEvent.change(screen.getByLabelText("Intel type"), { target: { value: "stock" } });
+    fireEvent.change(screen.getByLabelText("Intel signal"), { target: { value: "researching" } });
+    fireEvent.change(screen.getByLabelText("Intel thesis"), { target: { value: "AI chips and data center demand." } });
+    fireEvent.change(screen.getByLabelText("Intel source URL"), { target: { value: "https://example.com/nvda" } });
+    fireEvent.click(screen.getByRole("button", { name: /add intel/i }));
+
+    const intelRow = screen.getAllByText("NVIDIA").find((item) => item.closest(".intel-row"))?.closest(".intel-row") as HTMLElement;
+    expect(intelRow).toBeInTheDocument();
+    expect(within(intelRow).getByText(/NVDA - stock - researching/i)).toBeInTheDocument();
+    expect(within(intelRow).getByText("AI chips and data center demand.")).toBeInTheDocument();
+
+    fireEvent.click(within(intelRow).getByRole("button", { name: "Focus" }));
+    fireEvent.change(screen.getByLabelText("Intel note"), { target: { value: "Check earnings call and margin trend." } });
+    fireEvent.click(screen.getByRole("button", { name: /add note/i }));
+
+    expect(screen.getByText("Check earnings call and margin trend.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /news search for NVIDIA/i })).toHaveAttribute("href", expect.stringContaining("NVDA"));
+  });
+
   it("customizes callsign, accent, density, and resets the new deck", () => {
     render(<App />);
 
@@ -124,6 +152,10 @@ describe("Wren OS command deck", () => {
     clickNav("Finances");
     expect(screen.getByRole("heading", { name: "Cashflow Command" })).toBeInTheDocument();
     expect(screen.getByText("Ledger stream")).toBeInTheDocument();
+
+    clickNav("Intel");
+    expect(screen.getByRole("heading", { name: "Watchtower" })).toBeInTheDocument();
+    expect(screen.getByText("Research queue")).toBeInTheDocument();
 
     clickNav("Customize");
     expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
