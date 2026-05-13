@@ -1,6 +1,16 @@
 import { githubProjectSeed, githubScanSummary } from "../data/githubProjects";
 
-export type DeckView = "dashboard" | "todo" | "projects" | "calendar" | "workout" | "books" | "journal" | "finances" | "customize";
+export type DeckView =
+  | "dashboard"
+  | "todo"
+  | "projects"
+  | "calendar"
+  | "workout"
+  | "books"
+  | "journal"
+  | "finances"
+  | "customize"
+  | "account";
 export type Priority = "low" | "medium" | "high" | "critical";
 export type ProjectStatus = "pending" | "done";
 export type FinanceType = "income" | "expense" | "savings";
@@ -99,6 +109,9 @@ export interface DeckSettings {
   showOrbit: boolean;
   showFinance: boolean;
   showWorkout: boolean;
+  showCalendar: boolean;
+  showBooks: boolean;
+  showJournal: boolean;
 }
 
 export interface CommandDeckState {
@@ -165,7 +178,10 @@ export const freshCommandDeck: CommandDeckState = {
     density: "comfortable",
     showOrbit: true,
     showFinance: true,
-    showWorkout: true
+    showWorkout: true,
+    showCalendar: true,
+    showBooks: true,
+    showJournal: true
   }
 };
 

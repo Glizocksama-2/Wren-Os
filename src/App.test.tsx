@@ -57,7 +57,7 @@ describe("Wren OS command deck", () => {
     clickNav("Calendar");
     fireEvent.change(screen.getByLabelText("Calendar event title"), { target: { value: "Strategy block" } });
     fireEvent.click(screen.getByRole("button", { name: /add event/i }));
-    expect(screen.getByText("Strategy block")).toBeInTheDocument();
+    expect(screen.getAllByText("Strategy block").length).toBeGreaterThan(0);
 
     clickNav("Workout");
     fireEvent.change(screen.getByLabelText("Workout name"), { target: { value: "Push day" } });
@@ -83,7 +83,7 @@ describe("Wren OS command deck", () => {
     fireEvent.change(screen.getByLabelText("Finance amount"), { target: { value: "500" } });
     fireEvent.click(screen.getByRole("button", { name: /add finance/i }));
     expect(screen.getByText("Client payment")).toBeInTheDocument();
-    expect(screen.getByText("$500")).toBeInTheDocument();
+    expect(screen.getAllByText("$500").length).toBeGreaterThan(0);
   });
 
   it("customizes callsign, accent, density, and resets the new deck", () => {
@@ -100,6 +100,48 @@ describe("Wren OS command deck", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /reset deck/i }));
     expect(screen.getByDisplayValue("Operator")).toBeInTheDocument();
+  });
+
+  it("renders richer life modules and account settings", () => {
+    render(<App />);
+
+    clickNav("Calendar");
+    expect(screen.getByRole("heading", { name: "Mission Radar" })).toBeInTheDocument();
+    expect(screen.getByText("Next seven days")).toBeInTheDocument();
+
+    clickNav("Workout");
+    expect(screen.getByRole("heading", { name: "Training Split" })).toBeInTheDocument();
+    expect(screen.getByText("Completion heat")).toBeInTheDocument();
+
+    clickNav("Books");
+    expect(screen.getByRole("heading", { name: "Reading Radar" })).toBeInTheDocument();
+    expect(screen.getByText("Library lanes")).toBeInTheDocument();
+
+    clickNav("Journal");
+    expect(screen.getByRole("heading", { name: "Reflection Brief" })).toBeInTheDocument();
+    expect(screen.getByText("Entry archive")).toBeInTheDocument();
+
+    clickNav("Finances");
+    expect(screen.getByRole("heading", { name: "Cashflow Command" })).toBeInTheDocument();
+    expect(screen.getByText("Ledger stream")).toBeInTheDocument();
+
+    clickNav("Customize");
+    expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
+    expect(screen.getByText("Module switches")).toBeInTheDocument();
+
+    clickNav("Account");
+    expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();
+    expect(screen.getByText("Identity and sync")).toBeInTheDocument();
+  });
+
+  it("uses customize switches to hide optional life modules", () => {
+    render(<App />);
+
+    clickNav("Customize");
+    fireEvent.click(screen.getByLabelText("Calendar module"));
+
+    expect(screen.queryByRole("button", { name: "Calendar" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
   });
 });
 
