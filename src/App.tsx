@@ -2,6 +2,7 @@ import {
   Activity,
   Banknote,
   BatteryCharging,
+  Bot,
   BookMarked,
   BookOpen,
   CalendarCheck,
@@ -9,6 +10,7 @@ import {
   Circle,
   CircleCheck,
   Cloud,
+  Cpu,
   Database,
   Dumbbell,
   ExternalLink,
@@ -27,19 +29,25 @@ import {
   Palette,
   PiggyBank,
   Plus,
+  Radar,
   RotateCcw,
   Search,
+  Send,
   Settings2,
   Shield,
   SlidersHorizontal,
+  Sparkles,
   Target,
   Trash2,
   TrendingDown,
   TrendingUp,
   UserRound,
-  Wallet
+  Wallet,
+  X,
+  Zap
 } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
+import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
 import { loadCloudDeck, saveCloudDeck, type CloudDeckClient } from "./store/cloudDeck";
 import {
@@ -53,6 +61,7 @@ import {
   type IntelItem,
   type IntelKind,
   type IntelSignal,
+  type LogoStyle,
   type Priority,
   getDeckMetrics,
   loadCommandDeck,
@@ -84,6 +93,26 @@ const accentOptions: Array<{ value: Accent; label: string }> = [
   { value: "cyan", label: "Cyan" },
   { value: "green", label: "Green" },
   { value: "red", label: "Red" }
+];
+
+const logoOptions: Array<{ value: LogoStyle; label: string; description: string }> = [
+  { value: "sentinel", label: "Sentinel Wing", description: "Protective angular crest for the main command identity." },
+  { value: "monolith", label: "Black Tower", description: "A vertical signal mark for discipline, privacy, and control." },
+  { value: "radar", label: "Orbit Watch", description: "The third 3D concept: a surveillance ring for market intel and project awareness." },
+  { value: "spire", label: "North Spire", description: "A sharp forward mark for momentum and execution." }
+];
+
+type AgentMessage = {
+  id: string;
+  role: "agent" | "operator";
+  body: string;
+};
+
+const agentQuickPrompts = [
+  "Brief my next move",
+  "Find the bottleneck",
+  "Balance today",
+  "Create focus task"
 ];
 
 export default function App() {
@@ -327,9 +356,10 @@ export default function App() {
 
   return (
     <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density}>
+      <TechBackdrop metrics={metrics} />
       <aside className="tactical-rail" aria-label="Primary">
         <div className="rail-brand" aria-label="Northwatch">
-          <Shield size={22} />
+          <LogoMark variant={state.settings.logoStyle} />
         </div>
         <nav className="rail-nav" aria-label="Primary">
           {visibleNavItems.map((item) => (
@@ -366,6 +396,14 @@ export default function App() {
           {view === "account" && <AccountModule state={state} cloudStatus={cloudStatus} onSignOut={signOut} />}
         </section>
       </main>
+      <AgentDock
+        state={state}
+        metrics={metrics}
+        activeView={view}
+        dispatch={dispatch}
+        setView={setView}
+        setNotice={setNotice}
+      />
       {notice && <div className="deck-toast">{notice}</div>}
     </div>
   );
@@ -544,6 +582,11 @@ function Dashboard({
           <div className="hero-actions">
             <button type="button" onClick={() => setView("todo")}>Add to do</button>
             <button type="button" onClick={() => setView("projects")}>Open projects</button>
+          </div>
+          <div className="hero-signal-row" aria-label="Northwatch live systems">
+            <span><Bot size={14} /> Sentinel agent online</span>
+            <span><Radar size={14} /> {metrics.intelItems} intel targets</span>
+            <span><Zap size={14} /> {metrics.openTasks} active orders</span>
           </div>
         </div>
         {state.settings.showOrbit && <OrbitGauge value={metrics.readiness} />}
@@ -1428,6 +1471,24 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
             </button>
           </div>
         </div>
+        <div className="custom-card logo-select-card">
+          <span>Northwatch mark</span>
+          <div className="logo-options" aria-label="Northwatch logo options">
+            {logoOptions.map((option) => (
+              <button
+                className={`logo-option ${state.settings.logoStyle === option.value ? "active" : ""}`}
+                type="button"
+                key={option.value}
+                aria-label={`Use ${option.label} logo`}
+                onClick={() => dispatch({ type: "settings/update", payload: { logoStyle: option.value } })}
+              >
+                <LogoMark variant={option.value} />
+                <strong>{option.label}</strong>
+                <em>{option.description}</em>
+              </button>
+            ))}
+          </div>
+        </div>
         <ToggleCard label="Show orbit radar" checked={state.settings.showOrbit} onChange={(checked) => dispatch({ type: "settings/update", payload: { showOrbit: checked } })} />
         <ToggleCard label="Show finance card" checked={state.settings.showFinance} onChange={(checked) => dispatch({ type: "settings/update", payload: { showFinance: checked } })} />
         <ToggleCard label="Show workout systems" checked={state.settings.showWorkout} onChange={(checked) => dispatch({ type: "settings/update", payload: { showWorkout: checked } })} />
@@ -1510,6 +1571,226 @@ function AccountModule({
         </section>
       </section>
     </ModuleShell>
+  );
+}
+
+function LogoMark({ variant }: { variant: LogoStyle }) {
+  if (variant === "monolith") {
+    return (
+      <svg className="northwatch-logo" viewBox="0 0 64 64" role="img" aria-label="Black Tower logo">
+        <path d="M32 6 48 18v36H16V18L32 6Z" />
+        <path d="M32 15v39" />
+        <path d="M24 24h16" />
+        <path d="M22 34h20" />
+      </svg>
+    );
+  }
+
+  if (variant === "radar") {
+    return (
+      <span
+        className="northwatch-logo northwatch-logo-orbit-watch"
+        role="img"
+        aria-label="Orbit Watch logo"
+        style={{ backgroundImage: `url(${orbitWatchLogoBoardUrl})` }}
+      />
+    );
+  }
+
+  if (variant === "spire") {
+    return (
+      <svg className="northwatch-logo" viewBox="0 0 64 64" role="img" aria-label="North Spire logo">
+        <path d="M32 6 52 56 32 44 12 56 32 6Z" />
+        <path d="M32 16v28" />
+        <path d="M22 46h20" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg className="northwatch-logo" viewBox="0 0 64 64" role="img" aria-label="Sentinel Wing logo">
+      <path d="M32 8 54 20 47 48 32 56 17 48 10 20 32 8Z" />
+      <path d="M18 23h28" />
+      <path d="M21 31 32 43 43 31" />
+      <path d="M32 17v26" />
+    </svg>
+  );
+}
+
+function TechBackdrop({ metrics }: { metrics: ReturnType<typeof getDeckMetrics> }) {
+  const nodes = [
+    [8, 18, 0],
+    [16, 72, 1],
+    [28, 28, 2],
+    [38, 84, 3],
+    [52, 14, 1],
+    [64, 68, 2],
+    [74, 32, 0],
+    [88, 76, 3],
+    [93, 20, 2]
+  ];
+
+  return (
+    <div className="tech-backdrop" aria-hidden="true">
+      <div className="backdrop-grid" />
+      <div className="backdrop-sweep" />
+      <div className="backdrop-core">
+        <span />
+        <span />
+        <span />
+        <strong>{metrics.readiness}</strong>
+      </div>
+      <svg className="circuit-web" viewBox="0 0 1200 800" preserveAspectRatio="none">
+        <path d="M72 620 C260 460 305 555 450 390 S760 250 1128 116" />
+        <path d="M118 180 C306 260 330 138 528 250 S790 424 1134 332" />
+        <path d="M238 760 L420 610 L620 610 L790 474 L1060 474" />
+        <path d="M100 420 L250 420 L330 500 L520 500 L650 370 L910 370 L1080 238" />
+        <circle cx="250" cy="420" r="6" />
+        <circle cx="528" cy="250" r="7" />
+        <circle cx="790" cy="474" r="7" />
+        <circle cx="910" cy="370" r="5" />
+      </svg>
+      {nodes.map(([left, top, delay], index) => (
+        <span
+          className="backdrop-node"
+          key={`${left}-${top}`}
+          style={{ left: `${left}%`, top: `${top}%`, animationDelay: `${delay * 0.7}s` }}
+        >
+          {index % 3 === 0 && <i />}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function AgentDock({
+  state,
+  metrics,
+  activeView,
+  dispatch,
+  setView,
+  setNotice
+}: {
+  state: CommandDeckState;
+  metrics: ReturnType<typeof getDeckMetrics>;
+  activeView: DeckView;
+  dispatch: React.Dispatch<CommandDeckAction>;
+  setView: (view: DeckView) => void;
+  setNotice: (message: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [messages, setMessages] = useState<AgentMessage[]>(() => [
+    {
+      id: "sentinel-boot",
+      role: "agent",
+      body: composeAgentReply(state, metrics, "dashboard", "Brief my next move")
+    }
+  ]);
+  const priorityProject = getPriorityProject(state);
+  const priorityTask = getPriorityTask(state);
+  const activeLabel = navItems.find((item) => item.view === activeView)?.label ?? "Command";
+
+  const sendPrompt = (rawPrompt: string) => {
+    const prompt = rawPrompt.trim();
+    if (!prompt) return;
+
+    let reply = composeAgentReply(state, metrics, activeView, prompt);
+    if (/create|add|make/i.test(prompt) && /focus|task|order/i.test(prompt)) {
+      const title = getFocusTaskTitle(state);
+      dispatch({ type: "task/add", title, priority: "high", dueDate: new Date().toISOString().slice(0, 10) });
+      setView("todo");
+      setNotice("Sentinel created a focus task.");
+      reply = `Created a high-priority focus task: ${title}\nI moved you to To Do so you can execute or edit it.`;
+    }
+
+    setMessages((current) => [
+      ...current,
+      { id: `operator-${Date.now()}`, role: "operator", body: prompt },
+      { id: `sentinel-${Date.now()}`, role: "agent", body: reply }
+    ]);
+    setInput("");
+    setIsOpen(true);
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    sendPrompt(input);
+  };
+
+  return (
+    <section className={`agent-dock ${isOpen ? "open" : "collapsed"}`} aria-label="Sentinel Agent">
+      <header className="agent-header">
+        <div className="agent-orb">
+          <Bot size={19} />
+          <span />
+        </div>
+        <div>
+          <span>Sentinel Agent</span>
+          <strong>{activeLabel} scan active</strong>
+        </div>
+        <button type="button" aria-label={isOpen ? "Collapse Sentinel Agent" : "Open Sentinel Agent"} onClick={() => setIsOpen(!isOpen)}>
+          {isOpen ? <X size={16} /> : <Sparkles size={16} />}
+        </button>
+      </header>
+
+      {isOpen && (
+        <>
+          <div className="agent-vitals" aria-label="Sentinel live vitals">
+            <span><Cpu size={14} /> {metrics.readiness}% ready</span>
+            <span><Target size={14} /> {metrics.pendingProjects} projects</span>
+            <span><ListTodo size={14} /> {metrics.openTasks} orders</span>
+          </div>
+
+          <div className="agent-context">
+            <div>
+              <span>Priority project</span>
+              <strong>{priorityProject?.name ?? "No active project pressure"}</strong>
+            </div>
+            <div>
+              <span>Next order</span>
+              <strong>{priorityTask?.title ?? "Ask for a focus task"}</strong>
+            </div>
+          </div>
+
+          <div className="agent-messages" aria-live="polite">
+            {messages.slice(-5).map((message) => (
+              <article className={`agent-message ${message.role}`} key={message.id}>
+                {message.body.split("\n").map((line, index) => (
+                  <p key={`${message.id}-${index}`}>{line}</p>
+                ))}
+              </article>
+            ))}
+          </div>
+
+          <div className="agent-quick-row">
+            {agentQuickPrompts.map((prompt) => (
+              <button type="button" key={prompt} onClick={() => sendPrompt(prompt)}>
+                {prompt}
+              </button>
+            ))}
+          </div>
+
+          <div className="agent-route-row" aria-label="Agent route controls">
+            <button type="button" onClick={() => setView("todo")}>To Do</button>
+            <button type="button" onClick={() => setView("projects")}>Projects</button>
+            <button type="button" onClick={() => setView("intel")}>Intel</button>
+          </div>
+
+          <form className="agent-input" onSubmit={submit}>
+            <input
+              aria-label="Ask Sentinel"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Ask Sentinel what to do next..."
+            />
+            <button type="submit" aria-label="Send to Sentinel">
+              <Send size={16} />
+            </button>
+          </form>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1678,6 +1959,97 @@ function getInitialCloudStatus(): CloudStatus {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Unexpected cloud sync error.";
+}
+
+function composeAgentReply(
+  state: CommandDeckState,
+  metrics: ReturnType<typeof getDeckMetrics>,
+  activeView: DeckView,
+  prompt: string
+): string {
+  const normalized = prompt.toLowerCase();
+  const project = getPriorityProject(state);
+  const task = getPriorityTask(state);
+  const intel = state.intel.find((item) => item.signal === "high-priority" || item.signal === "researching");
+  const financeLine =
+    metrics.netCash >= 0
+      ? `Net cash is positive at ${formatMoney(metrics.netCash)}. Keep logging cleared income, expenses, and savings.`
+      : `Net cash is negative at ${formatMoney(metrics.netCash)}. Review expenses before adding new commitments.`;
+
+  if (normalized.includes("bottleneck") || normalized.includes("blocked")) {
+    const projectLine = project
+      ? `${project.name} is the main pressure point: ${project.nextAction || project.objective || "define the next action."}`
+      : "No pending project is currently bottlenecking the deck.";
+    const taskLine = task ? `The next loose order is ${task.title}.` : "There are no open to do items yet.";
+    return `${projectLine}\n${taskLine}\nBest move: create one visible next action, then close the smallest unfinished loop first.`;
+  }
+
+  if (normalized.includes("balance") || normalized.includes("today") || normalized.includes("day")) {
+    return `Today should stay simple: one project push, one body signal, one money check.\nProject: ${project?.name ?? "choose a pending project"}.\nBody: ${
+      state.workouts.find((entry) => entry.status === "planned")?.name ?? "add a short workout"
+    }.\nMoney: ${financeLine}`;
+  }
+
+  if (normalized.includes("finance") || normalized.includes("money") || normalized.includes("cash")) {
+    return `${financeLine}\nYou have ${state.finances.length} ledger entries and ${state.finances.filter((entry) => entry.status === "planned").length} waiting to clear.`;
+  }
+
+  if (normalized.includes("intel") || normalized.includes("invest") || normalized.includes("stock")) {
+    return `Intel board has ${metrics.intelItems} tracked targets and ${metrics.intelResearching} active research signals.\n${
+      intel ? `Lead target: ${intel.title}${intel.symbol ? ` (${intel.symbol})` : ""}. ${intel.thesis}` : "Add one market, stock, company, trend, or news item worth watching."
+    }`;
+  }
+
+  if (normalized.includes("journal") || normalized.includes("reflect")) {
+    return `Journal has ${metrics.journalEntries} entries. Capture one honest line after the next work block: what moved, what resisted, what gets cut next.`;
+  }
+
+  const viewLine = `Current module: ${navItems.find((item) => item.view === activeView)?.label ?? "Command"}.`;
+  const taskLine = task ? `Execute next: ${task.title}${task.dueDate ? ` by ${formatDate(task.dueDate)}` : ""}.` : "No open task is waiting. Create a focus task if you want a hard target.";
+  const projectLine = project ? `Project pressure: ${project.name} at ${project.progress}% with next action "${project.nextAction || "define next action"}".` : "Project pressure is clear.";
+
+  return `${viewLine}\n${taskLine}\n${projectLine}\nReadiness is ${metrics.readiness}%. Keep the deck small, visible, and moving.`;
+}
+
+function getPriorityTask(state: CommandDeckState): CommandDeckState["tasks"][number] | null {
+  const priorityWeight: Record<Priority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+  const openTasks = state.tasks.filter((task) => task.status === "todo");
+  if (openTasks.length === 0) return null;
+
+  return [...openTasks].sort((left, right) => {
+    const priorityDelta = priorityWeight[left.priority] - priorityWeight[right.priority];
+    if (priorityDelta !== 0) return priorityDelta;
+    if (left.dueDate && right.dueDate) return left.dueDate.localeCompare(right.dueDate);
+    if (left.dueDate) return -1;
+    if (right.dueDate) return 1;
+    return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+  })[0];
+}
+
+function getPriorityProject(state: CommandDeckState): CommandDeckState["projects"][number] | null {
+  const pending = state.projects.filter((project) => project.status === "pending");
+  if (pending.length === 0) return null;
+
+  return [...pending].sort((left, right) => {
+    const issueDelta = right.openIssues + right.openPullRequests - (left.openIssues + left.openPullRequests);
+    if (issueDelta !== 0) return issueDelta;
+    const progressDelta = left.progress - right.progress;
+    if (progressDelta !== 0) return progressDelta;
+    return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+  })[0];
+}
+
+function getFocusTaskTitle(state: CommandDeckState): string {
+  const task = getPriorityTask(state);
+  if (task) return `Finish: ${task.title}`;
+
+  const project = getPriorityProject(state);
+  if (project) return `Advance ${project.name}: ${project.nextAction || "define the next milestone"}`;
+
+  const intel = state.intel.find((item) => item.signal === "high-priority" || item.signal === "researching");
+  if (intel) return `Research ${intel.title}${intel.symbol ? ` (${intel.symbol})` : ""}`;
+
+  return "Run a 30 minute Northwatch review";
 }
 
 function shiftDate(daysFromToday: number): string {

@@ -1,22 +1,24 @@
 :root {
   color-scheme: dark;
-  --bg: #060807;
-  --bg-2: #0c100f;
-  --surface: #101614;
-  --surface-2: #151d1a;
-  --surface-3: #1c2521;
-  --line: #26342f;
-  --line-strong: #3f5149;
-  --text: #edf4ed;
-  --muted: #95a39b;
-  --faint: #67746d;
-  --accent: #d9a441;
-  --accent-rgb: 217 164 65;
+  --bg: #02050a;
+  --bg-2: #06121a;
+  --surface: #08131a;
+  --surface-2: #0c1a22;
+  --surface-3: #122733;
+  --line: #1d3644;
+  --line-strong: #335a6b;
+  --text: #ecf8ff;
+  --muted: #8aa7b3;
+  --faint: #54717d;
+  --accent: #f2b84b;
+  --accent-rgb: 242 184 75;
   --danger: #ff5e4d;
   --green: #55d283;
-  --cyan: #41e1d4;
+  --cyan: #4fe7ff;
+  --violet: #9b8cff;
   --radius: 8px;
-  --shadow: 0 18px 60px rgb(0 0 0 / 0.35);
+  --shadow: 0 22px 80px rgb(0 0 0 / 0.42);
+  --glass: rgb(8 19 26 / 0.72);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -29,9 +31,9 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    radial-gradient(circle at 75% 8%, rgb(var(--accent-rgb) / 0.16), transparent 28rem),
-    radial-gradient(circle at 20% 90%, rgb(65 225 212 / 0.09), transparent 24rem),
-    linear-gradient(135deg, #030504 0%, var(--bg) 46%, #0b0e0c 100%);
+    radial-gradient(circle at 76% 5%, rgb(79 231 255 / 0.13), transparent 30rem),
+    radial-gradient(circle at 16% 84%, rgb(242 184 75 / 0.12), transparent 26rem),
+    linear-gradient(135deg, #010205 0%, var(--bg) 48%, #07141d 100%);
   color: var(--text);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
@@ -67,8 +69,10 @@ p {
 }
 
 .deck-app {
-  --accent: #d9a441;
-  --accent-rgb: 217 164 65;
+  --accent: #f2b84b;
+  --accent-rgb: 242 184 75;
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
   height: 100vh;
@@ -76,8 +80,8 @@ p {
 }
 
 .deck-app[data-accent="cyan"] {
-  --accent: #41e1d4;
-  --accent-rgb: 65 225 212;
+  --accent: #4fe7ff;
+  --accent-rgb: 79 231 255;
 }
 
 .deck-app[data-accent="green"] {
@@ -94,11 +98,137 @@ p {
   font-size: 13px;
 }
 
+.tech-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 58% 36%, rgb(var(--accent-rgb) / 0.16), transparent 16rem),
+    radial-gradient(circle at 82% 70%, rgb(79 231 255 / 0.1), transparent 20rem);
+}
+
+.backdrop-grid {
+  position: absolute;
+  inset: -20%;
+  background:
+    linear-gradient(rgb(79 231 255 / 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(79 231 255 / 0.055) 1px, transparent 1px);
+  background-size: 58px 58px;
+  mask-image: radial-gradient(circle at 56% 46%, black 0 34%, transparent 74%);
+  transform: perspective(900px) rotateX(58deg) translateY(18%);
+  transform-origin: center;
+  animation: grid-drift 18s linear infinite;
+}
+
+.backdrop-sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0 44%, rgb(79 231 255 / 0.08) 50%, transparent 56% 100%);
+  mix-blend-mode: screen;
+  opacity: 0.8;
+  transform: translateX(-70%);
+  animation: sweep-pass 9s ease-in-out infinite;
+}
+
+.backdrop-core {
+  position: absolute;
+  right: min(7vw, 90px);
+  top: 18vh;
+  display: grid;
+  width: clamp(220px, 28vw, 390px);
+  aspect-ratio: 1;
+  place-items: center;
+  border-radius: 999px;
+  color: rgb(var(--accent-rgb) / 0.45);
+  opacity: 0.9;
+  filter: drop-shadow(0 0 38px rgb(var(--accent-rgb) / 0.18));
+}
+
+.backdrop-core span {
+  position: absolute;
+  inset: var(--ring-inset, 0);
+  border: 1px solid currentColor;
+  border-top-color: transparent;
+  border-radius: inherit;
+  animation: orbit-spin 18s linear infinite;
+}
+
+.backdrop-core span:nth-child(1) {
+  --ring-inset: 0;
+}
+
+.backdrop-core span:nth-child(2) {
+  --ring-inset: 15%;
+  color: rgb(79 231 255 / 0.45);
+  animation-duration: 11s;
+  animation-direction: reverse;
+}
+
+.backdrop-core span:nth-child(3) {
+  --ring-inset: 31%;
+  color: rgb(85 210 131 / 0.36);
+  animation-duration: 7s;
+}
+
+.backdrop-core strong {
+  color: rgb(236 248 255 / 0.12);
+  font-size: clamp(62px, 10vw, 140px);
+  line-height: 1;
+}
+
+.circuit-web {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  stroke: rgb(79 231 255 / 0.18);
+  stroke-width: 1.4;
+  fill: none;
+}
+
+.circuit-web path {
+  stroke-dasharray: 9 22;
+  animation: circuit-flow 12s linear infinite;
+}
+
+.circuit-web circle {
+  fill: rgb(var(--accent-rgb) / 0.4);
+  stroke: none;
+}
+
+.backdrop-node {
+  position: absolute;
+  display: grid;
+  width: 8px;
+  height: 8px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(79 231 255 / 0.72);
+  box-shadow: 0 0 20px rgb(79 231 255 / 0.5);
+  animation: node-breathe 3.8s ease-in-out infinite;
+}
+
+.backdrop-node i {
+  position: absolute;
+  width: 46px;
+  height: 1px;
+  background: linear-gradient(90deg, rgb(79 231 255 / 0.46), transparent);
+  transform: translateX(26px);
+}
+
 .tactical-rail {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  border-right: 1px solid var(--line);
-  background: linear-gradient(180deg, #080b0a 0%, #0c1110 100%);
+  border-right: 1px solid rgb(79 231 255 / 0.16);
+  background:
+    linear-gradient(180deg, rgb(7 16 22 / 0.9), rgb(3 8 12 / 0.92)),
+    linear-gradient(90deg, rgb(79 231 255 / 0.06), transparent);
+  box-shadow: 12px 0 40px rgb(0 0 0 / 0.22);
+  backdrop-filter: blur(20px);
   padding: 18px 12px;
 }
 
@@ -156,6 +286,8 @@ p {
 }
 
 .deck-screen {
+  position: relative;
+  z-index: 1;
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -1442,9 +1574,10 @@ p {
 
 .deck-toast {
   position: fixed;
-  right: 24px;
+  right: min(430px, calc(100vw - 380px));
   bottom: 22px;
   z-index: 10;
+  max-width: 360px;
   border: 1px solid rgb(var(--accent-rgb) / 0.42);
   border-radius: var(--radius);
   background: #070a09;
@@ -1452,6 +1585,565 @@ p {
   color: var(--accent);
   padding: 12px 14px;
   font-weight: 900;
+}
+
+.rail-brand {
+  border-color: rgb(79 231 255 / 0.32);
+  background:
+    radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb) / 0.28), transparent 58%),
+    rgb(79 231 255 / 0.08);
+  box-shadow: inset 0 0 28px rgb(79 231 255 / 0.08), 0 0 26px rgb(var(--accent-rgb) / 0.16);
+}
+
+.northwatch-logo {
+  width: 26px;
+  height: 26px;
+  overflow: visible;
+}
+
+.northwatch-logo path,
+.northwatch-logo circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.northwatch-logo-orbit-watch {
+  display: block;
+  border-radius: 999px;
+  background-repeat: no-repeat;
+  background-position: 86.5% 28%;
+  background-size: 382% auto;
+  filter: drop-shadow(0 0 12px rgb(79 231 255 / 0.34));
+}
+
+.rail-brand .northwatch-logo-orbit-watch {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+}
+
+.rail-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.rail-button::after {
+  position: absolute;
+  inset: auto 10px 7px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 16px rgb(var(--accent-rgb) / 0.75);
+  opacity: 0;
+  content: "";
+}
+
+.rail-button:hover,
+.rail-button.active {
+  background:
+    linear-gradient(135deg, rgb(var(--accent-rgb) / 0.2), rgb(79 231 255 / 0.08)),
+    rgb(8 19 26 / 0.86);
+}
+
+.rail-button.active::after {
+  opacity: 1;
+}
+
+.rail-footer span {
+  border-color: rgb(79 231 255 / 0.24);
+  background: rgb(5 12 17 / 0.92);
+  box-shadow: inset 0 0 18px rgb(79 231 255 / 0.08);
+}
+
+.deck-topbar {
+  border-bottom-color: rgb(79 231 255 / 0.15);
+  background:
+    linear-gradient(90deg, rgb(4 10 15 / 0.86), rgb(8 19 26 / 0.72)),
+    linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent);
+  box-shadow: 0 18px 45px rgb(0 0 0 / 0.16);
+}
+
+.deck-search,
+.cloud-status-pill,
+.topbar-icon-button {
+  border-color: rgb(79 231 255 / 0.18);
+  background: rgb(3 9 13 / 0.66);
+  box-shadow: inset 0 0 24px rgb(79 231 255 / 0.035);
+}
+
+.deck-content {
+  padding: 34px 34px 54px;
+}
+
+.dashboard-layout,
+.module-shell {
+  max-width: 1360px;
+  gap: 18px;
+}
+
+.hero-command {
+  position: relative;
+  min-height: 430px;
+  border-color: rgb(79 231 255 / 0.18);
+  background:
+    radial-gradient(circle at 82% 50%, rgb(79 231 255 / 0.17), transparent 20rem),
+    radial-gradient(circle at 58% 25%, rgb(var(--accent-rgb) / 0.13), transparent 17rem),
+    linear-gradient(135deg, rgb(8 18 25 / 0.88), rgb(3 7 11 / 0.92)),
+    repeating-linear-gradient(90deg, transparent 0 44px, rgb(255 255 255 / 0.03) 44px 45px);
+  box-shadow: 0 24px 100px rgb(0 0 0 / 0.46), inset 0 0 70px rgb(79 231 255 / 0.035);
+}
+
+.hero-command::before,
+.hero-command::after {
+  position: absolute;
+  pointer-events: none;
+  content: "";
+}
+
+.hero-command::before {
+  inset: 22px;
+  border: 1px solid rgb(79 231 255 / 0.08);
+  border-radius: calc(var(--radius) + 4px);
+}
+
+.hero-command::after {
+  right: 30px;
+  bottom: 28px;
+  width: 170px;
+  height: 170px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.22);
+  border-left-color: transparent;
+  border-radius: 999px;
+  animation: orbit-spin 16s linear infinite;
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 1;
+}
+
+.hero-copy h1 {
+  max-width: 760px;
+  text-shadow: 0 0 32px rgb(79 231 255 / 0.1);
+}
+
+.hero-signal-row,
+.agent-vitals,
+.agent-route-row,
+.agent-quick-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hero-signal-row span,
+.agent-vitals span {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgb(79 231 255 / 0.18);
+  border-radius: 999px;
+  background: rgb(3 9 13 / 0.52);
+  color: var(--muted);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.hero-signal-row svg,
+.agent-vitals svg {
+  color: var(--accent);
+}
+
+.readiness-panel,
+.battery-card,
+.deck-panel,
+.metric-tile,
+.custom-card,
+.book-card,
+.finance-summary div,
+.life-hero,
+.account-hero,
+.journal-card {
+  position: relative;
+  border-color: rgb(79 231 255 / 0.16);
+  background:
+    linear-gradient(180deg, rgb(11 26 35 / 0.78), rgb(4 10 14 / 0.82)),
+    radial-gradient(circle at top right, rgb(var(--accent-rgb) / 0.08), transparent 18rem);
+  box-shadow: 0 20px 70px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(16px);
+}
+
+.metric-tile::after,
+.deck-panel::after,
+.life-hero::after,
+.account-hero::after {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 28px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(79 231 255 / 0.45));
+  content: "";
+}
+
+.long-meter,
+.mini-progress {
+  background: rgb(2 8 12 / 0.9);
+}
+
+.long-meter span,
+.mini-progress span {
+  background: linear-gradient(90deg, var(--accent), var(--cyan));
+  box-shadow: 0 0 18px rgb(var(--accent-rgb) / 0.24);
+}
+
+.battery-bars span.charged {
+  background: linear-gradient(180deg, var(--accent), #fff0ae);
+  box-shadow: 0 0 16px rgb(var(--accent-rgb) / 0.18);
+}
+
+.ops-row,
+.intel-row,
+.timeline-item {
+  transition: background 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.ops-row:hover,
+.intel-row:hover {
+  background: rgb(79 231 255 / 0.055);
+}
+
+.panel-headline {
+  border-bottom-color: rgb(79 231 255 / 0.13);
+}
+
+.command-form,
+.journal-form {
+  border-color: rgb(79 231 255 / 0.15);
+  background: rgb(3 9 13 / 0.64);
+  backdrop-filter: blur(16px);
+}
+
+.command-form input,
+.command-form select,
+.journal-form input,
+.journal-form textarea,
+.custom-card input,
+.auth-form input {
+  border-color: rgb(79 231 255 / 0.16);
+  background: rgb(2 8 12 / 0.8);
+}
+
+.agent-dock {
+  position: fixed;
+  right: 24px;
+  bottom: 22px;
+  z-index: 9;
+  display: grid;
+  width: min(390px, calc(100vw - 32px));
+  max-height: min(720px, calc(100vh - 44px));
+  overflow: hidden;
+  border: 1px solid rgb(79 231 255 / 0.24);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgb(7 19 27 / 0.9), rgb(2 7 11 / 0.94)),
+    radial-gradient(circle at top right, rgb(var(--accent-rgb) / 0.12), transparent 15rem);
+  box-shadow: 0 24px 90px rgb(0 0 0 / 0.52), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  backdrop-filter: blur(22px);
+}
+
+.agent-dock.collapsed {
+  width: min(260px, calc(100vw - 32px));
+}
+
+.agent-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgb(79 231 255 / 0.14);
+  padding: 12px;
+}
+
+.agent-orb {
+  position: relative;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid rgb(var(--accent-rgb) / 0.34);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb) / 0.3), transparent 56%),
+    rgb(79 231 255 / 0.08);
+  color: var(--accent);
+}
+
+.agent-orb span {
+  position: absolute;
+  inset: -5px;
+  border: 1px solid rgb(79 231 255 / 0.22);
+  border-left-color: transparent;
+  border-radius: inherit;
+  animation: orbit-spin 5s linear infinite;
+}
+
+.agent-header span,
+.agent-context span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.agent-header strong,
+.agent-context strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-header button,
+.agent-input button,
+.agent-route-row button,
+.agent-quick-row button {
+  display: inline-grid;
+  min-height: 34px;
+  place-items: center;
+  border: 1px solid rgb(79 231 255 / 0.18);
+  border-radius: var(--radius);
+  background: rgb(3 9 13 / 0.72);
+  color: var(--accent);
+  padding: 0 10px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.agent-header button {
+  width: 34px;
+  padding: 0;
+}
+
+.agent-vitals,
+.agent-context,
+.agent-messages,
+.agent-quick-row,
+.agent-route-row,
+.agent-input {
+  margin: 12px;
+}
+
+.agent-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-context div {
+  min-width: 0;
+  border: 1px solid rgb(79 231 255 / 0.14);
+  border-radius: var(--radius);
+  background: rgb(2 8 12 / 0.55);
+  padding: 11px;
+}
+
+.agent-messages {
+  display: grid;
+  max-height: 230px;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.agent-message {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgb(79 231 255 / 0.12);
+  border-radius: var(--radius);
+  background: rgb(2 8 12 / 0.58);
+  color: var(--muted);
+  padding: 10px;
+  line-height: 1.45;
+}
+
+.agent-message.agent {
+  border-color: rgb(var(--accent-rgb) / 0.22);
+  color: var(--text);
+}
+
+.agent-message.operator {
+  justify-self: end;
+  max-width: 82%;
+  border-color: rgb(79 231 255 / 0.2);
+  background: rgb(79 231 255 / 0.08);
+}
+
+.agent-quick-row button,
+.agent-route-row button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.agent-quick-row button:hover,
+.agent-route-row button:hover,
+.agent-input button:hover {
+  border-color: rgb(var(--accent-rgb) / 0.42);
+  color: var(--accent);
+}
+
+.agent-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.agent-input input {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgb(79 231 255 / 0.16);
+  border-radius: var(--radius);
+  background: rgb(2 8 12 / 0.84);
+  color: var(--text);
+  outline: 0;
+  padding: 0 11px;
+}
+
+.logo-select-card {
+  grid-column: span 2;
+}
+
+.logo-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.logo-options .logo-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "mark title"
+    "mark detail";
+  min-height: 112px;
+  align-content: center;
+  align-items: start;
+  justify-content: stretch;
+  gap: 9px;
+  border: 1px solid rgb(79 231 255 / 0.16);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 50% 18%, rgb(var(--accent-rgb) / 0.12), transparent 62%),
+    rgb(2 8 12 / 0.64);
+  color: var(--muted);
+  padding: 12px;
+  text-align: left;
+}
+
+.logo-option .northwatch-logo {
+  grid-area: mark;
+  width: 38px;
+  height: 38px;
+  color: var(--accent);
+}
+
+.logo-option .northwatch-logo-orbit-watch {
+  width: 50px;
+  height: 50px;
+  margin: -6px 0 0 -6px;
+  color: var(--accent);
+}
+
+.logo-option strong {
+  grid-area: title;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.logo-option em {
+  grid-area: detail;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.logo-option.active {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background:
+    radial-gradient(circle at 50% 18%, rgb(var(--accent-rgb) / 0.2), transparent 62%),
+    rgb(7 19 27 / 0.84);
+  box-shadow: inset 0 0 28px rgb(var(--accent-rgb) / 0.06);
+}
+
+@keyframes grid-drift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 58px 58px;
+  }
+}
+
+@keyframes sweep-pass {
+  0%,
+  18% {
+    transform: translateX(-70%);
+    opacity: 0;
+  }
+  44% {
+    opacity: 0.85;
+  }
+  72%,
+  100% {
+    transform: translateX(70%);
+    opacity: 0;
+  }
+}
+
+@keyframes orbit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes circuit-flow {
+  to {
+    stroke-dashoffset: -124;
+  }
+}
+
+@keyframes node-breathe {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.82);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop-grid,
+  .backdrop-sweep,
+  .backdrop-core span,
+  .circuit-web path,
+  .backdrop-node,
+  .agent-orb span,
+  .hero-command::after {
+    animation: none;
+  }
 }
 
 @media (max-width: 1120px) {
@@ -1547,7 +2239,7 @@ p {
   }
 
   .deck-content {
-    padding: 16px 12px 26px;
+    padding: 16px 12px 120px;
   }
 
   .hero-command {
@@ -1600,7 +2292,36 @@ p {
 
   .deck-toast {
     right: 12px;
-    bottom: 12px;
+    bottom: 112px;
     left: 12px;
+  }
+
+  .backdrop-core {
+    right: -90px;
+    top: 22vh;
+    width: 270px;
+  }
+
+  .agent-dock {
+    right: 10px;
+    bottom: 10px;
+    width: calc(100vw - 20px);
+    max-height: 58vh;
+  }
+
+  .agent-dock.collapsed {
+    width: min(260px, calc(100vw - 20px));
+  }
+
+  .agent-context {
+    grid-template-columns: 1fr;
+  }
+
+  .logo-select-card {
+    grid-column: auto;
+  }
+
+  .logo-options {
+    grid-template-columns: 1fr;
   }
 }

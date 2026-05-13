@@ -17,6 +17,7 @@ export type ProjectStatus = "pending" | "done";
 export type FinanceType = "income" | "expense" | "savings";
 export type Accent = "amber" | "cyan" | "green" | "red";
 export type Density = "comfortable" | "compact";
+export type LogoStyle = "sentinel" | "monolith" | "radar" | "spire";
 export type ProjectSource = "manual" | "github";
 export type IntelKind = "stock" | "crypto" | "fund" | "company" | "trend" | "news";
 export type IntelSignal = "watching" | "researching" | "high-priority" | "on-hold";
@@ -126,6 +127,7 @@ export interface IntelItem {
 
 export interface DeckSettings {
   callsign: string;
+  logoStyle: LogoStyle;
   accent: Accent;
   density: Density;
   showOrbit: boolean;
@@ -180,13 +182,14 @@ export type CommandDeckAction =
 
 export const COMMAND_DECK_STORAGE_KEY = "wren-os.command-deck.v1";
 const LEGACY_WORKSPACE_KEY = "wren-os.workspace.v1";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const nowIso = () => new Date().toISOString();
 const todayInput = () => new Date().toISOString().slice(0, 10);
 const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
 const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
+const logoStyles: LogoStyle[] = ["sentinel", "monolith", "radar", "spire"];
 
 export const freshCommandDeck: CommandDeckState = {
   version: SCHEMA_VERSION,
@@ -203,6 +206,7 @@ export const freshCommandDeck: CommandDeckState = {
   intel: [],
   settings: {
     callsign: "Operator",
+    logoStyle: "radar",
     accent: "amber",
     density: "comfortable",
     showOrbit: true,
@@ -409,15 +413,20 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
 }
 
 export function loadCommandDeck(storage: Storage = window.localStorage): CommandDeckState {
-  storage.removeItem(LEGACY_WORKSPACE_KEY);
+  const migratedLegacyDeck = migrateLegacyWorkspace(storage.getItem(LEGACY_WORKSPACE_KEY));
   const raw = storage.getItem(COMMAND_DECK_STORAGE_KEY);
-  if (!raw) return createFreshDeck();
+  if (!raw) return migratedLegacyDeck ?? createFreshDeck();
 
   try {
     const parsed = JSON.parse(raw) as Partial<CommandDeckState>;
-    return normalizeCommandDeck(parsed);
+    const normalized = normalizeCommandDeck(parsed);
+    if (migratedLegacyDeck && !hasUserDeckData(normalized) && hasUserDeckData(migratedLegacyDeck)) {
+      return migratedLegacyDeck;
+    }
+
+    return normalized;
   } catch {
-    return createFreshDeck();
+    return migratedLegacyDeck ?? createFreshDeck();
   }
 }
 
@@ -462,6 +471,8 @@ export function getDeckMetrics(state: CommandDeckState) {
 
 export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandDeckState {
   const fresh = createFreshDeck();
+  const incomingSettings: Partial<DeckSettings> = value.settings ?? {};
+  const incomingVersion = typeof value.version === "number" ? value.version : 0;
   return {
     ...fresh,
     ...value,
@@ -478,7 +489,11 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     journal: Array.isArray(value.journal) ? value.journal : [],
     finances: Array.isArray(value.finances) ? value.finances : [],
     intel: Array.isArray(value.intel) ? value.intel.map(normalizeIntelItem) : [],
-    settings: { ...fresh.settings, ...(value.settings ?? {}) },
+    settings: {
+      ...fresh.settings,
+      ...incomingSettings,
+      logoStyle: normalizeLogoStyle(incomingSettings.logoStyle, incomingVersion)
+    },
     updatedAt: value.updatedAt ?? fresh.updatedAt
   };
 }
@@ -503,6 +518,189 @@ function createFreshDeck(): CommandDeckState {
 
 function touch(state: CommandDeckState, updatedAt: string): CommandDeckState {
   return { ...state, updatedAt };
+}
+
+function migrateLegacyWorkspace(raw: string | null): CommandDeckState | null {
+  if (!raw) return null;
+
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!isRecord(value)) return null;
+
+    const timestamp = nowIso();
+    const legacyTasks = Array.isArray(value.tasks) ? value.tasks.filter(isRecord) : [];
+    const legacyProjects = Array.isArray(value.projects) ? value.projects.filter(isRecord) : [];
+    const legacyDocuments = Array.isArray(value.documents) ? value.documents.filter(isRecord) : [];
+    const legacyContent = Array.isArray(value.contentItems) ? value.contentItems.filter(isRecord) : [];
+    const legacyAgentActions = Array.isArray(value.agentActions) ? value.agentActions.filter(isRecord) : [];
+    const workspace = isRecord(value.workspace) ? value.workspace : {};
+
+    const migrated: Partial<CommandDeckState> = {
+      version: SCHEMA_VERSION,
+      createdAt: getString(workspace.createdAt) ?? timestamp,
+      updatedAt: timestamp,
+      githubScan: githubScanSummary,
+      tasks: [
+        ...legacyTasks.map((task) => migrateLegacyTask(task, timestamp)),
+        ...legacyAgentActions.map((action) => migrateLegacyAgentAction(action, timestamp)),
+        ...legacyContent.filter((item) => getString(item.stage) !== "published").map((item) => migrateLegacyContentTask(item, timestamp))
+      ],
+      projects: legacyProjects.map((project) => migrateLegacyProject(project, legacyTasks, timestamp)),
+      journal: [
+        ...legacyDocuments.map((document) => migrateLegacyDocument(document, timestamp)),
+        ...legacyContent.map((item) => migrateLegacyContentJournal(item, timestamp))
+      ],
+      settings: {
+        ...freshCommandDeck.settings,
+        callsign: getString(workspace.owner) ?? getString(workspace.name) ?? freshCommandDeck.settings.callsign,
+        logoStyle: "radar"
+      }
+    };
+
+    const normalized = normalizeCommandDeck(migrated);
+    return hasUserDeckData(normalized) ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+function migrateLegacyTask(task: Record<string, unknown>, fallbackTimestamp: string): CommandTask {
+  const updatedAt = getString(task.updatedAt) ?? fallbackTimestamp;
+  return {
+    id: getString(task.id) ?? makeId("legacy-task"),
+    title: getString(task.title) ?? "Untitled legacy task",
+    priority: normalizePriority(task.priority),
+    dueDate: getNullableString(task.dueDate),
+    status: task.status === "done" ? "done" : "todo",
+    createdAt: getString(task.createdAt) ?? updatedAt,
+    updatedAt
+  };
+}
+
+function migrateLegacyAgentAction(action: Record<string, unknown>, fallbackTimestamp: string): CommandTask {
+  const updatedAt = getString(action.updatedAt) ?? getString(action.createdAt) ?? fallbackTimestamp;
+  const title = getString(action.title) ?? "Legacy agent action";
+  return {
+    id: `legacy-agent-${getString(action.id) ?? makeId("action")}`,
+    title: `Review agent action: ${title}`,
+    priority: action.status === "pending" ? "high" : "medium",
+    dueDate: null,
+    status: action.status === "approved" ? "done" : "todo",
+    createdAt: getString(action.createdAt) ?? updatedAt,
+    updatedAt
+  };
+}
+
+function migrateLegacyContentTask(item: Record<string, unknown>, fallbackTimestamp: string): CommandTask {
+  const updatedAt = getString(item.updatedAt) ?? fallbackTimestamp;
+  return {
+    id: `legacy-content-${getString(item.id) ?? makeId("content")}`,
+    title: `Advance content: ${getString(item.title) ?? "Untitled content"}`,
+    priority: "medium",
+    dueDate: getNullableString(item.scheduledFor),
+    status: "todo",
+    createdAt: updatedAt,
+    updatedAt
+  };
+}
+
+function migrateLegacyProject(
+  project: Record<string, unknown>,
+  legacyTasks: Record<string, unknown>[],
+  fallbackTimestamp: string
+): CommandProject {
+  const id = getString(project.id) ?? makeId("legacy-project");
+  const updatedAt = getString(project.updatedAt) ?? fallbackTimestamp;
+  return {
+    id,
+    name: getString(project.name) ?? "Untitled legacy project",
+    objective: getString(project.objective) ?? getString(project.description) ?? "",
+    nextAction: getLegacyProjectNextAction(id, legacyTasks),
+    status: project.status === "archived" ? "done" : "pending",
+    dueDate: null,
+    progress: getLegacyProjectProgress(id, legacyTasks),
+    source: "manual",
+    repositoryUrl: null,
+    language: null,
+    visibility: null,
+    defaultBranch: null,
+    lastPushedAt: null,
+    openIssues: 0,
+    openPullRequests: 0,
+    createdAt: getString(project.createdAt) ?? updatedAt,
+    updatedAt
+  };
+}
+
+function migrateLegacyDocument(document: Record<string, unknown>, fallbackTimestamp: string): JournalEntry {
+  const updatedAt = getString(document.updatedAt) ?? fallbackTimestamp;
+  const title = getString(document.title) ?? "Legacy document";
+  const body = getString(document.body) ?? getString(document.url) ?? "";
+  return {
+    id: `legacy-doc-${getString(document.id) ?? makeId("doc")}`,
+    date: updatedAt.slice(0, 10),
+    mood: `Knowledge: ${title}`,
+    body: body ? `${title}\n\n${body}` : title
+  };
+}
+
+function migrateLegacyContentJournal(item: Record<string, unknown>, fallbackTimestamp: string): JournalEntry {
+  const updatedAt = getString(item.updatedAt) ?? fallbackTimestamp;
+  const title = getString(item.title) ?? "Legacy content";
+  return {
+    id: `legacy-content-journal-${getString(item.id) ?? makeId("content-note")}`,
+    date: updatedAt.slice(0, 10),
+    mood: `Content: ${getString(item.stage) ?? "tracked"}`,
+    body: `${title}${getString(item.platform) ? `\nPlatform: ${getString(item.platform)}` : ""}`
+  };
+}
+
+function normalizePriority(value: unknown): Priority {
+  return value === "low" || value === "medium" || value === "high" || value === "critical" ? value : "medium";
+}
+
+function normalizeLogoStyle(value: unknown, version: number): LogoStyle {
+  if (logoStyles.includes(value as LogoStyle)) {
+    return version < SCHEMA_VERSION && value === "sentinel" ? "radar" : value as LogoStyle;
+  }
+
+  return "radar";
+}
+
+function hasUserDeckData(state: CommandDeckState): boolean {
+  return (
+    state.tasks.length > 0 ||
+    state.projects.some((project) => project.source !== "github") ||
+    state.calendar.length > 0 ||
+    state.workouts.length > 0 ||
+    state.books.length > 0 ||
+    state.journal.length > 0 ||
+    state.finances.length > 0 ||
+    state.intel.length > 0
+  );
+}
+
+function getLegacyProjectNextAction(projectId: string, legacyTasks: Record<string, unknown>[]): string {
+  const nextTask = legacyTasks.find((task) => getNullableString(task.projectId) === projectId && task.status !== "done");
+  return nextTask ? getString(nextTask.title) ?? "Review next legacy task." : "Review migrated legacy project.";
+}
+
+function getLegacyProjectProgress(projectId: string, legacyTasks: Record<string, unknown>[]): number {
+  const projectTasks = legacyTasks.filter((task) => getNullableString(task.projectId) === projectId);
+  if (projectTasks.length === 0) return 0;
+  return clampProgress((projectTasks.filter((task) => task.status === "done").length / projectTasks.length) * 100);
+}
+
+function getString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function getNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
 function normalizeIntelItem(item: Partial<IntelItem>): IntelItem {

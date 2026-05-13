@@ -18,7 +18,7 @@ describe("Northwatch command deck", () => {
     expect(screen.queryByText("Mercer Ventures")).not.toBeInTheDocument();
     expect(screen.getByText("8 GitHub repos imported from Glizocksama-2")).toBeInTheDocument();
     expect(screen.getByText(/cloud auth: local fallback/i)).toBeInTheDocument();
-    expect(window.localStorage.getItem("wren-os.workspace.v1")).toBeNull();
+    expect(window.localStorage.getItem("wren-os.workspace.v1")).not.toBeNull();
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Operator");
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("EStarzFc");
   });
@@ -31,7 +31,7 @@ describe("Northwatch command deck", () => {
     fireEvent.change(screen.getByLabelText("Task priority"), { target: { value: "critical" } });
     fireEvent.click(screen.getByRole("button", { name: /add task/i }));
 
-    expect(screen.getByText("Secure morning plan")).toBeInTheDocument();
+    expect(screen.getAllByText("Secure morning plan").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(within(screen.getByRole("heading", { name: "Done" }).closest(".deck-panel") as HTMLElement).getByText("Secure morning plan")).toBeInTheDocument();
   });
@@ -45,8 +45,12 @@ describe("Northwatch command deck", () => {
     fireEvent.change(screen.getByLabelText("Project next action"), { target: { value: "Finish UI pass" } });
     fireEvent.click(screen.getByRole("button", { name: /add project/i }));
 
-    expect(screen.getByText("Launch black deck")).toBeInTheDocument();
-    fireEvent.click(within(screen.getByText("Launch black deck").closest(".project-row") as HTMLElement).getByRole("button", { name: "Complete" }));
+    const projectRow = screen
+      .getAllByText("Launch black deck")
+      .find((item) => item.closest(".project-row"))
+      ?.closest(".project-row") as HTMLElement;
+    expect(projectRow).toBeInTheDocument();
+    fireEvent.click(within(projectRow).getByRole("button", { name: "Complete" }));
     expect(within(screen.getByText("Done Projects").closest(".deck-panel") as HTMLElement).getByText("Launch black deck")).toBeInTheDocument();
     expect(screen.getByText("EStarzFc")).toBeInTheDocument();
     expect(screen.getAllByText("GitHub").length).toBeGreaterThan(0);
@@ -122,10 +126,12 @@ describe("Northwatch command deck", () => {
     fireEvent.change(screen.getByLabelText("Callsign"), { target: { value: "Ghost" } });
     fireEvent.click(screen.getByRole("button", { name: "Use Cyan accent" }));
     fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use Orbit Watch logo" }));
 
     expect(screen.getByDisplayValue("Ghost")).toBeInTheDocument();
     expect(document.querySelector(".deck-app")).toHaveAttribute("data-accent", "cyan");
     expect(document.querySelector(".deck-app")).toHaveAttribute("data-density", "compact");
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"logoStyle\":\"radar\"");
 
     fireEvent.click(screen.getByRole("button", { name: /reset deck/i }));
     expect(screen.getByDisplayValue("Operator")).toBeInTheDocument();
