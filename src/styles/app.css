@@ -385,6 +385,7 @@ p {
   font-size: 12px;
 }
 
+.workspace-status-pill,
 .cloud-status-pill,
 .topbar-icon-button {
   display: inline-flex;
@@ -399,6 +400,11 @@ p {
   padding: 0 10px;
   font-size: 11px;
   font-weight: 900;
+}
+
+.workspace-status-pill {
+  border-color: rgb(var(--accent-rgb) / 0.28);
+  color: var(--accent);
 }
 
 .cloud-status-pill.synced {
@@ -1290,6 +1296,90 @@ p {
 
 .account-panel {
   min-height: 180px;
+}
+
+.team-panel {
+  grid-column: span 2;
+}
+
+.team-switcher,
+.team-code-list,
+.team-form {
+  display: grid;
+  gap: 8px;
+  padding: 14px 14px 0;
+}
+
+.team-switcher {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.team-switcher button,
+.team-form button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #070a09;
+  color: var(--muted);
+  padding: 0 13px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.team-switcher button.active {
+  border-color: rgb(var(--accent-rgb) / 0.44);
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent);
+}
+
+.team-switcher button:disabled,
+.team-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.team-code-list span {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #070a09;
+  padding: 10px;
+}
+
+.team-code-list strong,
+.team-code-list em {
+  color: var(--text);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.team-code-list code {
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.team-code-list em {
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.team-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.team-form label {
+  display: grid;
+  gap: 7px;
 }
 
 .account-actions button {
@@ -2247,6 +2337,10 @@ p {
     grid-row: auto;
   }
 
+  .team-panel {
+    grid-column: auto;
+  }
+
   .deck-topbar {
     height: auto;
     padding: 14px 18px;
@@ -2350,6 +2444,9 @@ p {
   .finance-summary,
   .signal-grid,
   .money-grid,
+  .team-code-list span,
+  .team-form,
+  .team-switcher,
   .account-status-grid,
   .command-form,
   .project-form,
@@ -2370,6 +2467,7 @@ p {
     white-space: normal;
   }
 
+  .workspace-status-pill,
   .cloud-status-pill,
   .deck-status-strip strong {
     max-width: 100%;

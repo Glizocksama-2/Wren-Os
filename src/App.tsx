@@ -51,7 +51,17 @@ import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type 
 import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
-import { loadCloudDeck, saveCloudDeck, type CloudDeckClient } from "./store/cloudDeck";
+import {
+  createTeamWorkspace,
+  joinTeamWorkspace,
+  listTeamWorkspaces,
+  loadCloudDeck,
+  loadTeamCloudDeck,
+  saveCloudDeck,
+  saveTeamCloudDeck,
+  type CloudDeckClient,
+  type TeamWorkspace
+} from "./store/cloudDeck";
 import {
   type Accent,
   type CalendarEntry,
@@ -65,6 +75,7 @@ import {
   type IntelSignal,
   type LogoStyle,
   type Priority,
+  freshCommandDeck,
   getDeckMetrics,
   loadCommandDeck,
   reduceCommandDeck,
@@ -116,6 +127,8 @@ type AgentConnectionState = {
   detail: string;
 };
 
+type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
+
 const agentQuickPrompts = [
   "Brief my next move",
   "Find the bottleneck",
@@ -131,10 +144,18 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!supabaseConfig.isConfigured);
   const [cloudReady, setCloudReady] = useState(!supabaseConfig.isConfigured);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>({ kind: "personal" });
+  const [teams, setTeams] = useState<TeamWorkspace[]>([]);
+  const [isTeamBusy, setIsTeamBusy] = useState(false);
   const latestDeckRef = useRef(state);
   const saveTimerRef = useRef<number | null>(null);
   const metrics = useMemo(() => getDeckMetrics(state), [state]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => isViewEnabled(item.view, state.settings)), [state.settings]);
+  const activeTeam = useMemo(
+    () => (workspaceMode.kind === "team" ? teams.find((team) => team.id === workspaceMode.teamId) ?? null : null),
+    [teams, workspaceMode]
+  );
+  const workspaceLabel = activeTeam ? `Team: ${activeTeam.name}` : "Personal vault";
 
   useEffect(() => {
     latestDeckRef.current = state;
@@ -183,6 +204,8 @@ export default function App() {
       setAuthReady(true);
       if (!nextSession) {
         setCloudReady(false);
+        setWorkspaceMode({ kind: "personal" });
+        setTeams([]);
         setCloudStatus({
           mode: "signed-out",
           label: "Cloud auth: sign in required",
@@ -206,6 +229,7 @@ export default function App() {
     const userEmail = session.user.email ?? null;
     let isCancelled = false;
     setCloudReady(false);
+    setWorkspaceMode({ kind: "personal" });
     setCloudStatus({
       mode: "syncing",
       label: "Cloud auth: syncing",
@@ -218,11 +242,13 @@ export default function App() {
       try {
         const client = supabase as unknown as CloudDeckClient;
         const cloudDeck = await loadCloudDeck(client, userId);
+        const teamWorkspaces = await listTeamWorkspaces(client, userId);
 
         if (isCancelled) return;
 
         if (cloudDeck) {
           dispatch({ type: "deck/import", deck: cloudDeck });
+          setTeams(teamWorkspaces);
           setCloudStatus({
             mode: "synced",
             label: "Cloud auth: synced",
@@ -231,12 +257,14 @@ export default function App() {
             userEmail
           });
         } else {
-          const savedAt = await saveCloudDeck(client, userId, latestDeckRef.current);
+          dispatch({ type: "deck/import", deck: freshCommandDeck });
+          setTeams(teamWorkspaces);
+          const savedAt = await saveCloudDeck(client, userId, freshCommandDeck);
           if (isCancelled) return;
           setCloudStatus({
             mode: "synced",
             label: "Cloud auth: seeded",
-            detail: "Created your private Supabase workspace from this browser.",
+            detail: "Created a private Supabase workspace for this signed-in user.",
             lastSyncedAt: savedAt,
             userEmail
           });
@@ -268,6 +296,7 @@ export default function App() {
 
     const userId = session.user.id;
     const userEmail = session.user.email ?? null;
+    const currentWorkspace = workspaceMode;
 
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current);
@@ -281,12 +310,18 @@ export default function App() {
 
     saveTimerRef.current = window.setTimeout(() => {
       const client = supabase as unknown as CloudDeckClient;
-      saveCloudDeck(client, userId, latestDeckRef.current)
+      const saveOperation =
+        currentWorkspace.kind === "team"
+          ? saveTeamCloudDeck(client, currentWorkspace.teamId, userId, latestDeckRef.current)
+          : saveCloudDeck(client, userId, latestDeckRef.current);
+
+      saveOperation
         .then((savedAt) => {
+          const teamName = currentWorkspace.kind === "team" ? teams.find((team) => team.id === currentWorkspace.teamId)?.name : null;
           setCloudStatus({
             mode: "synced",
             label: "Cloud auth: synced",
-            detail: "Private Supabase workspace is current.",
+            detail: teamName ? `Shared team workspace "${teamName}" is current.` : "Private Supabase workspace is current.",
             lastSyncedAt: savedAt,
             userEmail
           });
@@ -307,7 +342,7 @@ export default function App() {
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [state, session?.user.email, session?.user.id, cloudReady]);
+  }, [state, session?.user.email, session?.user.id, cloudReady, workspaceMode, teams]);
 
   useEffect(() => {
     if (!notice) return;
@@ -354,12 +389,131 @@ export default function App() {
     setNotice("Signed out of cloud auth.");
   };
 
+  const switchWorkspace = async (nextWorkspace: WorkspaceMode) => {
+    if (!supabaseConfig.isConfigured || !supabase || !session) return;
+
+    const isSameWorkspace =
+      workspaceMode.kind === nextWorkspace.kind &&
+      (workspaceMode.kind === "personal" || (nextWorkspace.kind === "team" && workspaceMode.teamId === nextWorkspace.teamId));
+    if (isSameWorkspace) return;
+
+    const client = supabase as unknown as CloudDeckClient;
+    const userId = session.user.id;
+    const userEmail = session.user.email ?? null;
+    const teamName = nextWorkspace.kind === "team" ? teams.find((team) => team.id === nextWorkspace.teamId)?.name ?? "team" : null;
+
+    setIsTeamBusy(true);
+    setCloudReady(false);
+    setCloudStatus({
+      mode: "syncing",
+      label: "Cloud auth: switching",
+      detail: teamName ? `Loading shared workspace for ${teamName}.` : "Loading your private workspace.",
+      lastSyncedAt: null,
+      userEmail
+    });
+
+    try {
+      if (nextWorkspace.kind === "team") {
+        const teamDeck = await loadTeamCloudDeck(client, nextWorkspace.teamId);
+        if (teamDeck) {
+          dispatch({ type: "deck/import", deck: teamDeck });
+          setWorkspaceMode(nextWorkspace);
+          setCloudStatus({
+            mode: "synced",
+            label: "Cloud auth: synced",
+            detail: `Loaded shared team workspace "${teamName ?? nextWorkspace.teamId}".`,
+            lastSyncedAt: teamDeck.updatedAt,
+            userEmail
+          });
+        } else {
+          dispatch({ type: "deck/import", deck: freshCommandDeck });
+          const savedAt = await saveTeamCloudDeck(client, nextWorkspace.teamId, userId, freshCommandDeck);
+          setWorkspaceMode(nextWorkspace);
+          setCloudStatus({
+            mode: "synced",
+            label: "Cloud auth: seeded",
+            detail: `Created a fresh shared workspace for ${teamName ?? "this team"}.`,
+            lastSyncedAt: savedAt,
+            userEmail
+          });
+        }
+      } else {
+        const personalDeck = await loadCloudDeck(client, userId);
+        const safeDeck = personalDeck ?? freshCommandDeck;
+        dispatch({ type: "deck/import", deck: safeDeck });
+        const savedAt = personalDeck ? personalDeck.updatedAt : await saveCloudDeck(client, userId, safeDeck);
+        setWorkspaceMode(nextWorkspace);
+        setCloudStatus({
+          mode: "synced",
+          label: personalDeck ? "Cloud auth: synced" : "Cloud auth: seeded",
+          detail: personalDeck ? "Loaded your private Supabase workspace." : "Created a private Supabase workspace for this signed-in user.",
+          lastSyncedAt: savedAt,
+          userEmail
+        });
+      }
+      setCloudReady(true);
+    } catch (error) {
+      setCloudReady(true);
+      setCloudStatus({
+        mode: "error",
+        label: "Cloud auth: workspace error",
+        detail: getErrorMessage(error),
+        lastSyncedAt: null,
+        userEmail
+      });
+    } finally {
+      setIsTeamBusy(false);
+    }
+  };
+
+  const createTeam = async (name: string) => {
+    if (!supabaseConfig.isConfigured || !supabase || !session) {
+      setNotice("Team mode requires Supabase sign-in.");
+      return;
+    }
+
+    const client = supabase as unknown as CloudDeckClient;
+    setIsTeamBusy(true);
+    try {
+      const team = await createTeamWorkspace(client, session.user.id, name);
+      setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
+      setNotice(`Team created: ${team.name}.`);
+      await switchWorkspace({ kind: "team", teamId: team.id });
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+      setIsTeamBusy(false);
+    }
+  };
+
+  const joinTeam = async (teamCode: string) => {
+    if (!supabaseConfig.isConfigured || !supabase || !session) {
+      setNotice("Team mode requires Supabase sign-in.");
+      return;
+    }
+
+    const client = supabase as unknown as CloudDeckClient;
+    setIsTeamBusy(true);
+    try {
+      const team = await joinTeamWorkspace(client, session.user.id, teamCode);
+      setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
+      setNotice(`Joined team: ${team.name}.`);
+      await switchWorkspace({ kind: "team", teamId: team.id });
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+      setIsTeamBusy(false);
+    }
+  };
+
   if (supabaseConfig.isConfigured && !authReady) {
     return <CloudBootScreen status={cloudStatus} />;
   }
 
   if (supabaseConfig.isConfigured && authReady && !session) {
     return <AuthGate status={cloudStatus} onRequestMagicLink={requestMagicLink} />;
+  }
+
+  if (supabaseConfig.isConfigured && authReady && session && !cloudReady) {
+    return <CloudBootScreen status={cloudStatus} />;
   }
 
   return (
@@ -389,7 +543,7 @@ export default function App() {
       </aside>
 
       <main className="deck-screen">
-        <TopBar callsign={state.settings.callsign} cloudStatus={cloudStatus} onCommand={navigateFromSearch} onSignOut={signOut} />
+        <TopBar callsign={state.settings.callsign} cloudStatus={cloudStatus} workspaceLabel={workspaceLabel} onCommand={navigateFromSearch} onSignOut={signOut} />
         <section className="deck-content">
           {view === "dashboard" && <Dashboard state={state} metrics={metrics} dispatch={dispatch} setView={setView} setNotice={setNotice} />}
           {view === "todo" && <TodoModule state={state} dispatch={dispatch} setNotice={setNotice} />}
@@ -401,7 +555,19 @@ export default function App() {
           {view === "journal" && <JournalModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "finances" && <FinancesModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "customize" && <CustomizeModule state={state} dispatch={dispatch} setNotice={setNotice} />}
-          {view === "account" && <AccountModule state={state} cloudStatus={cloudStatus} onSignOut={signOut} />}
+          {view === "account" && (
+            <AccountModule
+              state={state}
+              cloudStatus={cloudStatus}
+              workspaceMode={workspaceMode}
+              teams={teams}
+              isTeamBusy={isTeamBusy}
+              onSwitchWorkspace={switchWorkspace}
+              onCreateTeam={createTeam}
+              onJoinTeam={joinTeam}
+              onSignOut={signOut}
+            />
+          )}
         </section>
       </main>
       <AgentDock
@@ -439,11 +605,13 @@ function isViewEnabled(view: DeckView, settings: DeckSettings): boolean {
 function TopBar({
   callsign,
   cloudStatus,
+  workspaceLabel,
   onCommand,
   onSignOut
 }: {
   callsign: string;
   cloudStatus: CloudStatus;
+  workspaceLabel: string;
   onCommand: (query: string) => void;
   onSignOut: () => void;
 }) {
@@ -473,6 +641,10 @@ function TopBar({
       </form>
       <div className="deck-status-strip">
         <span>Last check: {checkedAt}</span>
+        <span className="workspace-status-pill">
+          <Shield size={14} />
+          {workspaceLabel}
+        </span>
         <span className={`cloud-status-pill ${cloudStatus.mode}`} title={cloudStatus.detail}>
           <Cloud size={14} />
           {cloudStatus.label}
@@ -1829,14 +2001,41 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
 function AccountModule({
   state,
   cloudStatus,
+  workspaceMode,
+  teams,
+  isTeamBusy,
+  onSwitchWorkspace,
+  onCreateTeam,
+  onJoinTeam,
   onSignOut
 }: {
   state: CommandDeckState;
   cloudStatus: CloudStatus;
+  workspaceMode: WorkspaceMode;
+  teams: TeamWorkspace[];
+  isTeamBusy: boolean;
+  onSwitchWorkspace: (workspace: WorkspaceMode) => Promise<void>;
+  onCreateTeam: (name: string) => Promise<void>;
+  onJoinTeam: (teamCode: string) => Promise<void>;
   onSignOut: () => void;
 }) {
+  const [teamName, setTeamName] = useState("");
+  const [teamCode, setTeamCode] = useState("");
   const lastSync = cloudStatus.lastSyncedAt ? formatDateTime(cloudStatus.lastSyncedAt) : "Not synced yet";
   const userEmail = cloudStatus.userEmail ?? "Local operator";
+  const isCloudUser = supabaseConfig.isConfigured && Boolean(cloudStatus.userEmail);
+
+  const submitCreateTeam = async (event: FormEvent) => {
+    event.preventDefault();
+    await onCreateTeam(teamName);
+    setTeamName("");
+  };
+
+  const submitJoinTeam = async (event: FormEvent) => {
+    event.preventDefault();
+    await onJoinTeam(teamCode);
+    setTeamCode("");
+  };
 
   return (
     <ModuleShell title="Account Settings" description="Identity, cloud sync, privacy posture, and deployment readiness.">
@@ -1863,10 +2062,81 @@ function AccountModule({
         <section className="deck-panel account-panel">
           <PanelHead title="Privacy checklist" />
           <div className="check-list">
-            <span><CircleCheck size={16} /> Supabase RLS protects command deck rows.</span>
+            <span><CircleCheck size={16} /> Personal decks are isolated by signed-in user id.</span>
+            <span><CircleCheck size={16} /> Team decks require explicit membership before data is shared.</span>
             <span><CircleCheck size={16} /> Local browser cache remains available offline.</span>
-            <span><Shield size={16} /> Vercel URL is public unless deployment protection is enabled.</span>
+            <span><Shield size={16} /> Netlify URL is public; Supabase Auth protects workspace data.</span>
           </div>
+        </section>
+        <section className="deck-panel account-panel team-panel">
+          <PanelHead title="Workspace mode" />
+          <div className="team-switcher">
+            <button
+              className={workspaceMode.kind === "personal" ? "active" : ""}
+              type="button"
+              onClick={() => void onSwitchWorkspace({ kind: "personal" })}
+              disabled={isTeamBusy || workspaceMode.kind === "personal"}
+            >
+              <LockKeyhole size={16} /> Personal vault
+            </button>
+            {teams.map((team) => (
+              <button
+                className={workspaceMode.kind === "team" && workspaceMode.teamId === team.id ? "active" : ""}
+                type="button"
+                key={team.id}
+                onClick={() => void onSwitchWorkspace({ kind: "team", teamId: team.id })}
+                disabled={isTeamBusy || (workspaceMode.kind === "team" && workspaceMode.teamId === team.id)}
+              >
+                <Shield size={16} /> {team.name}
+              </button>
+            ))}
+          </div>
+          <p className="panel-copy">
+            {isCloudUser
+              ? "Personal data stays private. Team mode only shares the selected team workspace with joined members."
+              : "Team mode requires Supabase sign-in so Northwatch can enforce membership before sharing data."}
+          </p>
+          {teams.length > 0 && (
+            <div className="team-code-list">
+              {teams.map((team) => (
+                <span key={team.id}>
+                  <strong>{team.name}</strong>
+                  <code>{team.id}</code>
+                  <em>{team.role}</em>
+                </span>
+              ))}
+            </div>
+          )}
+          <form className="team-form" onSubmit={submitCreateTeam}>
+            <label>
+              <span>New team</span>
+              <input
+                aria-label="Team name"
+                value={teamName}
+                onChange={(event) => setTeamName(event.target.value)}
+                placeholder="North Unit"
+                disabled={!isCloudUser || isTeamBusy}
+              />
+            </label>
+            <button type="submit" disabled={!isCloudUser || isTeamBusy || !teamName.trim()}>
+              <Plus size={16} /> Create team
+            </button>
+          </form>
+          <form className="team-form" onSubmit={submitJoinTeam}>
+            <label>
+              <span>Team code</span>
+              <input
+                aria-label="Team code"
+                value={teamCode}
+                onChange={(event) => setTeamCode(event.target.value)}
+                placeholder="Paste team id"
+                disabled={!isCloudUser || isTeamBusy}
+              />
+            </label>
+            <button type="submit" disabled={!isCloudUser || isTeamBusy || !teamCode.trim()}>
+              <KeyRound size={16} /> Join team
+            </button>
+          </form>
         </section>
         <section className="deck-panel account-panel">
           <PanelHead title="Session controls" />

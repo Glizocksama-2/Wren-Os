@@ -77,6 +77,12 @@ Use the legacy `VITE_SUPABASE_ANON_KEY` only if your project has not moved to pu
 
 Northwatch still stores an offline copy in the current browser's `localStorage`. With Supabase configured, that local copy is loaded into or replaced by the authenticated cloud row after sign-in. Export JSON before clearing browser data, switching profiles, using another device for the first time, or resetting the seed workspace.
 
+## Personal And Team Workspaces
+
+Signed-in users start in a private personal vault backed by `public.command_decks`, where RLS only allows the row whose `user_id` matches the active Supabase user. New signed-in users are seeded with a fresh private deck so a previous browser user's local data is not silently copied into their account.
+
+Team mode is opt-in from Account Settings. Creating a team makes a fresh shared deck in `public.team_command_decks`, adds the creator as `owner`, and shows a team code. Members join with that code, then Northwatch can switch between the private vault and any joined team workspace. Team data is visible and writable only to authenticated users with a row in `public.team_memberships` for that team.
+
 The Codex Bridge is local-first handoff generation only. `/api/codex/handoff` is documented as a future/local contract, not a live hosted server endpoint.
 
 Obsidian vault sync also stays local. Northwatch can read Markdown only after you approve a folder picker prompt in the browser, and auto-sync runs only while the app tab is open.

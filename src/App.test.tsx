@@ -211,6 +211,9 @@ describe("Northwatch command deck", () => {
     clickNav("Account");
     expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();
     expect(screen.getByText("Identity and sync")).toBeInTheDocument();
+    expect(screen.getByText("Workspace mode")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /personal vault/i })).toBeInTheDocument();
+    expect(screen.getByText(/team mode requires Supabase sign-in/i)).toBeInTheDocument();
   });
 
   it("uses customize switches to hide optional life modules", () => {
