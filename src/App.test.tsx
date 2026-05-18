@@ -36,6 +36,42 @@ describe("Northwatch command deck", () => {
     expect(within(screen.getByRole("heading", { name: "Done" }).closest(".deck-panel") as HTMLElement).getByText("Secure morning plan")).toBeInTheDocument();
   });
 
+  it("modifies and deletes visible task and finance records", () => {
+    render(<App />);
+
+    clickNav("To Do");
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Draft plan" } });
+    fireEvent.click(screen.getByRole("button", { name: /add task/i }));
+
+    let taskRow = screen.getByText("Draft plan").closest(".ops-row") as HTMLElement;
+    fireEvent.click(within(taskRow).getByRole("button", { name: /modify/i }));
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Draft revised plan" } });
+    fireEvent.change(screen.getByLabelText("Task priority"), { target: { value: "critical" } });
+    fireEvent.click(screen.getByRole("button", { name: /save task/i }));
+
+    taskRow = screen.getByText("Draft revised plan").closest(".ops-row") as HTMLElement;
+    expect(within(taskRow).getByText(/critical/i)).toBeInTheDocument();
+    fireEvent.click(within(taskRow).getByRole("button", { name: /delete draft revised plan/i }));
+    expect(screen.queryByText("Draft revised plan")).not.toBeInTheDocument();
+
+    clickNav("Finances");
+    fireEvent.change(screen.getByLabelText("Finance label"), { target: { value: "Client payment" } });
+    fireEvent.change(screen.getByLabelText("Finance type"), { target: { value: "income" } });
+    fireEvent.change(screen.getByLabelText("Finance amount"), { target: { value: "500" } });
+    fireEvent.click(screen.getByRole("button", { name: /add finance/i }));
+
+    let financeRow = screen.getByText("Client payment").closest(".ops-row") as HTMLElement;
+    fireEvent.click(within(financeRow).getByRole("button", { name: /modify/i }));
+    fireEvent.change(screen.getByLabelText("Finance label"), { target: { value: "Client retainer" } });
+    fireEvent.change(screen.getByLabelText("Finance amount"), { target: { value: "750" } });
+    fireEvent.click(screen.getByRole("button", { name: /save finance/i }));
+
+    financeRow = screen.getByText("Client retainer").closest(".ops-row") as HTMLElement;
+    expect(within(financeRow).getByText(/750/)).toBeInTheDocument();
+    fireEvent.click(within(financeRow).getByRole("button", { name: /delete client retainer/i }));
+    expect(screen.queryByText("Client retainer")).not.toBeInTheDocument();
+  });
+
   it("tracks pending projects and moves them to done projects", () => {
     render(<App />);
 
@@ -127,11 +163,14 @@ describe("Northwatch command deck", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use Cyan accent" }));
     fireEvent.click(screen.getByRole("button", { name: "Compact" }));
     fireEvent.click(screen.getByRole("button", { name: "Use Orbit Watch logo" }));
+    fireEvent.change(screen.getByLabelText("Ollama model"), { target: { value: "mistral" } });
+    fireEvent.change(screen.getByLabelText("Ollama endpoint"), { target: { value: "http://localhost:11434" } });
 
     expect(screen.getByDisplayValue("Ghost")).toBeInTheDocument();
     expect(document.querySelector(".deck-app")).toHaveAttribute("data-accent", "cyan");
     expect(document.querySelector(".deck-app")).toHaveAttribute("data-density", "compact");
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"logoStyle\":\"radar\"");
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"ollamaModel\":\"mistral\"");
 
     fireEvent.click(screen.getByRole("button", { name: /reset deck/i }));
     expect(screen.getByDisplayValue("Operator")).toBeInTheDocument();
@@ -167,6 +206,7 @@ describe("Northwatch command deck", () => {
     clickNav("Customize");
     expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
     expect(screen.getByText("Module switches")).toBeInTheDocument();
+    expect(screen.getByText("Sentinel brain")).toBeInTheDocument();
 
     clickNav("Account");
     expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();

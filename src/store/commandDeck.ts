@@ -130,6 +130,9 @@ export interface DeckSettings {
   logoStyle: LogoStyle;
   accent: Accent;
   density: Density;
+  ollamaEnabled: boolean;
+  ollamaEndpoint: string;
+  ollamaModel: string;
   showOrbit: boolean;
   showFinance: boolean;
   showWorkout: boolean;
@@ -161,21 +164,36 @@ export interface CommandDeckState {
 
 export type CommandDeckAction =
   | { type: "task/add"; title: string; priority: Priority; dueDate: string | null }
+  | { type: "task/update"; id: string; title: string; priority: Priority; dueDate: string | null }
   | { type: "task/toggle"; id: string }
   | { type: "task/delete"; id: string }
   | { type: "project/add"; name: string; objective: string; nextAction: string; dueDate: string | null }
+  | { type: "project/update"; id: string; name: string; objective: string; nextAction: string; dueDate: string | null; progress: number }
   | { type: "project/complete"; id: string }
+  | { type: "project/delete"; id: string }
   | { type: "github/import"; projects: GitHubProjectSeed[]; owner: string; scannedAt: string }
   | { type: "calendar/add"; title: string; date: string; time: string; entryType: CalendarEntry["type"] }
+  | { type: "calendar/update"; id: string; title: string; date: string; time: string; entryType: CalendarEntry["type"] }
+  | { type: "calendar/delete"; id: string }
   | { type: "workout/add"; name: string; day: string; focus: string }
+  | { type: "workout/update"; id: string; name: string; day: string; focus: string }
   | { type: "workout/toggle"; id: string }
+  | { type: "workout/delete"; id: string }
   | { type: "book/add"; title: string; author: string }
+  | { type: "book/update"; id: string; title: string; author: string; progress: number }
   | { type: "book/progress"; id: string; progress: number }
+  | { type: "book/delete"; id: string }
   | { type: "journal/add"; mood: string; body: string }
+  | { type: "journal/update"; id: string; mood: string; body: string }
+  | { type: "journal/delete"; id: string }
   | { type: "finance/add"; label: string; financeType: FinanceType; amount: number; date: string }
+  | { type: "finance/update"; id: string; label: string; financeType: FinanceType; amount: number; date: string }
   | { type: "finance/toggle"; id: string }
+  | { type: "finance/delete"; id: string }
   | { type: "intel/add"; title: string; symbol: string; kind: IntelKind; signal: IntelSignal; thesis: string; sourceUrl: string }
+  | { type: "intel/update"; id: string; title: string; symbol: string; kind: IntelKind; signal: IntelSignal; thesis: string; sourceUrl: string }
   | { type: "intel/note"; id: string; body: string }
+  | { type: "intel/delete"; id: string }
   | { type: "settings/update"; payload: Partial<DeckSettings> }
   | { type: "deck/import"; deck: Partial<CommandDeckState> }
   | { type: "deck/reset" };
@@ -209,6 +227,9 @@ export const freshCommandDeck: CommandDeckState = {
     logoStyle: "radar",
     accent: "amber",
     density: "comfortable",
+    ollamaEnabled: true,
+    ollamaEndpoint: "http://127.0.0.1:11434",
+    ollamaModel: "qwen2.5:1.5b",
     showOrbit: true,
     showFinance: true,
     showWorkout: true,
@@ -245,6 +266,16 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         ...state,
         tasks: state.tasks.map((task) =>
           task.id === action.id ? { ...task, status: task.status === "done" ? "todo" : "done", updatedAt: timestamp } : task
+        )
+      }, timestamp);
+
+    case "task/update":
+      return touch({
+        ...state,
+        tasks: state.tasks.map((task) =>
+          task.id === action.id
+            ? { ...task, title: action.title, priority: action.priority, dueDate: action.dueDate, updatedAt: timestamp }
+            : task
         )
       }, timestamp);
 
@@ -286,6 +317,27 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         )
       }, timestamp);
 
+    case "project/update":
+      return touch({
+        ...state,
+        projects: state.projects.map((project) =>
+          project.id === action.id
+            ? {
+                ...project,
+                name: action.name,
+                objective: action.objective,
+                nextAction: action.nextAction,
+                dueDate: action.dueDate,
+                progress: clampProgress(action.progress),
+                updatedAt: timestamp
+              }
+            : project
+        )
+      }, timestamp);
+
+    case "project/delete":
+      return touch({ ...state, projects: state.projects.filter((project) => project.id !== action.id) }, timestamp);
+
     case "github/import":
       return touch({
         ...state,
@@ -306,10 +358,29 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         ]
       }, timestamp);
 
+    case "calendar/update":
+      return touch({
+        ...state,
+        calendar: state.calendar.map((entry) =>
+          entry.id === action.id ? { ...entry, title: action.title, date: action.date, time: action.time, type: action.entryType } : entry
+        )
+      }, timestamp);
+
+    case "calendar/delete":
+      return touch({ ...state, calendar: state.calendar.filter((entry) => entry.id !== action.id) }, timestamp);
+
     case "workout/add":
       return touch({
         ...state,
         workouts: [{ id: makeId("workout"), name: action.name, day: action.day, focus: action.focus, status: "planned" }, ...state.workouts]
+      }, timestamp);
+
+    case "workout/update":
+      return touch({
+        ...state,
+        workouts: state.workouts.map((entry) =>
+          entry.id === action.id ? { ...entry, name: action.name, day: action.day, focus: action.focus } : entry
+        )
       }, timestamp);
 
     case "workout/toggle":
@@ -320,10 +391,29 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         )
       }, timestamp);
 
+    case "workout/delete":
+      return touch({ ...state, workouts: state.workouts.filter((entry) => entry.id !== action.id) }, timestamp);
+
     case "book/add":
       return touch({
         ...state,
         books: [{ id: makeId("book"), title: action.title, author: action.author, status: "reading", progress: 0 }, ...state.books]
+      }, timestamp);
+
+    case "book/update":
+      return touch({
+        ...state,
+        books: state.books.map((book) =>
+          book.id === action.id
+            ? {
+                ...book,
+                title: action.title,
+                author: action.author,
+                progress: clampProgress(action.progress),
+                status: action.progress >= 100 ? "done" : "reading"
+              }
+            : book
+        )
       }, timestamp);
 
     case "book/progress":
@@ -334,11 +424,23 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         )
       }, timestamp);
 
+    case "book/delete":
+      return touch({ ...state, books: state.books.filter((book) => book.id !== action.id) }, timestamp);
+
     case "journal/add":
       return touch({
         ...state,
         journal: [{ id: makeId("journal"), date: todayInput(), mood: action.mood, body: action.body }, ...state.journal]
       }, timestamp);
+
+    case "journal/update":
+      return touch({
+        ...state,
+        journal: state.journal.map((entry) => (entry.id === action.id ? { ...entry, mood: action.mood, body: action.body } : entry))
+      }, timestamp);
+
+    case "journal/delete":
+      return touch({ ...state, journal: state.journal.filter((entry) => entry.id !== action.id) }, timestamp);
 
     case "finance/add":
       return touch({
@@ -356,6 +458,16 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         ]
       }, timestamp);
 
+    case "finance/update":
+      return touch({
+        ...state,
+        finances: state.finances.map((entry) =>
+          entry.id === action.id
+            ? { ...entry, label: action.label, type: action.financeType, amount: action.amount, date: action.date }
+            : entry
+        )
+      }, timestamp);
+
     case "finance/toggle":
       return touch({
         ...state,
@@ -363,6 +475,9 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
           entry.id === action.id ? { ...entry, status: entry.status === "cleared" ? "planned" : "cleared" } : entry
         )
       }, timestamp);
+
+    case "finance/delete":
+      return touch({ ...state, finances: state.finances.filter((entry) => entry.id !== action.id) }, timestamp);
 
     case "intel/add":
       return touch({
@@ -384,6 +499,25 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         ]
       }, timestamp);
 
+    case "intel/update":
+      return touch({
+        ...state,
+        intel: state.intel.map((item) =>
+          item.id === action.id
+            ? {
+                ...item,
+                title: action.title,
+                symbol: action.symbol.trim().toUpperCase(),
+                kind: action.kind,
+                signal: action.signal,
+                thesis: action.thesis,
+                sourceUrl: action.sourceUrl.trim() || null,
+                updatedAt: timestamp
+              }
+            : item
+        )
+      }, timestamp);
+
     case "intel/note":
       return touch({
         ...state,
@@ -397,6 +531,9 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
             : item
         )
       }, timestamp);
+
+    case "intel/delete":
+      return touch({ ...state, intel: state.intel.filter((item) => item.id !== action.id) }, timestamp);
 
     case "settings/update":
       return touch({ ...state, settings: { ...state.settings, ...action.payload } }, timestamp);

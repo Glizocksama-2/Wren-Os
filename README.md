@@ -22,6 +22,24 @@ npm install
 npm run dev
 ```
 
+## Local Ollama Agent
+
+Sentinel can use a local Ollama model from the floating agent panel. The checked-in default is:
+
+- Endpoint: `http://127.0.0.1:11434`
+- Model: `qwen2.5:1.5b`
+
+Start Ollama before opening the app, then make sure the default model is available:
+
+```bash
+ollama pull qwen2.5:1.5b
+ollama serve
+```
+
+On Windows, launching the Ollama desktop app also starts the local server. In Northwatch, open `Customize`, confirm the `Sentinel brain` endpoint and model, then use `Test Ollama`. The Sentinel panel will use Ollama when it is reachable and fall back to built-in deck logic if the server or model is unavailable.
+
+If the app is served from a different local origin and the browser blocks Ollama, add that origin to `OLLAMA_ORIGINS`, then restart Ollama. For Vite development, allow the current local app origin such as `http://127.0.0.1:5174`, `http://127.0.0.1:5173`, or the matching `localhost` URL.
+
 To refresh GitHub/Vercel project sources from authenticated local CLIs:
 
 ```bash

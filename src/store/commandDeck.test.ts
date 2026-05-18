@@ -17,6 +17,9 @@ function makeTask(title: string): CommandDeckState["tasks"][number] {
 describe("command deck cloud import", () => {
   it("uses the selected Orbit Watch logo as the default mark", () => {
     expect(freshCommandDeck.settings.logoStyle).toBe("radar");
+    expect(freshCommandDeck.settings.ollamaEnabled).toBe(true);
+    expect(freshCommandDeck.settings.ollamaEndpoint).toBe("http://127.0.0.1:11434");
+    expect(freshCommandDeck.settings.ollamaModel).toBe("qwen2.5:1.5b");
     expect(normalizeCommandDeck({ version: 1, settings: { ...freshCommandDeck.settings, logoStyle: "sentinel" } }).settings.logoStyle).toBe("radar");
   });
 
@@ -178,6 +181,58 @@ describe("command deck cloud import", () => {
     expect(withNote.intel).toHaveLength(1);
     expect(withNote.intel[0].symbol).toBe("NVDA");
     expect(withNote.intel[0].notes[0].body).toBe("Check earnings call and margin trend.");
+  });
+
+  it("updates and deletes editable deck records", () => {
+    let deck: CommandDeckState = { ...freshCommandDeck, tasks: [], projects: [], calendar: [], workouts: [], books: [], journal: [], finances: [], intel: [] };
+
+    deck = reduceCommandDeck(deck, { type: "task/add", title: "Draft plan", priority: "medium", dueDate: null });
+    deck = reduceCommandDeck(deck, { type: "task/update", id: deck.tasks[0].id, title: "Revised plan", priority: "critical", dueDate: "2026-05-20" });
+    expect(deck.tasks[0]).toMatchObject({ title: "Revised plan", priority: "critical", dueDate: "2026-05-20" });
+    deck = reduceCommandDeck(deck, { type: "task/delete", id: deck.tasks[0].id });
+    expect(deck.tasks).toHaveLength(0);
+
+    deck = reduceCommandDeck(deck, { type: "project/add", name: "Launch", objective: "Ship", nextAction: "Build", dueDate: null });
+    deck = reduceCommandDeck(deck, { type: "project/update", id: deck.projects[0].id, name: "Launch v2", objective: "Ship clean", nextAction: "Verify", dueDate: "2026-05-21", progress: 63 });
+    expect(deck.projects[0]).toMatchObject({ name: "Launch v2", objective: "Ship clean", nextAction: "Verify", progress: 63 });
+    deck = reduceCommandDeck(deck, { type: "project/delete", id: deck.projects[0].id });
+    expect(deck.projects).toHaveLength(0);
+
+    deck = reduceCommandDeck(deck, { type: "calendar/add", title: "Strategy", date: "2026-05-22", time: "09:00", entryType: "mission" });
+    deck = reduceCommandDeck(deck, { type: "calendar/update", id: deck.calendar[0].id, title: "Strategy v2", date: "2026-05-23", time: "10:30", entryType: "personal" });
+    expect(deck.calendar[0]).toMatchObject({ title: "Strategy v2", date: "2026-05-23", time: "10:30", type: "personal" });
+    deck = reduceCommandDeck(deck, { type: "calendar/delete", id: deck.calendar[0].id });
+    expect(deck.calendar).toHaveLength(0);
+
+    deck = reduceCommandDeck(deck, { type: "workout/add", name: "Push", day: "Monday", focus: "Chest" });
+    deck = reduceCommandDeck(deck, { type: "workout/update", id: deck.workouts[0].id, name: "Pull", day: "Tuesday", focus: "Back" });
+    expect(deck.workouts[0]).toMatchObject({ name: "Pull", day: "Tuesday", focus: "Back" });
+    deck = reduceCommandDeck(deck, { type: "workout/delete", id: deck.workouts[0].id });
+    expect(deck.workouts).toHaveLength(0);
+
+    deck = reduceCommandDeck(deck, { type: "book/add", title: "Deep Work", author: "Cal Newport" });
+    deck = reduceCommandDeck(deck, { type: "book/update", id: deck.books[0].id, title: "Slow Productivity", author: "Cal Newport", progress: 45 });
+    expect(deck.books[0]).toMatchObject({ title: "Slow Productivity", progress: 45 });
+    deck = reduceCommandDeck(deck, { type: "book/delete", id: deck.books[0].id });
+    expect(deck.books).toHaveLength(0);
+
+    deck = reduceCommandDeck(deck, { type: "journal/add", mood: "Focused", body: "Built." });
+    deck = reduceCommandDeck(deck, { type: "journal/update", id: deck.journal[0].id, mood: "Clear", body: "Refined." });
+    expect(deck.journal[0]).toMatchObject({ mood: "Clear", body: "Refined." });
+    deck = reduceCommandDeck(deck, { type: "journal/delete", id: deck.journal[0].id });
+    expect(deck.journal).toHaveLength(0);
+
+    deck = reduceCommandDeck(deck, { type: "finance/add", label: "Client payment", financeType: "income", amount: 500, date: "2026-05-24" });
+    deck = reduceCommandDeck(deck, { type: "finance/update", id: deck.finances[0].id, label: "Client retainer", financeType: "savings", amount: 750, date: "2026-05-25" });
+    expect(deck.finances[0]).toMatchObject({ label: "Client retainer", type: "savings", amount: 750 });
+    deck = reduceCommandDeck(deck, { type: "finance/delete", id: deck.finances[0].id });
+    expect(deck.finances).toHaveLength(0);
+
+    deck = reduceCommandDeck(deck, { type: "intel/add", title: "NVIDIA", symbol: "nvda", kind: "stock", signal: "watching", thesis: "AI chips.", sourceUrl: "" });
+    deck = reduceCommandDeck(deck, { type: "intel/update", id: deck.intel[0].id, title: "AMD", symbol: "amd", kind: "company", signal: "researching", thesis: "GPU watch.", sourceUrl: "https://example.com" });
+    expect(deck.intel[0]).toMatchObject({ title: "AMD", symbol: "AMD", kind: "company", signal: "researching", thesis: "GPU watch.", sourceUrl: "https://example.com" });
+    deck = reduceCommandDeck(deck, { type: "intel/delete", id: deck.intel[0].id });
+    expect(deck.intel).toHaveLength(0);
   });
 });
 

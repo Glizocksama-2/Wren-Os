@@ -35,7 +35,7 @@ body {
     radial-gradient(circle at 16% 84%, rgb(242 184 75 / 0.12), transparent 26rem),
     linear-gradient(135deg, #010205 0%, var(--bg) 48%, #07141d 100%);
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -291,23 +291,23 @@ p {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 78px minmax(0, 1fr);
+  grid-template-rows: 70px minmax(0, 1fr);
 }
 
 .deck-topbar {
   display: grid;
   grid-template-columns: minmax(210px, 0.7fr) minmax(280px, 1fr) auto;
   align-items: center;
-  gap: 18px;
+  gap: 14px;
   border-bottom: 1px solid var(--line);
   background: rgb(8 12 11 / 0.78);
-  padding: 0 26px;
+  padding: 0 20px;
   backdrop-filter: blur(16px);
 }
 
 .deck-topbar strong {
   display: block;
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 15px;
   letter-spacing: 0;
 }
@@ -340,7 +340,7 @@ p {
 
 .deck-search {
   display: flex;
-  height: 42px;
+  height: 38px;
   align-items: center;
   gap: 10px;
   border: 1px solid var(--line);
@@ -513,14 +513,14 @@ p {
 .deck-content {
   min-width: 0;
   overflow: auto;
-  padding: 24px 28px 34px;
+  padding: 20px 24px 30px;
 }
 
 .dashboard-layout,
 .module-shell {
   display: grid;
-  gap: 16px;
-  max-width: 1240px;
+  gap: 14px;
+  max-width: 1460px;
   margin: 0 auto;
 }
 
@@ -531,7 +531,7 @@ p {
 
 .hero-command {
   display: grid;
-  min-height: 360px;
+  min-height: 300px;
   grid-column: 1 / -1;
   grid-template-columns: minmax(0, 0.85fr) minmax(340px, 0.8fr);
   align-items: center;
@@ -542,17 +542,17 @@ p {
     linear-gradient(135deg, rgb(16 22 20 / 0.96), rgb(10 14 13 / 0.94)),
     repeating-linear-gradient(90deg, transparent 0 34px, rgb(255 255 255 / 0.025) 34px 35px);
   box-shadow: var(--shadow);
-  padding: 42px;
+  padding: 30px;
 }
 
 .hero-copy {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .hero-copy h1 {
   max-width: 720px;
-  font-size: clamp(34px, 5vw, 60px);
+  font-size: clamp(28px, 3.8vw, 46px);
   line-height: 0.98;
   letter-spacing: 0;
 }
@@ -560,8 +560,8 @@ p {
 .hero-copy p {
   max-width: 600px;
   color: var(--muted);
-  font-size: 15px;
-  line-height: 1.65;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .hero-actions {
@@ -575,6 +575,7 @@ p {
 .command-form button,
 .journal-form button,
 .row-actions button,
+.card-actions button,
 .custom-card button,
 .segmented button {
   display: inline-flex;
@@ -601,12 +602,12 @@ p {
 .orbit-wrap {
   position: relative;
   display: grid;
-  min-height: 310px;
+  min-height: 260px;
   place-items: center;
 }
 
 .orbit-wrap svg {
-  width: min(430px, 100%);
+  width: min(360px, 100%);
   filter: drop-shadow(0 0 20px rgb(var(--accent-rgb) / 0.16));
 }
 
@@ -621,8 +622,8 @@ p {
 .orbit-core {
   position: absolute;
   display: grid;
-  width: 150px;
-  height: 150px;
+  width: 128px;
+  height: 128px;
   place-items: center;
   align-content: center;
   border: 1px solid rgb(var(--accent-rgb) / 0.34);
@@ -632,7 +633,7 @@ p {
 }
 
 .orbit-core strong {
-  font-size: 42px;
+  font-size: 34px;
   line-height: 1;
 }
 
@@ -660,13 +661,13 @@ p {
 
 .readiness-panel {
   display: grid;
-  gap: 22px;
-  padding: 24px;
+  gap: 16px;
+  padding: 18px;
 }
 
 .readiness-panel h2 {
-  margin-top: 10px;
-  font-size: 68px;
+  margin-top: 6px;
+  font-size: 52px;
   line-height: 0.9;
 }
 
@@ -695,12 +696,12 @@ p {
 
 .battery-card {
   display: grid;
-  gap: 15px;
-  padding: 22px;
+  gap: 12px;
+  padding: 18px;
 }
 
 .battery-card strong {
-  font-size: 40px;
+  font-size: 34px;
 }
 
 .battery-bars {
@@ -728,8 +729,8 @@ p {
 
 .metric-tile {
   display: grid;
-  gap: 8px;
-  padding: 16px;
+  gap: 6px;
+  padding: 13px;
 }
 
 .metric-tile span {
@@ -739,7 +740,7 @@ p {
 }
 
 .metric-tile strong {
-  font-size: 28px;
+  font-size: 24px;
 }
 
 .deck-panel {
@@ -753,12 +754,12 @@ p {
 
 .panel-headline {
   display: flex;
-  min-height: 54px;
+  min-height: 46px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   border-bottom: 1px solid var(--line);
-  padding: 0 16px;
+  padding: 0 13px;
 }
 
 .panel-headline h2 {
@@ -775,13 +776,13 @@ p {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 12px;
-  min-height: 54px;
+  gap: 10px;
+  min-height: 46px;
   border: 0;
   border-bottom: 1px solid var(--line);
   background: transparent;
   color: var(--text);
-  padding: 12px 16px;
+  padding: 10px 13px;
   text-align: left;
 }
 
@@ -819,11 +820,26 @@ p {
 .row-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .row-actions button {
-  min-height: 32px;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.card-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.row-actions button[aria-label^="Delete"],
+.card-actions button[aria-label^="Delete"] {
+  border-color: rgb(255 94 77 / 0.34);
+  background: rgb(255 94 77 / 0.08);
+  color: var(--danger);
 }
 
 .empty-state {
@@ -831,7 +847,7 @@ p {
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
   color: var(--faint);
-  padding: 24px 16px;
+  padding: 18px 14px;
   text-align: center;
 }
 
@@ -843,7 +859,7 @@ p {
   border-radius: var(--radius);
   background: rgb(var(--accent-rgb) / 0.08);
   color: var(--accent);
-  padding: 14px 16px;
+  padding: 11px 13px;
 }
 
 .github-scan-strip div {
@@ -910,18 +926,18 @@ p {
 .account-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(220px, 0.7fr));
-  gap: 14px;
+  gap: 12px;
   align-items: stretch;
 }
 
 .life-hero,
 .account-hero {
   display: grid;
-  min-height: 210px;
+  min-height: 170px;
   align-content: space-between;
-  gap: 20px;
+  gap: 14px;
   overflow: hidden;
-  padding: 22px;
+  padding: 18px;
   background:
     linear-gradient(135deg, rgb(var(--accent-rgb) / 0.14), transparent 44%),
     linear-gradient(180deg, rgb(21 29 26 / 0.98), rgb(8 12 11 / 0.96));
@@ -929,8 +945,8 @@ p {
 
 .life-hero h2,
 .account-hero h2 {
-  margin-top: 8px;
-  font-size: clamp(28px, 4vw, 46px);
+  margin-top: 6px;
+  font-size: clamp(24px, 3.2vw, 38px);
   line-height: 0.98;
 }
 
@@ -938,7 +954,7 @@ p {
 .panel-copy,
 .account-hero p {
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.45;
 }
 
 .life-panel {
@@ -949,8 +965,8 @@ p {
 .signal-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 12px;
 }
 
 .signal-grid.compact {
@@ -959,11 +975,11 @@ p {
 
 .signal-card {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #070a09;
-  padding: 12px;
+  padding: 10px;
 }
 
 .signal-card span,
@@ -976,7 +992,7 @@ p {
 
 .signal-card strong {
   color: var(--accent);
-  font-size: 26px;
+  font-size: 22px;
 }
 
 .week-strip,
@@ -987,14 +1003,14 @@ p {
 .setting-stack,
 .check-list {
   display: flex;
-  gap: 8px;
+  gap: 7px;
   flex-wrap: wrap;
 }
 
 .week-node {
   display: grid;
-  width: 54px;
-  height: 58px;
+  width: 46px;
+  height: 50px;
   place-items: center;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1018,10 +1034,10 @@ p {
 
 .timeline-item {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: 10px;
   border-bottom: 1px solid var(--line);
-  padding: 13px 16px;
+  padding: 10px 13px;
 }
 
 .timeline-item:last-child {
@@ -1051,13 +1067,13 @@ p {
 .setting-stack span,
 .check-list span {
   display: inline-flex;
-  min-height: 32px;
+  min-height: 28px;
   align-items: center;
   gap: 7px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: #070a09;
-  padding: 0 11px;
+  padding: 0 9px;
   font-weight: 900;
 }
 
@@ -1073,13 +1089,13 @@ p {
 
 .big-readout {
   display: grid;
-  gap: 8px;
-  padding: 16px;
+  gap: 6px;
+  padding: 13px;
 }
 
 .big-readout strong {
   color: var(--accent);
-  font-size: 42px;
+  font-size: 34px;
   line-height: 1;
 }
 
@@ -1089,7 +1105,7 @@ p {
 
 .book-spines {
   align-items: end;
-  min-height: 120px;
+  min-height: 92px;
 }
 
 .book-spines span {
@@ -1109,8 +1125,8 @@ p {
 
 .journal-card {
   display: grid;
-  gap: 9px;
-  padding: 16px;
+  gap: 8px;
+  padding: 13px;
 }
 
 .journal-card span {
@@ -1130,8 +1146,8 @@ p {
 
 .cash-orbit {
   display: grid;
-  width: 160px;
-  height: 160px;
+  width: 132px;
+  height: 132px;
   place-items: center;
   align-content: center;
   border: 1px solid rgb(var(--accent-rgb) / 0.36);
@@ -1153,8 +1169,8 @@ p {
 
 .intel-radar {
   display: grid;
-  width: 170px;
-  height: 170px;
+  width: 140px;
+  height: 140px;
   place-items: center;
   align-content: center;
   border: 1px solid rgb(var(--accent-rgb) / 0.36);
@@ -1166,9 +1182,9 @@ p {
 }
 
 .intel-radar strong {
-  margin-top: 10px;
+  margin-top: 8px;
   color: var(--text);
-  font-size: 42px;
+  font-size: 34px;
   line-height: 1;
 }
 
@@ -1182,18 +1198,18 @@ p {
 .account-status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 12px;
 }
 
 .money-grid div,
 .account-status-grid div {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #070a09;
-  padding: 12px;
+  padding: 10px;
 }
 
 .money-grid svg,
@@ -1296,36 +1312,36 @@ p {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
 }
 
 .module-head h1 {
-  font-size: clamp(30px, 4vw, 54px);
+  font-size: clamp(28px, 3.4vw, 46px);
   line-height: 1;
 }
 
 .module-head p {
-  margin-top: 9px;
+  margin-top: 6px;
 }
 
 .command-form,
 .journal-form {
   display: grid;
   grid-template-columns: minmax(220px, 1.4fr) minmax(150px, 0.65fr) minmax(150px, 0.65fr) auto;
-  gap: 10px;
+  gap: 8px;
   align-items: end;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgb(10 14 13 / 0.8);
-  padding: 12px;
+  padding: 10px;
 }
 
 .project-form {
-  grid-template-columns: repeat(4, minmax(160px, 1fr)) auto;
+  grid-template-columns: repeat(5, minmax(140px, 1fr)) auto;
 }
 
 .intel-form {
-  grid-template-columns: minmax(170px, 1fr) minmax(130px, 0.6fr) minmax(130px, 0.6fr) minmax(150px, 0.65fr) minmax(220px, 1.1fr) minmax(170px, 0.8fr) auto;
+  grid-template-columns: minmax(150px, 1fr) minmax(100px, 0.55fr) minmax(120px, 0.6fr) minmax(130px, 0.65fr) minmax(200px, 1.1fr) minmax(150px, 0.8fr) auto;
 }
 
 .intel-wide {
@@ -1336,7 +1352,7 @@ p {
 .journal-form label,
 .custom-card {
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 
 .command-form input,
@@ -1345,13 +1361,13 @@ p {
 .journal-form textarea,
 .custom-card input {
   width: 100%;
-  min-height: 40px;
+  min-height: 36px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #070a09;
   color: var(--text);
   outline: 0;
-  padding: 8px 10px;
+  padding: 7px 9px;
 }
 
 .journal-form {
@@ -1366,28 +1382,28 @@ p {
 .two-column {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .book-grid,
 .custom-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+  gap: 12px;
 }
 
 .book-card,
 .custom-card {
-  padding: 16px;
+  padding: 13px;
 }
 
 .book-card {
   display: grid;
-  gap: 14px;
+  gap: 11px;
 }
 
 .book-card h3 {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .book-card input[type="range"] {
@@ -1615,14 +1631,14 @@ p {
   display: block;
   border-radius: 999px;
   background-repeat: no-repeat;
-  background-position: 86.5% 28%;
+  background-position: 87.5% 6.5%;
   background-size: 382% auto;
   filter: drop-shadow(0 0 12px rgb(79 231 255 / 0.34));
 }
 
 .rail-brand .northwatch-logo-orbit-watch {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius);
 }
 
@@ -1676,25 +1692,25 @@ p {
 }
 
 .deck-content {
-  padding: 34px 34px 54px;
+  padding: 22px 24px 40px;
 }
 
 .dashboard-layout,
 .module-shell {
-  max-width: 1360px;
-  gap: 18px;
+  max-width: 1480px;
+  gap: 14px;
 }
 
 .hero-command {
   position: relative;
-  min-height: 430px;
+  min-height: 300px;
   border-color: rgb(79 231 255 / 0.18);
   background:
     radial-gradient(circle at 82% 50%, rgb(79 231 255 / 0.17), transparent 20rem),
     radial-gradient(circle at 58% 25%, rgb(var(--accent-rgb) / 0.13), transparent 17rem),
     linear-gradient(135deg, rgb(8 18 25 / 0.88), rgb(3 7 11 / 0.92)),
     repeating-linear-gradient(90deg, transparent 0 44px, rgb(255 255 255 / 0.03) 44px 45px);
-  box-shadow: 0 24px 100px rgb(0 0 0 / 0.46), inset 0 0 70px rgb(79 231 255 / 0.035);
+  box-shadow: 0 18px 70px rgb(0 0 0 / 0.38), inset 0 0 56px rgb(79 231 255 / 0.035);
 }
 
 .hero-command::before,
@@ -1705,16 +1721,16 @@ p {
 }
 
 .hero-command::before {
-  inset: 22px;
+  inset: 18px;
   border: 1px solid rgb(79 231 255 / 0.08);
   border-radius: calc(var(--radius) + 4px);
 }
 
 .hero-command::after {
-  right: 30px;
-  bottom: 28px;
-  width: 170px;
-  height: 170px;
+  right: 24px;
+  bottom: 22px;
+  width: 136px;
+  height: 136px;
   border: 1px solid rgb(var(--accent-rgb) / 0.22);
   border-left-color: transparent;
   border-radius: 999px;
@@ -1727,7 +1743,7 @@ p {
 }
 
 .hero-copy h1 {
-  max-width: 760px;
+  max-width: 680px;
   text-shadow: 0 0 32px rgb(79 231 255 / 0.1);
 }
 
@@ -1755,6 +1771,22 @@ p {
   font-weight: 900;
 }
 
+.agent-vitals span.agent-model-pill.online {
+  border-color: rgb(85 210 131 / 0.32);
+  color: var(--green);
+}
+
+.agent-vitals span.agent-model-pill.thinking,
+.agent-vitals span.agent-model-pill.checking {
+  border-color: rgb(var(--accent-rgb) / 0.34);
+  color: var(--accent);
+}
+
+.agent-vitals span.agent-model-pill.offline {
+  border-color: rgb(255 94 77 / 0.32);
+  color: var(--danger);
+}
+
 .hero-signal-row svg,
 .agent-vitals svg {
   color: var(--accent);
@@ -1775,7 +1807,7 @@ p {
   background:
     linear-gradient(180deg, rgb(11 26 35 / 0.78), rgb(4 10 14 / 0.82)),
     radial-gradient(circle at top right, rgb(var(--accent-rgb) / 0.08), transparent 18rem);
-  box-shadow: 0 20px 70px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  box-shadow: 0 14px 48px rgb(0 0 0 / 0.3), inset 0 1px 0 rgb(255 255 255 / 0.04);
   backdrop-filter: blur(16px);
 }
 
@@ -1846,8 +1878,8 @@ p {
   bottom: 22px;
   z-index: 9;
   display: grid;
-  width: min(390px, calc(100vw - 32px));
-  max-height: min(720px, calc(100vh - 44px));
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(620px, calc(100vh - 44px));
   overflow: hidden;
   border: 1px solid rgb(79 231 255 / 0.24);
   border-radius: 14px;
@@ -1859,7 +1891,35 @@ p {
 }
 
 .agent-dock.collapsed {
-  width: min(260px, calc(100vw - 32px));
+  width: 58px;
+  min-height: 58px;
+  border-radius: 999px;
+}
+
+.agent-dock.collapsed .agent-header {
+  min-height: 58px;
+  grid-template-columns: 1fr;
+  border: 0;
+  padding: 7px;
+}
+
+.agent-dock.collapsed .agent-header > div:not(.agent-orb) {
+  display: none;
+}
+
+.agent-dock.collapsed .agent-header button {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: transparent;
+}
+
+.agent-dock.collapsed .agent-orb {
+  width: 42px;
+  height: 42px;
 }
 
 .agent-header {
@@ -2022,6 +2082,32 @@ p {
   grid-column: span 2;
 }
 
+.ollama-card {
+  grid-column: span 2;
+}
+
+.ollama-card label {
+  display: grid;
+  gap: 7px;
+}
+
+.inline-check {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 10px;
+}
+
+.inline-check input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--accent);
+}
+
+.ollama-card button {
+  justify-self: start;
+}
+
 .logo-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2059,7 +2145,7 @@ p {
 .logo-option .northwatch-logo-orbit-watch {
   width: 50px;
   height: 50px;
-  margin: -6px 0 0 -6px;
+  margin: 0;
   color: var(--accent);
 }
 
@@ -2318,6 +2404,10 @@ p {
   }
 
   .logo-select-card {
+    grid-column: auto;
+  }
+
+  .ollama-card {
     grid-column: auto;
   }
 

@@ -27,6 +27,7 @@ import {
   Newspaper,
   NotebookPen,
   Palette,
+  Pencil,
   PiggyBank,
   Plus,
   Radar,
@@ -48,6 +49,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
 import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
+import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
 import { loadCloudDeck, saveCloudDeck, type CloudDeckClient } from "./store/cloudDeck";
 import {
@@ -106,6 +108,12 @@ type AgentMessage = {
   id: string;
   role: "agent" | "operator";
   body: string;
+};
+
+type AgentConnectionState = {
+  mode: "disabled" | "checking" | "online" | "offline" | "thinking";
+  label: string;
+  detail: string;
 };
 
 const agentQuickPrompts = [
@@ -693,16 +701,37 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [dueDate, setDueDate] = useState("");
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const open = state.tasks.filter((task) => task.status === "todo");
   const done = state.tasks.filter((task) => task.status === "done");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
-    dispatch({ type: "task/add", title: title.trim(), priority, dueDate: dueDate || null });
+    if (editingTaskId) {
+      dispatch({ type: "task/update", id: editingTaskId, title: title.trim(), priority, dueDate: dueDate || null });
+      setEditingTaskId(null);
+      setNotice("Task updated.");
+    } else {
+      dispatch({ type: "task/add", title: title.trim(), priority, dueDate: dueDate || null });
+      setNotice("To do item added.");
+    }
     setTitle("");
     setDueDate("");
-    setNotice("To do item added.");
+  };
+
+  const startEdit = (task: CommandDeckState["tasks"][number]) => {
+    setEditingTaskId(task.id);
+    setTitle(task.title);
+    setPriority(task.priority);
+    setDueDate(task.dueDate ?? "");
+  };
+
+  const cancelEdit = () => {
+    setEditingTaskId(null);
+    setTitle("");
+    setPriority("medium");
+    setDueDate("");
   };
 
   return (
@@ -722,21 +751,25 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
           <span>Due</span>
           <input aria-label="Task due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} />
         </label>
-        <button type="submit"><Plus size={16} /> Add task</button>
+        <button type="submit"><Plus size={16} /> {editingTaskId ? "Save task" : "Add task"}</button>
+        {editingTaskId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <TwoColumn titleLeft="Active" titleRight="Done">
         <ItemList empty="No active tasks.">
           {open.map((task) => (
             <ActionRow key={task.id} title={task.title} meta={`${task.priority}${task.dueDate ? ` - ${formatDate(task.dueDate)}` : ""}`}>
+              <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Done</button>
-              <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /></button>
+              <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
             </ActionRow>
           ))}
         </ItemList>
         <ItemList empty="No completed tasks.">
           {done.map((task) => (
             <ActionRow key={task.id} title={task.title} meta="completed">
+              <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Reopen</button>
+              <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
             </ActionRow>
           ))}
         </ItemList>
@@ -750,24 +783,59 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
   const [objective, setObjective] = useState("");
   const [nextAction, setNextAction] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [progress, setProgress] = useState("0");
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const pending = state.projects.filter((project) => project.status === "pending");
   const done = state.projects.filter((project) => project.status === "done");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) return;
-    dispatch({
-      type: "project/add",
-      name: name.trim(),
-      objective: objective.trim(),
-      nextAction: nextAction.trim(),
-      dueDate: dueDate || null
-    });
+    if (editingProjectId) {
+      dispatch({
+        type: "project/update",
+        id: editingProjectId,
+        name: name.trim(),
+        objective: objective.trim(),
+        nextAction: nextAction.trim(),
+        dueDate: dueDate || null,
+        progress: Number(progress)
+      });
+      setEditingProjectId(null);
+      setNotice("Project updated.");
+    } else {
+      dispatch({
+        type: "project/add",
+        name: name.trim(),
+        objective: objective.trim(),
+        nextAction: nextAction.trim(),
+        dueDate: dueDate || null
+      });
+      setNotice("Project added to pending.");
+    }
     setName("");
     setObjective("");
     setNextAction("");
     setDueDate("");
-    setNotice("Project added to pending.");
+    setProgress("0");
+  };
+
+  const startEdit = (project: CommandDeckState["projects"][number]) => {
+    setEditingProjectId(project.id);
+    setName(project.name);
+    setObjective(project.objective);
+    setNextAction(project.nextAction);
+    setDueDate(project.dueDate ?? "");
+    setProgress(String(project.progress));
+  };
+
+  const cancelEdit = () => {
+    setEditingProjectId(null);
+    setName("");
+    setObjective("");
+    setNextAction("");
+    setDueDate("");
+    setProgress("0");
   };
 
   return (
@@ -784,20 +852,26 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         <label><span>Objective</span><input aria-label="Project objective" value={objective} onChange={(event) => setObjective(event.target.value)} /></label>
         <label><span>Next action</span><input aria-label="Project next action" value={nextAction} onChange={(event) => setNextAction(event.target.value)} /></label>
         <label><span>Due</span><input aria-label="Project due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
-        <button type="submit"><Plus size={16} /> Add project</button>
+        <label><span>Progress</span><input aria-label="Project progress" type="number" min="0" max="100" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
+        <button type="submit"><Plus size={16} /> {editingProjectId ? "Save project" : "Add project"}</button>
+        {editingProjectId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <TwoColumn titleLeft="Pending Projects" titleRight="Done Projects">
         <ItemList empty="No pending projects.">
           {pending.map((project) => (
             <ProjectRow key={project.id} project={project}>
+              <button onClick={() => startEdit(project)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "project/complete", id: project.id })} type="button">Complete</button>
+              <button onClick={() => dispatch({ type: "project/delete", id: project.id })} type="button" aria-label={`Delete ${project.name}`}><Trash2 size={15} /> Delete</button>
             </ProjectRow>
           ))}
         </ItemList>
         <ItemList empty="No done projects.">
           {done.map((project) => (
             <ProjectRow key={project.id} project={project}>
+              <button onClick={() => startEdit(project)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "project/complete", id: project.id })} type="button">Reopen</button>
+              <button onClick={() => dispatch({ type: "project/delete", id: project.id })} type="button" aria-label={`Delete ${project.name}`}><Trash2 size={15} /> Delete</button>
             </ProjectRow>
           ))}
         </ItemList>
@@ -815,6 +889,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [note, setNote] = useState("");
+  const [editingIntelId, setEditingIntelId] = useState<string | null>(null);
   const selected = state.intel.find((item) => item.id === selectedId) ?? state.intel[0] ?? null;
   const signalCounts = intelSignals.map((item) => ({
     signal: item,
@@ -832,20 +907,66 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
-    dispatch({
-      type: "intel/add",
-      title: title.trim(),
-      symbol: symbol.trim(),
-      kind,
-      signal,
-      thesis: thesis.trim(),
-      sourceUrl: sourceUrl.trim()
-    });
+    if (editingIntelId) {
+      dispatch({
+        type: "intel/update",
+        id: editingIntelId,
+        title: title.trim(),
+        symbol: symbol.trim(),
+        kind,
+        signal,
+        thesis: thesis.trim(),
+        sourceUrl: sourceUrl.trim()
+      });
+      setSelectedId(editingIntelId);
+      setEditingIntelId(null);
+      setNotice("Intel item updated.");
+    } else {
+      dispatch({
+        type: "intel/add",
+        title: title.trim(),
+        symbol: symbol.trim(),
+        kind,
+        signal,
+        thesis: thesis.trim(),
+        sourceUrl: sourceUrl.trim()
+      });
+      setNotice("Intel item added.");
+    }
     setTitle("");
     setSymbol("");
     setThesis("");
     setSourceUrl("");
-    setNotice("Intel item added.");
+  };
+
+  const startEdit = (item: IntelItem) => {
+    setEditingIntelId(item.id);
+    setTitle(item.title);
+    setSymbol(item.symbol);
+    setKind(item.kind);
+    setSignal(item.signal);
+    setThesis(item.thesis);
+    setSourceUrl(item.sourceUrl ?? "");
+    setSelectedId(item.id);
+  };
+
+  const cancelEdit = () => {
+    setEditingIntelId(null);
+    setTitle("");
+    setSymbol("");
+    setKind("stock");
+    setSignal("watching");
+    setThesis("");
+    setSourceUrl("");
+  };
+
+  const deleteIntelItem = (id: string, label: string) => {
+    dispatch({ type: "intel/delete", id });
+    if (selectedId === id) {
+      setSelectedId(state.intel.find((item) => item.id !== id)?.id ?? "");
+    }
+    if (editingIntelId === id) cancelEdit();
+    setNotice(`${label} deleted.`);
   };
 
   const submitNote = (event: FormEvent) => {
@@ -916,7 +1037,8 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
         </label>
         <label className="intel-wide"><span>Thesis</span><input aria-label="Intel thesis" value={thesis} onChange={(event) => setThesis(event.target.value)} placeholder="Why it matters" /></label>
         <label><span>Source</span><input aria-label="Intel source URL" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://" /></label>
-        <button type="submit"><Plus size={16} /> Add intel</button>
+        <button type="submit"><Plus size={16} /> {editingIntelId ? "Save intel" : "Add intel"}</button>
+        {editingIntelId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
 
       <div className="intel-grid">
@@ -931,7 +1053,11 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                   <em>{[item.symbol, item.kind, item.signal].filter(Boolean).join(" - ")}</em>
                   {item.thesis && <p>{item.thesis}</p>}
                 </div>
-                <button type="button" onClick={() => setSelectedId(item.id)}><Eye size={15} /> Focus</button>
+                <div className="row-actions">
+                  <button type="button" onClick={() => setSelectedId(item.id)}><Eye size={15} /> Focus</button>
+                  <button type="button" onClick={() => startEdit(item)}><Pencil size={15} /> Modify</button>
+                  <button type="button" aria-label={`Delete ${item.title}`} onClick={() => deleteIntelItem(item.id, item.title)}><Trash2 size={15} /> Delete</button>
+                </div>
               </div>
             ))}
           </div>
@@ -946,6 +1072,10 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                 <span className="source-pill">{selected.kind}</span>
                 <h3>{selected.title}</h3>
                 <p>{selected.thesis || "No thesis recorded yet."}</p>
+              </div>
+              <div className="row-actions">
+                <button type="button" onClick={() => startEdit(selected)}><Pencil size={15} /> Modify</button>
+                <button type="button" aria-label={`Delete ${selected.title}`} onClick={() => deleteIntelItem(selected.id, selected.title)}><Trash2 size={15} /> Delete</button>
               </div>
               <div className="research-links">
                 <a href={getIntelNewsUrl(selected)} target="_blank" rel="noreferrer" aria-label={`News search for ${selected.title}`}>
@@ -982,6 +1112,7 @@ function CalendarModule({ state, dispatch, setNotice }: ModuleProps) {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [time, setTime] = useState("09:00");
   const [entryType, setEntryType] = useState<CalendarEntry["type"]>("mission");
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const sortedEvents = state.calendar.slice().sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
   const upcomingEvents = sortedEvents.filter((entry) => getDayDelta(entry.date) >= 0).slice(0, 5);
   const nextSevenDays = sortedEvents.filter((entry) => {
@@ -1004,9 +1135,31 @@ function CalendarModule({ state, dispatch, setNotice }: ModuleProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
-    dispatch({ type: "calendar/add", title: title.trim(), date, time, entryType });
+    if (editingEventId) {
+      dispatch({ type: "calendar/update", id: editingEventId, title: title.trim(), date, time, entryType });
+      setEditingEventId(null);
+      setNotice("Calendar event updated.");
+    } else {
+      dispatch({ type: "calendar/add", title: title.trim(), date, time, entryType });
+      setNotice("Calendar event added.");
+    }
     setTitle("");
-    setNotice("Calendar event added.");
+  };
+
+  const startEdit = (entry: CalendarEntry) => {
+    setEditingEventId(entry.id);
+    setTitle(entry.title);
+    setDate(entry.date);
+    setTime(entry.time);
+    setEntryType(entry.type);
+  };
+
+  const cancelEdit = () => {
+    setEditingEventId(null);
+    setTitle("");
+    setDate(new Date().toISOString().slice(0, 10));
+    setTime("09:00");
+    setEntryType("mission");
   };
 
   return (
@@ -1064,13 +1217,17 @@ function CalendarModule({ state, dispatch, setNotice }: ModuleProps) {
             {eventTypes.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
-        <button type="submit"><Plus size={16} /> Add event</button>
+        <button type="submit"><Plus size={16} /> {editingEventId ? "Save event" : "Add event"}</button>
+        {editingEventId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <section className="deck-panel">
         <PanelHead title="Full schedule" />
         <ItemList empty="No calendar entries.">
           {sortedEvents.map((entry) => (
-            <ActionRow key={entry.id} title={entry.title} meta={`${formatDate(entry.date)} at ${entry.time} - ${entry.type}`} />
+            <ActionRow key={entry.id} title={entry.title} meta={`${formatDate(entry.date)} at ${entry.time} - ${entry.type}`}>
+              <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
+              <button type="button" aria-label={`Delete ${entry.title}`} onClick={() => dispatch({ type: "calendar/delete", id: entry.id })}><Trash2 size={15} /> Delete</button>
+            </ActionRow>
           ))}
         </ItemList>
       </section>
@@ -1082,6 +1239,7 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
   const [name, setName] = useState("");
   const [day, setDay] = useState("Monday");
   const [focus, setFocus] = useState("");
+  const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
   const plannedCount = state.workouts.filter((entry) => entry.status === "planned").length;
   const doneCount = state.workouts.filter((entry) => entry.status === "done").length;
   const completion = state.workouts.length === 0 ? 0 : Math.round((doneCount / state.workouts.length) * 100);
@@ -1095,10 +1253,30 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) return;
-    dispatch({ type: "workout/add", name: name.trim(), day, focus: focus.trim() });
+    if (editingWorkoutId) {
+      dispatch({ type: "workout/update", id: editingWorkoutId, name: name.trim(), day, focus: focus.trim() });
+      setEditingWorkoutId(null);
+      setNotice("Workout updated.");
+    } else {
+      dispatch({ type: "workout/add", name: name.trim(), day, focus: focus.trim() });
+      setNotice("Workout added.");
+    }
     setName("");
     setFocus("");
-    setNotice("Workout added.");
+  };
+
+  const startEdit = (entry: CommandDeckState["workouts"][number]) => {
+    setEditingWorkoutId(entry.id);
+    setName(entry.name);
+    setDay(entry.day);
+    setFocus(entry.focus);
+  };
+
+  const cancelEdit = () => {
+    setEditingWorkoutId(null);
+    setName("");
+    setDay("Monday");
+    setFocus("");
   };
 
   return (
@@ -1138,16 +1316,19 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
         <label><span>Session</span><input aria-label="Workout name" value={name} onChange={(event) => setName(event.target.value)} /></label>
         <label><span>Day</span><input aria-label="Workout day" value={day} onChange={(event) => setDay(event.target.value)} /></label>
         <label><span>Focus</span><input aria-label="Workout focus" value={focus} onChange={(event) => setFocus(event.target.value)} /></label>
-        <button type="submit"><Plus size={16} /> Add workout</button>
+        <button type="submit"><Plus size={16} /> {editingWorkoutId ? "Save workout" : "Add workout"}</button>
+        {editingWorkoutId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <section className="deck-panel">
         <PanelHead title="Training log" />
         <ItemList empty="No workouts planned.">
           {state.workouts.map((entry) => (
             <ActionRow key={entry.id} title={entry.name} meta={`${entry.day} - ${entry.focus || "general"} - ${entry.status}`}>
+              <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "workout/toggle", id: entry.id })} type="button">
                 {entry.status === "done" ? "Reopen" : "Done"}
               </button>
+              <button type="button" aria-label={`Delete ${entry.name}`} onClick={() => dispatch({ type: "workout/delete", id: entry.id })}><Trash2 size={15} /> Delete</button>
             </ActionRow>
           ))}
         </ItemList>
@@ -1159,6 +1340,8 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
 function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
+  const [progress, setProgress] = useState("0");
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const reading = state.books.filter((book) => book.status === "reading");
   const done = state.books.filter((book) => book.status === "done");
   const averageProgress = state.books.length === 0 ? 0 : Math.round(state.books.reduce((total, book) => total + book.progress, 0) / state.books.length);
@@ -1167,10 +1350,31 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
-    dispatch({ type: "book/add", title: title.trim(), author: author.trim() || "Unknown" });
+    if (editingBookId) {
+      dispatch({ type: "book/update", id: editingBookId, title: title.trim(), author: author.trim() || "Unknown", progress: Number(progress) });
+      setEditingBookId(null);
+      setNotice("Book updated.");
+    } else {
+      dispatch({ type: "book/add", title: title.trim(), author: author.trim() || "Unknown" });
+      setNotice("Book added.");
+    }
     setTitle("");
     setAuthor("");
-    setNotice("Book added.");
+    setProgress("0");
+  };
+
+  const startEdit = (book: CommandDeckState["books"][number]) => {
+    setEditingBookId(book.id);
+    setTitle(book.title);
+    setAuthor(book.author);
+    setProgress(String(book.progress));
+  };
+
+  const cancelEdit = () => {
+    setEditingBookId(null);
+    setTitle("");
+    setAuthor("");
+    setProgress("0");
   };
 
   return (
@@ -1204,7 +1408,9 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
       <form className="command-form" onSubmit={submit}>
         <label><span>Title</span><input aria-label="Book title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <label><span>Author</span><input aria-label="Book author" value={author} onChange={(event) => setAuthor(event.target.value)} /></label>
-        <button type="submit"><Plus size={16} /> Add book</button>
+        <label><span>Progress</span><input aria-label="Book progress" type="number" min="0" max="100" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
+        <button type="submit"><Plus size={16} /> {editingBookId ? "Save book" : "Add book"}</button>
+        {editingBookId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <div className="book-grid">
         {state.books.map((book) => (
@@ -1226,6 +1432,10 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
                 onChange={(event) => dispatch({ type: "book/progress", id: book.id, progress: Number(event.target.value) })}
               />
             </label>
+            <div className="card-actions">
+              <button type="button" onClick={() => startEdit(book)}><Pencil size={15} /> Modify</button>
+              <button type="button" aria-label={`Delete ${book.title}`} onClick={() => dispatch({ type: "book/delete", id: book.id })}><Trash2 size={15} /> Delete</button>
+            </div>
           </article>
         ))}
         {state.books.length === 0 && <EmptyState>No books tracked.</EmptyState>}
@@ -1237,6 +1447,7 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
 function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
   const [mood, setMood] = useState("Focused");
   const [body, setBody] = useState("");
+  const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
   const latestEntry = state.journal[0];
   const moodMix = state.journal.reduce<Record<string, number>>((acc, entry) => {
     acc[entry.mood] = (acc[entry.mood] ?? 0) + 1;
@@ -1247,9 +1458,27 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!body.trim()) return;
-    dispatch({ type: "journal/add", mood: mood.trim() || "Logged", body: body.trim() });
+    if (editingJournalId) {
+      dispatch({ type: "journal/update", id: editingJournalId, mood: mood.trim() || "Logged", body: body.trim() });
+      setEditingJournalId(null);
+      setNotice("Journal entry updated.");
+    } else {
+      dispatch({ type: "journal/add", mood: mood.trim() || "Logged", body: body.trim() });
+      setNotice("Journal entry saved.");
+    }
     setBody("");
-    setNotice("Journal entry saved.");
+  };
+
+  const startEdit = (entry: CommandDeckState["journal"][number]) => {
+    setEditingJournalId(entry.id);
+    setMood(entry.mood);
+    setBody(entry.body);
+  };
+
+  const cancelEdit = () => {
+    setEditingJournalId(null);
+    setMood("Focused");
+    setBody("");
   };
 
   return (
@@ -1283,7 +1512,8 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
       <form className="journal-form" onSubmit={submit}>
         <label><span>Mood</span><input aria-label="Journal mood" value={mood} onChange={(event) => setMood(event.target.value)} /></label>
         <label><span>Entry</span><textarea aria-label="Journal entry" value={body} onChange={(event) => setBody(event.target.value)} rows={8} /></label>
-        <button type="submit"><Plus size={16} /> Save entry</button>
+        <button type="submit"><Plus size={16} /> {editingJournalId ? "Save changes" : "Save entry"}</button>
+        {editingJournalId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <section className="journal-archive">
         {state.journal.length === 0 && <EmptyState>No journal entries.</EmptyState>}
@@ -1292,6 +1522,10 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
             <span>{formatDate(entry.date)}</span>
             <h3>{entry.mood}</h3>
             <p>{entry.body}</p>
+            <div className="card-actions">
+              <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
+              <button type="button" aria-label={`Delete ${entry.mood}`} onClick={() => dispatch({ type: "journal/delete", id: entry.id })}><Trash2 size={15} /> Delete</button>
+            </div>
           </article>
         ))}
       </section>
@@ -1304,6 +1538,7 @@ function FinancesModule({ state, dispatch, setNotice }: ModuleProps) {
   const [financeType, setFinanceType] = useState<FinanceType>("expense");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [editingFinanceId, setEditingFinanceId] = useState<string | null>(null);
   const metrics = getDeckMetrics(state);
   const income = state.finances.filter((entry) => entry.type === "income").reduce((total, entry) => total + entry.amount, 0);
   const expenses = state.finances.filter((entry) => entry.type === "expense").reduce((total, entry) => total + entry.amount, 0);
@@ -1315,10 +1550,32 @@ function FinancesModule({ state, dispatch, setNotice }: ModuleProps) {
     event.preventDefault();
     const numericAmount = Number(amount);
     if (!label.trim() || !Number.isFinite(numericAmount)) return;
-    dispatch({ type: "finance/add", label: label.trim(), financeType, amount: numericAmount, date });
+    if (editingFinanceId) {
+      dispatch({ type: "finance/update", id: editingFinanceId, label: label.trim(), financeType, amount: numericAmount, date });
+      setEditingFinanceId(null);
+      setNotice("Finance entry updated.");
+    } else {
+      dispatch({ type: "finance/add", label: label.trim(), financeType, amount: numericAmount, date });
+      setNotice("Finance entry added.");
+    }
     setLabel("");
     setAmount("");
-    setNotice("Finance entry added.");
+  };
+
+  const startEdit = (entry: CommandDeckState["finances"][number]) => {
+    setEditingFinanceId(entry.id);
+    setLabel(entry.label);
+    setFinanceType(entry.type);
+    setAmount(String(entry.amount));
+    setDate(entry.date);
+  };
+
+  const cancelEdit = () => {
+    setEditingFinanceId(null);
+    setLabel("");
+    setFinanceType("expense");
+    setAmount("");
+    setDate(new Date().toISOString().slice(0, 10));
   };
 
   return (
@@ -1367,16 +1624,19 @@ function FinancesModule({ state, dispatch, setNotice }: ModuleProps) {
         </label>
         <label><span>Amount</span><input aria-label="Finance amount" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
         <label><span>Date</span><input aria-label="Finance date" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
-        <button type="submit"><Plus size={16} /> Add finance</button>
+        <button type="submit"><Plus size={16} /> {editingFinanceId ? "Save finance" : "Add finance"}</button>
+        {editingFinanceId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <section className="deck-panel">
         <PanelHead title="Ledger stream" />
         <ItemList empty="No finance entries.">
           {state.finances.map((entry) => (
             <ActionRow key={entry.id} title={entry.label} meta={`${entry.type} - ${formatMoney(entry.amount)} - ${entry.status}`}>
+              <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "finance/toggle", id: entry.id })} type="button">
                 {entry.status === "cleared" ? "Plan" : "Clear"}
               </button>
+              <button type="button" aria-label={`Delete ${entry.label}`} onClick={() => dispatch({ type: "finance/delete", id: entry.id })}><Trash2 size={15} /> Delete</button>
             </ActionRow>
           ))}
         </ItemList>
@@ -1395,6 +1655,23 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
     state.settings.showJournal,
     state.settings.showIntel
   ].filter(Boolean).length;
+
+  const testOllama = async () => {
+    setNotice("Checking Ollama...");
+    const result = await checkOllamaConnection({
+      enabled: state.settings.ollamaEnabled,
+      endpoint: state.settings.ollamaEndpoint,
+      model: state.settings.ollamaModel
+    });
+
+    if (!result.ok) {
+      setNotice(`Ollama offline: ${result.error}`);
+      return;
+    }
+
+    const hasModel = result.models.includes(state.settings.ollamaModel);
+    setNotice(hasModel ? `Ollama ready: ${state.settings.ollamaModel}.` : `Ollama online. Model not found: ${state.settings.ollamaModel}.`);
+  };
 
   return (
     <ModuleShell title="Customize Options" description="Tune callsign, accent, density, dashboard modules, and reset the fresh deck.">
@@ -1492,6 +1769,37 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
         <ToggleCard label="Show orbit radar" checked={state.settings.showOrbit} onChange={(checked) => dispatch({ type: "settings/update", payload: { showOrbit: checked } })} />
         <ToggleCard label="Show finance card" checked={state.settings.showFinance} onChange={(checked) => dispatch({ type: "settings/update", payload: { showFinance: checked } })} />
         <ToggleCard label="Show workout systems" checked={state.settings.showWorkout} onChange={(checked) => dispatch({ type: "settings/update", payload: { showWorkout: checked } })} />
+        <div className="custom-card ollama-card">
+          <span>Sentinel brain</span>
+          <label className="inline-check">
+            <input
+              aria-label="Use Ollama for Sentinel"
+              type="checkbox"
+              checked={state.settings.ollamaEnabled}
+              onChange={(event) => dispatch({ type: "settings/update", payload: { ollamaEnabled: event.target.checked } })}
+            />
+            <strong>Ollama</strong>
+          </label>
+          <label>
+            <span>Endpoint</span>
+            <input
+              aria-label="Ollama endpoint"
+              value={state.settings.ollamaEndpoint}
+              onChange={(event) => dispatch({ type: "settings/update", payload: { ollamaEndpoint: event.target.value } })}
+            />
+          </label>
+          <label>
+            <span>Model</span>
+            <input
+              aria-label="Ollama model"
+              value={state.settings.ollamaModel}
+              onChange={(event) => dispatch({ type: "settings/update", payload: { ollamaModel: event.target.value } })}
+            />
+          </label>
+          <button type="button" onClick={testOllama}>
+            <Bot size={16} /> Test Ollama
+          </button>
+        </div>
         <div className="custom-card">
           <span>Cloud lock</span>
           <p>
@@ -1680,37 +1988,162 @@ function AgentDock({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
+  const [agentStatus, setAgentStatus] = useState<AgentConnectionState>(() =>
+    state.settings.ollamaEnabled
+      ? {
+          mode: "checking",
+          label: "Ollama checking",
+          detail: "Checking the local Ollama server."
+        }
+      : {
+          mode: "disabled",
+          label: "Local brain",
+          detail: "Ollama is disabled in Customize."
+        }
+  );
   const [messages, setMessages] = useState<AgentMessage[]>(() => [
     {
       id: "sentinel-boot",
       role: "agent",
-      body: composeAgentReply(state, metrics, "dashboard", "Brief my next move")
+      body: state.settings.ollamaEnabled
+        ? `Ollama route armed for ${state.settings.ollamaModel}.\nIf the local server is running, I will use it. If not, I will fall back to deck logic.`
+        : composeAgentReply(state, metrics, "dashboard", "Brief my next move")
     }
   ]);
   const priorityProject = getPriorityProject(state);
   const priorityTask = getPriorityTask(state);
   const activeLabel = navItems.find((item) => item.view === activeView)?.label ?? "Command";
+  const ollamaConfig = {
+    enabled: state.settings.ollamaEnabled,
+    endpoint: state.settings.ollamaEndpoint,
+    model: state.settings.ollamaModel
+  };
 
-  const sendPrompt = (rawPrompt: string) => {
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!state.settings.ollamaEnabled) {
+      setAgentStatus({
+        mode: "disabled",
+        label: "Local brain",
+        detail: "Ollama is disabled in Customize."
+      });
+      return;
+    }
+
+    if (!isOpen) return;
+
+    setAgentStatus({
+      mode: "checking",
+      label: "Ollama checking",
+      detail: "Checking the local Ollama server."
+    });
+
+    checkOllamaConnection(ollamaConfig).then((result) => {
+      if (isCancelled) return;
+
+      if (!result.ok) {
+        setAgentStatus({
+          mode: "offline",
+          label: "Ollama offline",
+          detail: result.error ?? "Could not reach Ollama."
+        });
+        return;
+      }
+
+      const hasModel = result.models.includes(state.settings.ollamaModel);
+      setAgentStatus({
+        mode: hasModel ? "online" : "offline",
+        label: hasModel ? `Ollama: ${state.settings.ollamaModel}` : "Model missing",
+        detail: hasModel
+          ? `${result.models.length} local model${result.models.length === 1 ? "" : "s"} available.`
+          : `Pull ${state.settings.ollamaModel} or choose one of: ${result.models.join(", ") || "none installed"}.`
+      });
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isOpen, state.settings.ollamaEnabled, state.settings.ollamaEndpoint, state.settings.ollamaModel]);
+
+  const sendPrompt = async (rawPrompt: string) => {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
 
-    let reply = composeAgentReply(state, metrics, activeView, prompt);
     if (/create|add|make/i.test(prompt) && /focus|task|order/i.test(prompt)) {
       const title = getFocusTaskTitle(state);
       dispatch({ type: "task/add", title, priority: "high", dueDate: new Date().toISOString().slice(0, 10) });
       setView("todo");
       setNotice("Sentinel created a focus task.");
-      reply = `Created a high-priority focus task: ${title}\nI moved you to To Do so you can execute or edit it.`;
+      setMessages((current) => [
+        ...current,
+        { id: `operator-${Date.now()}`, role: "operator", body: prompt },
+        {
+          id: `sentinel-${Date.now()}`,
+          role: "agent",
+          body: `Created a high-priority focus task: ${title}\nI moved you to To Do so you can execute or edit it.`
+        }
+      ]);
+      setInput("");
+      setIsOpen(true);
+      return;
     }
 
+    const fallbackReply = composeAgentReply(state, metrics, activeView, prompt);
+    const pendingId = `sentinel-${Date.now()}`;
     setMessages((current) => [
       ...current,
       { id: `operator-${Date.now()}`, role: "operator", body: prompt },
-      { id: `sentinel-${Date.now()}`, role: "agent", body: reply }
+      {
+        id: pendingId,
+        role: "agent",
+        body: state.settings.ollamaEnabled ? `Thinking locally with ${state.settings.ollamaModel}...` : fallbackReply
+      }
     ]);
     setInput("");
     setIsOpen(true);
+
+    if (!state.settings.ollamaEnabled) return;
+
+    setAgentStatus((current) => ({
+      ...current,
+      mode: "thinking",
+      label: `Ollama: ${state.settings.ollamaModel}`
+    }));
+
+    try {
+      const reply = await requestOllamaAgentReply({
+        config: ollamaConfig,
+        state,
+        metrics,
+        activeView,
+        prompt,
+        history: messages
+      });
+      setMessages((current) => current.map((message) => (message.id === pendingId ? { ...message, body: reply } : message)));
+      setAgentStatus({
+        mode: "online",
+        label: `Ollama: ${state.settings.ollamaModel}`,
+        detail: "Last reply came from local Ollama."
+      });
+    } catch (error) {
+      const detail = getErrorMessage(error);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === pendingId
+            ? {
+                ...message,
+                body: `${fallbackReply}\n\nOllama could not answer: ${detail}`
+              }
+            : message
+        )
+      );
+      setAgentStatus({
+        mode: "offline",
+        label: "Ollama fallback",
+        detail
+      });
+    }
   };
 
   const submit = (event: FormEvent) => {
@@ -1727,7 +2160,7 @@ function AgentDock({
         </div>
         <div>
           <span>Sentinel Agent</span>
-          <strong>{activeLabel} scan active</strong>
+          <strong>{agentStatus.mode === "thinking" ? "Ollama thinking" : `${activeLabel} scan active`}</strong>
         </div>
         <button type="button" aria-label={isOpen ? "Collapse Sentinel Agent" : "Open Sentinel Agent"} onClick={() => setIsOpen(!isOpen)}>
           {isOpen ? <X size={16} /> : <Sparkles size={16} />}
@@ -1740,6 +2173,7 @@ function AgentDock({
             <span><Cpu size={14} /> {metrics.readiness}% ready</span>
             <span><Target size={14} /> {metrics.pendingProjects} projects</span>
             <span><ListTodo size={14} /> {metrics.openTasks} orders</span>
+            <span className={`agent-model-pill ${agentStatus.mode}`} title={agentStatus.detail}><Bot size={14} /> {agentStatus.label}</span>
           </div>
 
           <div className="agent-context">
