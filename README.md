@@ -94,12 +94,28 @@ GitHub and Vercel linking is still metadata-only. Northwatch stores imported pro
 - Run `npm run sources:snapshot`, import the snapshot in Settings, and confirm GitHub/Vercel source counts update.
 - Keep the first Vercel version private-use only.
 
-## Link to Vercel
+## Link to Netlify
 
-Import the GitHub repo into Vercel as a Vite app. Use `npm run build` as the build command and `dist` as the output directory.
+The Netlify project is `northwatch`, with the production URL `https://northwatch.netlify.app`. Netlify reads `netlify.toml`, runs `npm run build`, and publishes `dist`.
 
-Add the Supabase variables above to Vercel for Production and Preview before publishing a private cross-device build. Supabase Auth protects Northwatch data. To make the hosted URL itself private, also enable Vercel Deployment Protection for the project in Vercel settings.
+For this project, the public Supabase browser config is included in `netlify.toml` so Netlify builds can lock Northwatch behind Supabase Auth without a manual environment-variable step. Do not add a `service_role` or secret key to Netlify or this repo.
 
-After the first deployment, open the Vercel URL, sign in through Supabase Auth, add a test task, reload on another device, and confirm the same deck loads.
+In Supabase Dashboard > Authentication > URL Configuration, set:
+
+```text
+Site URL: https://northwatch.netlify.app
+Additional Redirect URLs:
+https://northwatch.netlify.app/**
+https://main--northwatch.netlify.app/**
+https://**--northwatch.netlify.app/**
+http://localhost:5173/**
+http://localhost:5174/**
+http://127.0.0.1:5173/**
+http://127.0.0.1:5174/**
+```
+
+Northwatch sends magic links with `emailRedirectTo: window.location.origin`, so those allowed URLs are what let the same build work on production, branch deploys, and local Vite ports. If you customized Supabase email templates, use `{{ .RedirectTo }}` for the sign-in link target.
+
+After the first Netlify deployment, open the Netlify URL, sign in through Supabase Auth, add a test task, reload on another device, and confirm the same deck loads.
 
 The approved design spec lives at `docs/superpowers/specs/2026-05-08-wren-os-rebuild-design.md`.
