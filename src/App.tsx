@@ -10,7 +10,9 @@ import {
   Circle,
   CircleCheck,
   Cloud,
+  Copy,
   Cpu,
+  Crown,
   Database,
   Dumbbell,
   ExternalLink,
@@ -42,7 +44,9 @@ import {
   Trash2,
   TrendingDown,
   TrendingUp,
+  UserMinus,
   UserRound,
+  UsersRound,
   Wallet,
   X,
   Zap
@@ -52,14 +56,21 @@ import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
 import {
+  buildTeamInviteUrl,
+  createTeamInvite,
   createTeamWorkspace,
   joinTeamWorkspace,
+  listTeamMembers,
   listTeamWorkspaces,
   loadCloudDeck,
   loadTeamCloudDeck,
+  removeTeamMember,
   saveCloudDeck,
   saveTeamCloudDeck,
+  updateTeamMemberRole,
   type CloudDeckClient,
+  type TeamMember,
+  type TeamRole,
   type TeamWorkspace
 } from "./store/cloudDeck";
 import {
@@ -128,6 +139,7 @@ type AgentConnectionState = {
 };
 
 type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
+const PENDING_TEAM_INVITE_STORAGE_KEY = "northwatch.pendingTeamInvite.v1";
 
 const agentQuickPrompts = [
   "Brief my next move",
@@ -146,9 +158,12 @@ export default function App() {
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>({ kind: "personal" });
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamInviteLink, setTeamInviteLink] = useState("");
   const [isTeamBusy, setIsTeamBusy] = useState(false);
   const latestDeckRef = useRef(state);
   const saveTimerRef = useRef<number | null>(null);
+  const pendingInviteAttemptRef = useRef<string | null>(null);
   const metrics = useMemo(() => getDeckMetrics(state), [state]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => isViewEnabled(item.view, state.settings)), [state.settings]);
   const activeTeam = useMemo(
@@ -206,6 +221,8 @@ export default function App() {
         setCloudReady(false);
         setWorkspaceMode({ kind: "personal" });
         setTeams([]);
+        setTeamMembers([]);
+        setTeamInviteLink("");
         setCloudStatus({
           mode: "signed-out",
           label: "Cloud auth: sign in required",
@@ -369,6 +386,10 @@ export default function App() {
 
   const requestMagicLink = async (email: string) => {
     if (!supabase) throw new Error("Supabase is not configured.");
+    const pendingInvite = readTeamInviteFromLocation();
+    if (pendingInvite) {
+      window.localStorage.setItem(PENDING_TEAM_INVITE_STORAGE_KEY, pendingInvite);
+    }
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
@@ -387,6 +408,22 @@ export default function App() {
       return;
     }
     setNotice("Signed out of cloud auth.");
+  };
+
+  const refreshTeamMembers = async (teamId: string) => {
+    if (!supabaseConfig.isConfigured || !supabase || !session) {
+      setTeamMembers([]);
+      return;
+    }
+
+    try {
+      const client = supabase as unknown as CloudDeckClient;
+      const members = await listTeamMembers(client, teamId);
+      setTeamMembers(members);
+    } catch (error) {
+      setTeamMembers([]);
+      setNotice(getErrorMessage(error));
+    }
   };
 
   const switchWorkspace = async (nextWorkspace: WorkspaceMode) => {
@@ -418,6 +455,8 @@ export default function App() {
         if (teamDeck) {
           dispatch({ type: "deck/import", deck: teamDeck });
           setWorkspaceMode(nextWorkspace);
+          setTeamInviteLink("");
+          await refreshTeamMembers(nextWorkspace.teamId);
           setCloudStatus({
             mode: "synced",
             label: "Cloud auth: synced",
@@ -429,6 +468,8 @@ export default function App() {
           dispatch({ type: "deck/import", deck: freshCommandDeck });
           const savedAt = await saveTeamCloudDeck(client, nextWorkspace.teamId, userId, freshCommandDeck);
           setWorkspaceMode(nextWorkspace);
+          setTeamInviteLink("");
+          await refreshTeamMembers(nextWorkspace.teamId);
           setCloudStatus({
             mode: "synced",
             label: "Cloud auth: seeded",
@@ -443,6 +484,8 @@ export default function App() {
         dispatch({ type: "deck/import", deck: safeDeck });
         const savedAt = personalDeck ? personalDeck.updatedAt : await saveCloudDeck(client, userId, safeDeck);
         setWorkspaceMode(nextWorkspace);
+        setTeamMembers([]);
+        setTeamInviteLink("");
         setCloudStatus({
           mode: "synced",
           label: personalDeck ? "Cloud auth: synced" : "Cloud auth: seeded",
@@ -475,7 +518,7 @@ export default function App() {
     const client = supabase as unknown as CloudDeckClient;
     setIsTeamBusy(true);
     try {
-      const team = await createTeamWorkspace(client, session.user.id, name);
+      const team = await createTeamWorkspace(client, session.user.id, name, undefined, session.user.email);
       setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
       setNotice(`Team created: ${team.name}.`);
       await switchWorkspace({ kind: "team", teamId: team.id });
@@ -494,7 +537,8 @@ export default function App() {
     const client = supabase as unknown as CloudDeckClient;
     setIsTeamBusy(true);
     try {
-      const team = await joinTeamWorkspace(client, session.user.id, teamCode);
+      const team = await joinTeamWorkspace(client, session.user.id, teamCode, session.user.email);
+      clearPendingTeamInvite();
       setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
       setNotice(`Joined team: ${team.name}.`);
       await switchWorkspace({ kind: "team", teamId: team.id });
@@ -503,6 +547,87 @@ export default function App() {
       setIsTeamBusy(false);
     }
   };
+
+  const createInviteLink = async () => {
+    if (!supabaseConfig.isConfigured || !supabase || !session || !activeTeam) {
+      setNotice("Open a signed-in team workspace before creating an invite.");
+      return;
+    }
+
+    const client = supabase as unknown as CloudDeckClient;
+    setIsTeamBusy(true);
+    try {
+      const invite = await createTeamInvite(client, activeTeam.id, session.user.id, window.location.origin);
+      setTeamInviteLink(invite.url);
+      try {
+        await navigator.clipboard?.writeText(invite.url);
+        setNotice("Invite link created and copied.");
+      } catch {
+        setNotice("Invite link created. Copy it from the field.");
+      }
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+    } finally {
+      setIsTeamBusy(false);
+    }
+  };
+
+  const updateMemberRole = async (memberUserId: string, role: TeamRole) => {
+    if (!supabaseConfig.isConfigured || !supabase || !session || !activeTeam) {
+      setNotice("Open an owner team workspace before changing roles.");
+      return;
+    }
+
+    const client = supabase as unknown as CloudDeckClient;
+    setIsTeamBusy(true);
+    try {
+      await updateTeamMemberRole(client, activeTeam.id, memberUserId, role);
+      const nextTeams = await listTeamWorkspaces(client, session.user.id);
+      setTeams(nextTeams);
+      await refreshTeamMembers(activeTeam.id);
+      setNotice(role === "owner" ? "Member promoted to owner." : "Member role set to member.");
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+    } finally {
+      setIsTeamBusy(false);
+    }
+  };
+
+  const removeMember = async (memberUserId: string) => {
+    if (!supabaseConfig.isConfigured || !supabase || !session || !activeTeam) {
+      setNotice("Open an owner team workspace before removing members.");
+      return;
+    }
+
+    const client = supabase as unknown as CloudDeckClient;
+    setIsTeamBusy(true);
+    try {
+      await removeTeamMember(client, activeTeam.id, memberUserId);
+      const nextTeams = await listTeamWorkspaces(client, session.user.id);
+      setTeams(nextTeams);
+      setTeamMembers((current) => current.filter((member) => member.userId !== memberUserId));
+      setNotice("Member removed from team.");
+      if (memberUserId === session.user.id) {
+        await switchWorkspace({ kind: "personal" });
+      } else {
+        await refreshTeamMembers(activeTeam.id);
+      }
+    } catch (error) {
+      setNotice(getErrorMessage(error));
+    } finally {
+      setIsTeamBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!supabaseConfig.isConfigured || !session || !cloudReady) return;
+
+    const pendingInvite = readPendingTeamInvite();
+    if (!pendingInvite || pendingInviteAttemptRef.current === pendingInvite) return;
+
+    pendingInviteAttemptRef.current = pendingInvite;
+    void joinTeam(pendingInvite);
+  }, [cloudReady, session?.user.id]);
 
   if (supabaseConfig.isConfigured && !authReady) {
     return <CloudBootScreen status={cloudStatus} />;
@@ -561,10 +686,16 @@ export default function App() {
               cloudStatus={cloudStatus}
               workspaceMode={workspaceMode}
               teams={teams}
+              activeTeam={activeTeam}
+              teamMembers={teamMembers}
+              teamInviteLink={teamInviteLink}
               isTeamBusy={isTeamBusy}
               onSwitchWorkspace={switchWorkspace}
               onCreateTeam={createTeam}
               onJoinTeam={joinTeam}
+              onCreateInviteLink={createInviteLink}
+              onUpdateMemberRole={updateMemberRole}
+              onRemoveMember={removeMember}
               onSignOut={signOut}
             />
           )}
@@ -2003,20 +2134,32 @@ function AccountModule({
   cloudStatus,
   workspaceMode,
   teams,
+  activeTeam,
+  teamMembers,
+  teamInviteLink,
   isTeamBusy,
   onSwitchWorkspace,
   onCreateTeam,
   onJoinTeam,
+  onCreateInviteLink,
+  onUpdateMemberRole,
+  onRemoveMember,
   onSignOut
 }: {
   state: CommandDeckState;
   cloudStatus: CloudStatus;
   workspaceMode: WorkspaceMode;
   teams: TeamWorkspace[];
+  activeTeam: TeamWorkspace | null;
+  teamMembers: TeamMember[];
+  teamInviteLink: string;
   isTeamBusy: boolean;
   onSwitchWorkspace: (workspace: WorkspaceMode) => Promise<void>;
   onCreateTeam: (name: string) => Promise<void>;
   onJoinTeam: (teamCode: string) => Promise<void>;
+  onCreateInviteLink: () => Promise<void>;
+  onUpdateMemberRole: (memberUserId: string, role: TeamRole) => Promise<void>;
+  onRemoveMember: (memberUserId: string) => Promise<void>;
   onSignOut: () => void;
 }) {
   const [teamName, setTeamName] = useState("");
@@ -2024,6 +2167,8 @@ function AccountModule({
   const lastSync = cloudStatus.lastSyncedAt ? formatDateTime(cloudStatus.lastSyncedAt) : "Not synced yet";
   const userEmail = cloudStatus.userEmail ?? "Local operator";
   const isCloudUser = supabaseConfig.isConfigured && Boolean(cloudStatus.userEmail);
+  const canManageTeam = activeTeam?.role === "owner";
+  const activeTeamName = activeTeam?.name ?? "No team selected";
 
   const submitCreateTeam = async (event: FormEvent) => {
     event.preventDefault();
@@ -2124,12 +2269,12 @@ function AccountModule({
           </form>
           <form className="team-form" onSubmit={submitJoinTeam}>
             <label>
-              <span>Team code</span>
+              <span>Invite link</span>
               <input
-                aria-label="Team code"
+                aria-label="Invite link"
                 value={teamCode}
                 onChange={(event) => setTeamCode(event.target.value)}
-                placeholder="Paste team id"
+                placeholder="Paste team invite link"
                 disabled={!isCloudUser || isTeamBusy}
               />
             </label>
@@ -2137,6 +2282,87 @@ function AccountModule({
               <KeyRound size={16} /> Join team
             </button>
           </form>
+          <div className="team-ops-grid">
+            <div className="team-ops-card">
+              <div className="team-ops-head">
+                <Copy size={16} />
+                <div>
+                  <strong>Invite links</strong>
+                  <span>{activeTeam ? `For ${activeTeam.name}` : "Switch to a team first"}</span>
+                </div>
+              </div>
+              <button type="button" onClick={() => void onCreateInviteLink()} disabled={!canManageTeam || isTeamBusy}>
+                <Plus size={16} /> Create invite link
+              </button>
+              <input
+                aria-label="Team invite link"
+                value={teamInviteLink}
+                readOnly
+                placeholder={canManageTeam ? "Generated invite link appears here" : "Owner access required"}
+              />
+            </div>
+            <div className="team-ops-card">
+              <div className="team-ops-head">
+                <UsersRound size={16} />
+                <div>
+                  <strong>Member command</strong>
+                  <span>{activeTeamName}</span>
+                </div>
+              </div>
+              <p className="panel-copy">
+                {canManageTeam
+                  ? "Owners can promote, demote, and remove team members."
+                  : "Role management unlocks when an owner opens a team workspace."}
+              </p>
+              <div className="team-member-list">
+                {teamMembers.length === 0 ? (
+                  <span className="team-empty-state">No team members loaded.</span>
+                ) : (
+                  teamMembers.map((member) => {
+                    const memberLabel = member.email ?? member.userId;
+                    return (
+                      <article className="team-member-row" key={`${member.teamId}-${member.userId}`}>
+                        <div>
+                          <strong>{memberLabel}</strong>
+                          <span>{member.userId}</span>
+                        </div>
+                        <em>{member.role}</em>
+                        <div className="team-member-actions">
+                          <button
+                            type="button"
+                            aria-label={`Make ${memberLabel} owner`}
+                            onClick={() => void onUpdateMemberRole(member.userId, "owner")}
+                            disabled={!canManageTeam || isTeamBusy || member.role === "owner"}
+                            title="Make owner"
+                          >
+                            <Crown size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Make ${memberLabel} member`}
+                            onClick={() => void onUpdateMemberRole(member.userId, "member")}
+                            disabled={!canManageTeam || isTeamBusy || member.role === "member"}
+                            title="Make member"
+                          >
+                            <Shield size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Remove ${memberLabel}`}
+                            onClick={() => void onRemoveMember(member.userId)}
+                            disabled={!canManageTeam || isTeamBusy}
+                            title="Remove member"
+                          >
+                            <UserMinus size={15} />
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
         </section>
         <section className="deck-panel account-panel">
           <PanelHead title="Session controls" />
@@ -2150,6 +2376,29 @@ function AccountModule({
       </section>
     </ModuleShell>
   );
+}
+
+function readPendingTeamInvite(): string | null {
+  const inviteFromLocation = readTeamInviteFromLocation();
+  if (inviteFromLocation) return inviteFromLocation;
+  return window.localStorage.getItem(PENDING_TEAM_INVITE_STORAGE_KEY);
+}
+
+function readTeamInviteFromLocation(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  const teamId = params.get("team")?.trim();
+  const inviteId = params.get("invite")?.trim();
+  if (!teamId || !inviteId) return null;
+  return buildTeamInviteUrl(window.location.origin, teamId, inviteId);
+}
+
+function clearPendingTeamInvite() {
+  window.localStorage.removeItem(PENDING_TEAM_INVITE_STORAGE_KEY);
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("team") && !url.searchParams.has("invite")) return;
+  url.searchParams.delete("team");
+  url.searchParams.delete("invite");
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function LogoMark({ variant }: { variant: LogoStyle }) {

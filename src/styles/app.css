@@ -1382,6 +1382,168 @@ p {
   gap: 7px;
 }
 
+.team-ops-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  padding: 14px;
+}
+
+.team-ops-card {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.04), rgb(var(--accent-rgb) / 0.06));
+  padding: 14px;
+}
+
+.team-ops-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.team-ops-head svg {
+  color: var(--accent);
+}
+
+.team-ops-head div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.team-ops-head strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.team-ops-head span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-ops-card > button {
+  display: inline-flex;
+  min-height: 38px;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.38);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent);
+  padding: 0 13px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.team-ops-card > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.team-ops-card input {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-member-list {
+  display: grid;
+  gap: 8px;
+}
+
+.team-empty-state,
+.team-member-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #070a09;
+  padding: 10px;
+}
+
+.team-empty-state {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.team-member-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.team-member-row div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.team-member-row strong,
+.team-member-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-member-row strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.team-member-row span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.team-member-row em {
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+.team-member-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.team-member-actions button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.04);
+  color: var(--muted);
+}
+
+.team-member-actions button:not(:disabled):hover {
+  border-color: rgb(var(--accent-rgb) / 0.38);
+  color: var(--accent);
+}
+
+.team-member-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .account-actions button {
   display: inline-flex;
   min-height: 38px;
@@ -2444,6 +2606,7 @@ p {
   .finance-summary,
   .signal-grid,
   .money-grid,
+  .team-ops-grid,
   .team-code-list span,
   .team-form,
   .team-switcher,
@@ -2458,8 +2621,13 @@ p {
   }
 
   .ops-row,
-  .intel-row {
+  .intel-row,
+  .team-member-row {
     grid-template-columns: 1fr;
+  }
+
+  .team-member-actions {
+    flex-wrap: wrap;
   }
 
   .deck-status-strip {

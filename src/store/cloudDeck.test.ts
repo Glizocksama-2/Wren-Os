@@ -1,13 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import { freshCommandDeck } from "./commandDeck";
 import {
+  createTeamInvite,
   createTeamWorkspace,
   joinTeamWorkspace,
+  listTeamMembers,
   listTeamWorkspaces,
   loadCloudDeck,
   loadTeamCloudDeck,
+  removeTeamMember,
   saveCloudDeck,
-  saveTeamCloudDeck
+  saveTeamCloudDeck,
+  updateTeamMemberRole
 } from "./cloudDeck";
 
 describe("Supabase command deck persistence", () => {
@@ -157,7 +161,24 @@ describe("Supabase command deck persistence", () => {
     expect(team).toMatchObject({ id: "team-1", name: "North Unit", role: "owner" });
   });
 
-  it("joins a team as the current user without touching personal storage", async () => {
+  it("creates a shareable invite link for a team", async () => {
+    const single = vi.fn(async () => ({
+      data: { id: "invite-1", team_id: "team-1", created_at: "2026-05-18T12:00:00.000Z", expires_at: "2026-06-01T12:00:00.000Z" },
+      error: null
+    }));
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    const from = vi.fn((table: string) => (table === "team_invites" ? { insert } : {}));
+
+    const invite = await createTeamInvite({ from } as never, "team-1", "user-1", "https://northwatch.netlify.app");
+
+    expect(from).toHaveBeenCalledWith("team_invites");
+    expect(insert).toHaveBeenCalledWith({ team_id: "team-1", created_by: "user-1" });
+    expect(invite.url).toBe("https://northwatch.netlify.app/?team=team-1&invite=invite-1");
+    expect(invite.expiresAt).toBe("2026-06-01T12:00:00.000Z");
+  });
+
+  it("joins a team through an invite link without touching personal storage", async () => {
     const insert = vi.fn(async () => ({ data: null, error: null }));
     const membershipEq = vi.fn(async () => ({ data: [{ team_id: "team-1", role: "member" }], error: null }));
     const teamIn = vi.fn(async () => ({
@@ -172,10 +193,74 @@ describe("Supabase command deck persistence", () => {
       return {};
     });
 
-    const team = await joinTeamWorkspace({ from } as never, "user-2", "team-1");
+    const team = await joinTeamWorkspace(
+      { from } as never,
+      "user-2",
+      "https://northwatch.netlify.app/?team=team-1&invite=invite-1",
+      "user2@example.com"
+    );
 
     expect(from).not.toHaveBeenCalledWith("command_decks");
-    expect(insert).toHaveBeenCalledWith({ team_id: "team-1", user_id: "user-2", role: "member" });
+    expect(insert).toHaveBeenCalledWith({
+      team_id: "team-1",
+      user_id: "user-2",
+      role: "member",
+      invite_id: "invite-1",
+      member_email: "user2@example.com"
+    });
     expect(team).toEqual({ id: "team-1", name: "North Unit", role: "member", createdAt: "2026-05-18T09:00:00.000Z" });
+  });
+
+  it("lists team members for owner management", async () => {
+    const eq = vi.fn(async () => ({
+      data: [
+        {
+          team_id: "team-1",
+          user_id: "user-1",
+          role: "owner",
+          member_email: "owner@example.com",
+          joined_at: "2026-05-18T09:00:00.000Z"
+        },
+        {
+          team_id: "team-1",
+          user_id: "user-2",
+          role: "member",
+          member_email: "member@example.com",
+          joined_at: "2026-05-18T09:10:00.000Z"
+        }
+      ],
+      error: null
+    }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn((table: string) => (table === "team_memberships" ? { select } : {}));
+
+    const members = await listTeamMembers({ from } as never, "team-1");
+
+    expect(select).toHaveBeenCalledWith("team_id, user_id, role, member_email, joined_at");
+    expect(eq).toHaveBeenCalledWith("team_id", "team-1");
+    expect(members).toEqual([
+      { teamId: "team-1", userId: "user-1", role: "owner", email: "owner@example.com", joinedAt: "2026-05-18T09:00:00.000Z" },
+      { teamId: "team-1", userId: "user-2", role: "member", email: "member@example.com", joinedAt: "2026-05-18T09:10:00.000Z" }
+    ]);
+  });
+
+  it("updates member roles and removes members by team/user keys", async () => {
+    const updateUserEq = vi.fn(async () => ({ data: null, error: null }));
+    const updateTeamEq = vi.fn(() => ({ eq: updateUserEq }));
+    const update = vi.fn(() => ({ eq: updateTeamEq }));
+
+    const deleteUserEq = vi.fn(async () => ({ data: null, error: null }));
+    const deleteTeamEq = vi.fn(() => ({ eq: deleteUserEq }));
+    const deleteFn = vi.fn(() => ({ eq: deleteTeamEq }));
+    const from = vi.fn((table: string) => (table === "team_memberships" ? { update, delete: deleteFn } : {}));
+
+    await updateTeamMemberRole({ from } as never, "team-1", "user-2", "owner");
+    await removeTeamMember({ from } as never, "team-1", "user-2");
+
+    expect(update).toHaveBeenCalledWith({ role: "owner" });
+    expect(updateTeamEq).toHaveBeenCalledWith("team_id", "team-1");
+    expect(updateUserEq).toHaveBeenCalledWith("user_id", "user-2");
+    expect(deleteTeamEq).toHaveBeenCalledWith("team_id", "team-1");
+    expect(deleteUserEq).toHaveBeenCalledWith("user_id", "user-2");
   });
 });

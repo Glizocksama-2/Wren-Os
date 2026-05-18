@@ -81,7 +81,9 @@ Northwatch still stores an offline copy in the current browser's `localStorage`.
 
 Signed-in users start in a private personal vault backed by `public.command_decks`, where RLS only allows the row whose `user_id` matches the active Supabase user. New signed-in users are seeded with a fresh private deck so a previous browser user's local data is not silently copied into their account.
 
-Team mode is opt-in from Account Settings. Creating a team makes a fresh shared deck in `public.team_command_decks`, adds the creator as `owner`, and shows a team code. Members join with that code, then Northwatch can switch between the private vault and any joined team workspace. Team data is visible and writable only to authenticated users with a row in `public.team_memberships` for that team.
+Team mode is opt-in from Account Settings. Creating a team makes a fresh shared deck in `public.team_command_decks` and adds the creator as `owner`. Members join with owner-generated invite links, then Northwatch can switch between the private vault and any joined team workspace. Team data is visible and writable only to authenticated users with a row in `public.team_memberships` for that team.
+
+Owners can now create time-limited invite links from Account Settings. A signed-in user joins by opening or pasting that invite link, which records their membership in `public.team_memberships`. Owners can promote members to owner, demote owners back to member when another owner remains, and remove members from the team. These controls are backed by RLS policies and private Postgres helper functions in `private.*`; only the `role` column is update-granted to authenticated clients.
 
 The Codex Bridge is local-first handoff generation only. `/api/codex/handoff` is documented as a future/local contract, not a live hosted server endpoint.
 

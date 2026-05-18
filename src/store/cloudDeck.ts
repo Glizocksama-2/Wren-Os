@@ -4,6 +4,7 @@ const CLOUD_DECK_TABLE = "command_decks";
 const TEAMS_TABLE = "teams";
 const TEAM_MEMBERSHIPS_TABLE = "team_memberships";
 const TEAM_DECK_TABLE = "team_command_decks";
+const TEAM_INVITES_TABLE = "team_invites";
 
 export type TeamRole = "owner" | "member";
 
@@ -12,6 +13,22 @@ export type TeamWorkspace = {
   name: string;
   role: TeamRole;
   createdAt: string;
+};
+
+export type TeamInvite = {
+  id: string;
+  teamId: string;
+  url: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export type TeamMember = {
+  teamId: string;
+  userId: string;
+  role: TeamRole;
+  email: string | null;
+  joinedAt: string;
 };
 
 type CloudDeckRow = {
@@ -30,6 +47,14 @@ type TeamDeckPayload = {
   deck: CommandDeckState;
   updated_at: string;
   updated_by: string;
+};
+
+type TeamMembershipPayload = {
+  team_id: string;
+  user_id: string;
+  role: TeamRole;
+  invite_id?: string;
+  member_email?: string;
 };
 
 type SupabaseResult<T> = {
@@ -171,7 +196,8 @@ export async function createTeamWorkspace(
   client: CloudDeckClient | null,
   userId: string,
   name: string,
-  makeTeamId = createWorkspaceId
+  makeTeamId = createWorkspaceId,
+  userEmail?: string | null
 ): Promise<TeamWorkspace> {
   if (!client) throw new Error("Supabase is not configured.");
 
@@ -189,11 +215,14 @@ export async function createTeamWorkspace(
     throw new Error(teamInsert.error.message);
   }
 
-  const membershipInsert = await client.from(TEAM_MEMBERSHIPS_TABLE).insert({
+  const ownerMembership: TeamMembershipPayload = {
     team_id: teamId,
     user_id: userId,
     role: "owner"
-  }) as SupabaseResult<null>;
+  };
+  if (userEmail) ownerMembership.member_email = userEmail;
+
+  const membershipInsert = await client.from(TEAM_MEMBERSHIPS_TABLE).insert(ownerMembership) as SupabaseResult<null>;
 
   if (membershipInsert.error) {
     throw new Error(membershipInsert.error.message);
@@ -209,26 +238,152 @@ export async function createTeamWorkspace(
   };
 }
 
-export async function joinTeamWorkspace(client: CloudDeckClient | null, userId: string, teamId: string): Promise<TeamWorkspace> {
+export async function createTeamInvite(
+  client: CloudDeckClient | null,
+  teamId: string,
+  userId: string,
+  origin: string
+): Promise<TeamInvite> {
   if (!client) throw new Error("Supabase is not configured.");
 
   const cleanedTeamId = teamId.trim();
-  if (!cleanedTeamId) throw new Error("Team code is required.");
+  if (!cleanedTeamId) throw new Error("Team id is required.");
 
-  const membershipInsert = await client.from(TEAM_MEMBERSHIPS_TABLE).insert({
-    team_id: cleanedTeamId,
+  const { data, error } = await client
+    .from(TEAM_INVITES_TABLE)
+    .insert({ team_id: cleanedTeamId, created_by: userId })
+    .select("id, team_id, created_at, expires_at")
+    .single() as SupabaseResult<{ id: string; team_id: string; created_at: string; expires_at: string }>;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  if (!data) throw new Error("Invite link could not be created.");
+
+  return {
+    id: data.id,
+    teamId: data.team_id,
+    url: buildTeamInviteUrl(origin, data.team_id, data.id),
+    createdAt: data.created_at,
+    expiresAt: data.expires_at
+  };
+}
+
+export async function joinTeamWorkspace(
+  client: CloudDeckClient | null,
+  userId: string,
+  inviteInput: string,
+  userEmail?: string | null
+): Promise<TeamWorkspace> {
+  if (!client) throw new Error("Supabase is not configured.");
+
+  const invite = parseTeamInviteInput(inviteInput);
+
+  const membership: TeamMembershipPayload = {
+    team_id: invite.teamId,
     user_id: userId,
-    role: "member"
-  }) as SupabaseResult<null>;
+    role: "member",
+    invite_id: invite.inviteId
+  };
+  if (userEmail) membership.member_email = userEmail;
+
+  const membershipInsert = await client.from(TEAM_MEMBERSHIPS_TABLE).insert(membership) as SupabaseResult<null>;
 
   if (membershipInsert.error) {
     throw new Error(membershipInsert.error.message);
   }
 
   const teams = await listTeamWorkspaces(client, userId);
-  const joinedTeam = teams.find((team) => team.id === cleanedTeamId);
+  const joinedTeam = teams.find((team) => team.id === invite.teamId);
   if (!joinedTeam) throw new Error("Team joined, but it could not be loaded.");
   return joinedTeam;
+}
+
+export async function listTeamMembers(client: CloudDeckClient | null, teamId: string): Promise<TeamMember[]> {
+  if (!client) return [];
+
+  const { data, error } = await client
+    .from(TEAM_MEMBERSHIPS_TABLE)
+    .select("team_id, user_id, role, member_email, joined_at")
+    .eq("team_id", teamId) as SupabaseResult<Array<{
+      team_id: string;
+      user_id: string;
+      role: TeamRole;
+      member_email: string | null;
+      joined_at: string;
+    }>>;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((member) => ({
+    teamId: member.team_id,
+    userId: member.user_id,
+    role: member.role,
+    email: member.member_email,
+    joinedAt: member.joined_at
+  }));
+}
+
+export async function updateTeamMemberRole(
+  client: CloudDeckClient | null,
+  teamId: string,
+  memberUserId: string,
+  role: TeamRole
+): Promise<void> {
+  if (!client) throw new Error("Supabase is not configured.");
+
+  const { error } = await client
+    .from(TEAM_MEMBERSHIPS_TABLE)
+    .update({ role })
+    .eq("team_id", teamId)
+    .eq("user_id", memberUserId) as SupabaseResult<null>;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function removeTeamMember(client: CloudDeckClient | null, teamId: string, memberUserId: string): Promise<void> {
+  if (!client) throw new Error("Supabase is not configured.");
+
+  const { error } = await client
+    .from(TEAM_MEMBERSHIPS_TABLE)
+    .delete()
+    .eq("team_id", teamId)
+    .eq("user_id", memberUserId) as SupabaseResult<null>;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export function buildTeamInviteUrl(origin: string, teamId: string, inviteId: string): string {
+  const url = new URL(origin);
+  url.searchParams.set("team", teamId);
+  url.searchParams.set("invite", inviteId);
+  return url.toString();
+}
+
+export function parseTeamInviteInput(input: string): { teamId: string; inviteId: string } {
+  const cleaned = input.trim();
+  if (!cleaned) throw new Error("Invite link is required.");
+
+  try {
+    const url = new URL(cleaned);
+    const teamId = url.searchParams.get("team")?.trim() ?? "";
+    const inviteId = url.searchParams.get("invite")?.trim() ?? "";
+    if (teamId && inviteId) return { teamId, inviteId };
+  } catch {
+    // Fall through to compact invite formats.
+  }
+
+  const [teamId, inviteId] = cleaned.split(":").map((part) => part.trim());
+  if (teamId && inviteId) return { teamId, inviteId };
+
+  throw new Error("Paste a valid Northwatch invite link.");
 }
 
 function createWorkspaceId(): string {
