@@ -86,25 +86,9 @@ npm test -- --run
 npm run build
 ```
 
-## Private Cloud Auth
-
-Northwatch can now run in two modes:
-
-- Without Supabase env vars, it stays local-only and shows `Cloud auth: local fallback`.
-- With Supabase env vars, the app locks behind Supabase magic-link auth and syncs one private `command_decks` row per signed-in user.
-
-Create a Supabase project, run the SQL in `supabase/migrations/20260512000000_create_command_decks.sql`, and set:
-
-```bash
-VITE_SUPABASE_URL=your-project-url
-VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-```
-
-Use the legacy `VITE_SUPABASE_ANON_KEY` only if your project has not moved to publishable keys yet. Never put a `service_role` or secret key in this Vite app.
-
 ## Express Password Auth
 
-Northwatch also includes an Express auth API for email/password accounts, httpOnly JWT cookies, seven-day expiry, silent refresh, server-side logout revocation, and per-user PostgreSQL isolation.
+Northwatch uses an Express auth API for email/password accounts. Signed-out users choose either Sign in or Sign up, then enter credentials. Sessions use httpOnly JWT cookies, seven-day expiry, silent refresh, server-side logout revocation, and per-user PostgreSQL isolation.
 
 Required server env vars:
 
@@ -132,7 +116,7 @@ Protected API data routes live under `/api/:resource` for `kanban-cards`, `proje
 
 ## Local-first Data Warning
 
-Northwatch still stores an offline copy in the current browser's `localStorage`. With Supabase configured, that local copy is loaded into or replaced by the authenticated cloud row after sign-in. Export JSON before clearing browser data, switching profiles, using another device for the first time, or resetting the seed workspace.
+Northwatch still stores an offline copy in the current browser's `localStorage`, keyed per signed-in user. Export JSON before clearing browser data, switching profiles, using another device for the first time, or resetting the seed workspace.
 
 ## Legal Consent
 
@@ -140,13 +124,11 @@ First use is gated by two explicit checkboxes: agreement to the Terms and Condit
 
 ## Personal And Team Workspaces
 
-Signed-in users start in a private personal vault backed by `public.command_decks`, where RLS only allows the row whose `user_id` matches the active Supabase user. New signed-in users are seeded with a fresh private deck so a previous browser user's local data is not silently copied into their account.
+Signed-in users start in a private personal vault scoped to their Northwatch user id. New signed-in users are seeded with a fresh private deck so a previous browser user's local data is not silently copied into their account.
 
-Team workspace tables are supported at the data layer. Creating a team makes a fresh shared deck in `public.team_command_decks` and adds the creator as `owner`. Members join with owner-generated invite links, then Northwatch can switch between the private vault and any joined team workspace. Team data is visible and writable only to authenticated users with a row in `public.team_memberships` for that team.
+Team workspace UI remains present, but shared cloud team sync is paused while Northwatch uses the Express credential system as the primary auth layer.
 
 Open the logo button > Account to manage identity, workspace mode, team creation, invite links, member roles, and sign out.
-
-Owners can create time-limited invite links through the team helper functions. A signed-in user joins by opening or pasting that invite link, which records their membership in `public.team_memberships`. Owners can promote members to owner, demote owners back to member when another owner remains, and remove members from the team. These controls are backed by RLS policies and private Postgres helper functions in `private.*`; only the `role` column is update-granted to authenticated clients.
 
 The Codex Bridge is local-first handoff generation only. `/api/codex/handoff` is documented as a future/local contract, not a live hosted server endpoint.
 
@@ -171,24 +153,8 @@ GitHub and Vercel linking is still metadata-only. Northwatch stores imported pro
 
 The Netlify project is `northwatch`, with the production URL `https://northwatch.netlify.app`. Netlify reads `netlify.toml`, runs `npm run build`, and publishes `dist`.
 
-For this project, the public Supabase browser config is included in `netlify.toml` so Netlify builds can lock Northwatch behind Supabase Auth without a manual environment-variable step. Do not add a `service_role` or secret key to Netlify or this repo.
+For this project, password auth is handled by the Express API. Configure the API origin with `VITE_AUTH_API_BASE_URL` and keep server secrets such as `DATABASE_URL`, `JWT_SECRET`, and `TELEGRAM_SECRET_KEY` out of the Vite client bundle.
 
-In Supabase Dashboard > Authentication > URL Configuration, set:
-
-```text
-Site URL: https://northwatch.netlify.app
-Additional Redirect URLs:
-https://northwatch.netlify.app/**
-https://main--northwatch.netlify.app/**
-https://**--northwatch.netlify.app/**
-http://localhost:5173/**
-http://localhost:5174/**
-http://127.0.0.1:5173/**
-http://127.0.0.1:5174/**
-```
-
-Northwatch sends magic links with `emailRedirectTo: window.location.origin`, so those allowed URLs are what let the same build work on production, branch deploys, and local Vite ports. If you customized Supabase email templates, use `{{ .RedirectTo }}` for the sign-in link target.
-
-After the first Netlify deployment, open the Netlify URL, sign in through Supabase Auth, add a test task, reload on another device, and confirm the same deck loads.
+After deployment, open the hosted URL, choose Sign up, create a test account, add a test task, sign out, then sign back in with the same email and password.
 
 The approved design spec lives at `docs/superpowers/specs/2026-05-08-wren-os-rebuild-design.md`.

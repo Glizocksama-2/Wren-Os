@@ -3,6 +3,29 @@ import { LockKeyhole, Mail, UserRound } from "lucide-react";
 import { AuthApiError } from "./api";
 import { useAuth } from "./AuthContext";
 
+export function AuthChoicePage() {
+  return (
+    <main className="auth-screen">
+      <section className="auth-panel auth-panel-wide">
+        <div className="auth-mark">
+          <LockKeyhole size={24} />
+        </div>
+        <span className="micro-label">Northwatch secure access</span>
+        <h1>Choose how to enter Northwatch.</h1>
+        <p>Sign in with your existing account or create a new one with email and password. Credentials only.</p>
+        <div className="auth-choice-actions">
+          <a href="/login">
+            <LockKeyhole size={16} /> Sign in
+          </a>
+          <a href="/register">
+            <UserRound size={16} /> Sign up
+          </a>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");

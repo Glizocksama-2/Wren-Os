@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import App from "../App";
 import { AuthProvider, useAuth } from "./AuthContext";
-import { LoginPage, RegisterPage } from "./AuthPages";
+import { AuthChoicePage, LoginPage, RegisterPage } from "./AuthPages";
 import { ProtectedRoute } from "./ProtectedRoute";
 
 export default function ProtectedNorthwatch() {
@@ -24,6 +24,7 @@ function AuthRouter() {
 
   if (!isAuthenticated && path === "/register") return <RegisterPage />;
   if (!isAuthenticated && path === "/login") return <LoginPage />;
+  if (!isAuthenticated) return <AuthChoicePage />;
 
   return (
     <ProtectedRoute>

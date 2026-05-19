@@ -4,6 +4,7 @@ import App from "../App";
 import { COMMAND_DECK_STORAGE_KEY, getCommandDeckStorageKey } from "../store/commandDeck";
 import { AuthProvider, useAuth, type AuthUser } from "./AuthContext";
 import { LoginPage, RegisterPage } from "./AuthPages";
+import ProtectedNorthwatch from "./ProtectedNorthwatch";
 import { ProtectedRoute } from "./ProtectedRoute";
 
 const authUser: AuthUser = {
@@ -72,6 +73,18 @@ describe("Northwatch React auth", () => {
 
     expect(screen.getByText("Password confirmation does not match.")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith("/auth/register", expect.anything());
+  });
+
+  it("lets signed-out users choose sign in or sign up without a magic link", async () => {
+    mockFetch([{ ok: false, status: 401, json: async () => ({ error: "Authentication required." }) }]);
+    window.history.replaceState(null, "", "/");
+
+    render(<ProtectedNorthwatch />);
+
+    expect(await screen.findByRole("heading", { name: "Choose how to enter Northwatch." })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/register");
+    expect(screen.queryByText(/magic link/i)).not.toBeInTheDocument();
   });
 
   it("shows a loading state while protected routes verify the httpOnly cookie session", () => {

@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, {
-  AuthGate,
   LEGAL_CONSENT_STORAGE_KEY,
   PRIVACY_VERSION,
   SESSION_TOKEN_STORAGE_KEY,
@@ -58,7 +57,7 @@ describe("Northwatch command deck", () => {
     expect(screen.getByRole("heading", { name: /your command deck, live/i })).toBeInTheDocument();
     expect(screen.queryByText("Mercer Ventures")).not.toBeInTheDocument();
     expect(screen.getByText("8 GitHub repos imported from Glizocksama-2")).toBeInTheDocument();
-    expect(screen.getByText(/cloud auth: local fallback/i)).toBeInTheDocument();
+    expect(screen.getByText(/credential auth: active/i)).toBeInTheDocument();
     expect(window.localStorage.getItem("wren-os.workspace.v1")).not.toBeNull();
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Operator");
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("EStarzFc");
@@ -375,37 +374,6 @@ describe("Northwatch command deck", () => {
     expect(within(nav).queryByRole("button", { name: "Account" })).not.toBeInTheDocument();
   });
 
-  it("prefills remembered auth accounts and can forget one", async () => {
-    const requestMagicLink = vi.fn().mockResolvedValue(undefined);
-    const forgetRememberedAccount = vi.fn();
-
-    render(
-      <AuthGate
-        status={{
-          mode: "signed-out",
-          label: "Cloud auth: sign in required",
-          detail: "Use your Supabase magic link to unlock cross-device sync.",
-          lastSyncedAt: null,
-          userEmail: null
-        }}
-        rememberedAccounts={[
-          { email: "operator@northwatch.dev", userId: "user-1", lastUsedAt: "2026-05-19T08:00:00.000Z" },
-          { email: "backup@northwatch.dev", userId: null, lastUsedAt: "2026-05-18T08:00:00.000Z" }
-        ]}
-        onRequestMagicLink={requestMagicLink}
-        onForgetRememberedAccount={forgetRememberedAccount}
-      />
-    );
-
-    expect(screen.getByDisplayValue("operator@northwatch.dev")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /continue as backup@northwatch.dev/i }));
-    await waitFor(() => expect(requestMagicLink).toHaveBeenCalledWith("backup@northwatch.dev"));
-    expect(screen.getByText(/magic link sent/i)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /forget operator@northwatch.dev/i }));
-    expect(forgetRememberedAccount).toHaveBeenCalledWith("operator@northwatch.dev");
-  });
 });
 
 function clickNav(name: string) {
