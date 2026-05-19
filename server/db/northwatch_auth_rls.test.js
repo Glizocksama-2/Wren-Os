@@ -14,6 +14,8 @@ describe("northwatch auth RLS migration", () => {
     expect(sql).toContain("create table if not exists user_sessions");
     expect(sql).toContain("create table if not exists auth_login_failures");
     expect(sql).toContain("current_setting('app.current_user_id', true)");
+    expect(sql).toContain("northwatch_legacy_command_deck_for_email");
+    expect(sql).toContain("grant execute on function public.northwatch_legacy_command_deck_for_email(text) to northwatch_app");
 
     for (const table of isolatedTables) {
       expect(sql).toContain(`create table if not exists ${table}`);

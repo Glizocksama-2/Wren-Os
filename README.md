@@ -96,6 +96,7 @@ Required server env vars:
 DATABASE_URL=postgres://user:password@host:5432/northwatch
 JWT_SECRET=use-a-long-random-secret
 TELEGRAM_SECRET_KEY=use-at-least-32-random-characters
+NORTHWATCH_APP_URL=https://northwatch.app
 CORS_ORIGIN=http://127.0.0.1:5173,http://127.0.0.1:5174
 PORT=4000
 ```
@@ -110,9 +111,23 @@ Apply the PostgreSQL schema and RLS policies from:
 
 ```bash
 server/db/northwatch_auth_rls.sql
+server/db/northwatch_team_feature.sql
 ```
 
-Protected API data routes live under `/api/:resource` for `kanban-cards`, `projects`, `content-queue`, `documents`, `activity-feed`, `agent-configs`, and `api-tokens`. The backend ignores any `user_id` sent by the client and scopes each query with `WHERE user_id = req.userId` plus the RLS `app.current_user_id` setting.
+Protected API data routes live under `/api/:resource` for `kanban-cards`, `projects`, `content-queue`, `documents`, `activity-feed`, `agent-configs`, and `api-tokens`. The backend ignores any `user_id` sent by the client. Personal queries scope by `req.userId`; team queries require membership and scope by `team_id`.
+
+Optional invite email delivery:
+
+```bash
+INVITE_EMAIL_FROM="Northwatch <no-reply@northwatch.app>"
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=mailer@example.com
+SMTP_PASS=provider-password
+```
+
+When `SMTP_HOST` is not set, the Express API logs invite links for development.
 
 ## Local-first Data Warning
 
@@ -126,9 +141,11 @@ First use is gated by two explicit checkboxes: agreement to the Terms and Condit
 
 Signed-in users start in a private personal vault scoped to their Northwatch user id. New signed-in users are seeded with a fresh private deck so a previous browser user's local data is not silently copied into their account.
 
-Team workspace UI remains present, but shared cloud team sync is paused while Northwatch uses the Express credential system as the primary auth layer.
+Team workspaces are handled by the Express API and PostgreSQL RLS. Owners create teams at `/team/create`, admins invite members from `/team/:slug/settings`, and invite recipients complete `/invite/:token` after signing in or registering. Team roles are `owner`, `admin`, `member`, and `viewer`.
 
-Open the logo button > Account to manage identity, workspace mode, team creation, invite links, member roles, and sign out.
+The header includes a workspace switcher for Personal plus each team the user belongs to, and a notification bell for team events such as being added, task assignment, and accepted invites.
+
+Migration steps for existing deployments are in `docs/team-migration-guide.md`.
 
 The Codex Bridge is local-first handoff generation only. `/api/codex/handoff` is documented as a future/local contract, not a live hosted server endpoint.
 

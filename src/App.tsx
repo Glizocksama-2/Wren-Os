@@ -54,9 +54,12 @@ import {
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
 import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
 import type { AuthUser } from "./auth/AuthContext";
+import { IntelPage } from "./components/IntelPage";
+import { CurrencyProvider } from "./context/CurrencyContext";
 import { buildAutonomousIntelScan } from "./lib/intelAutopilot";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
+import { toKSH } from "./utils/currency";
 import {
   buildTeamInviteUrl,
   createTeamInvite,
@@ -75,6 +78,7 @@ import {
   type TeamRole,
   type TeamWorkspace
 } from "./store/cloudDeck";
+import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
 import {
   type Accent,
   type BackgroundMode,
@@ -94,6 +98,7 @@ import {
   type RoutineDay,
   freshCommandDeck,
   getDeckMetrics,
+  hasMeaningfulDeckData,
   loadCommandDeck,
   reduceCommandDeck,
   saveCommandDeck
@@ -165,7 +170,9 @@ type AgentConnectionState = {
 };
 
 type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
+type TeamWorkspaceSelection = { type: "personal" } | { type: "team"; teamId: string; slug: string; name: string; role: string };
 const PENDING_TEAM_INVITE_STORAGE_KEY = "northwatch.pendingTeamInvite.v1";
+const ACTIVE_TEAM_WORKSPACE_STORAGE_KEY = "northwatch.active-team-workspace.v1";
 export const LEGAL_CONSENT_STORAGE_KEY = "northwatch.legal-consent.v1";
 export const TERMS_VERSION = "2026-05-19";
 export const PRIVACY_VERSION = "2026-05-19";
@@ -177,7 +184,9 @@ const ACTIVITY_FEED_POLL_MS = 60000;
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL?.trim() ?? "").replace(/\/$/, "");
 const TELEGRAM_SEND_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/send`;
 const TELEGRAM_CONFIG_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/config`;
+const LEGACY_COMMAND_DECK_ENDPOINT = `${AUTH_API_BASE_URL}/api/legacy-command-deck`;
 const LEGACY_SUPABASE_CLOUD_SYNC_ENABLED = false;
+const LEGACY_CLOUD_IMPORT_STORAGE_PREFIX = "northwatch.legacy-cloud-import.v2";
 
 type LegalPanel = "settings" | "help" | "privacy" | "terms";
 type AgentHealthStatus = "alive" | "dead" | "idle";
@@ -220,6 +229,11 @@ interface TelegramConfigStatus {
   configured: boolean;
   botUsername: string | null;
   chatId: string | null;
+  updatedAt: string | null;
+}
+
+interface LegacyCommandDeckPayload {
+  deck: Partial<CommandDeckState>;
   updatedAt: string | null;
 }
 
@@ -289,7 +303,15 @@ const agentQuickPrompts = [
   "Create focus task"
 ];
 
-export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
+export default function App(props: AppProps = {}) {
+  return (
+    <CurrencyProvider>
+      <NorthwatchApp {...props} />
+    </CurrencyProvider>
+  );
+}
+
+function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   const authUserId = authUser?.id ?? null;
   const isSupabaseCloudConfigured = LEGACY_SUPABASE_CLOUD_SYNC_ENABLED && supabaseConfig.isConfigured;
   const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeck(window.localStorage, authUserId));
@@ -300,6 +322,7 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
   const [cloudReady, setCloudReady] = useState(!isSupabaseCloudConfigured);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>({ kind: "personal" });
+  const [activeTeamWorkspace, setActiveTeamWorkspace] = useState<TeamWorkspaceSelection>(() => loadActiveTeamWorkspace());
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
@@ -309,6 +332,7 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
   const [legalConsent, setLegalConsent] = useState<LegalConsentRecord | null>(() => loadLegalConsent());
   const [sessionToken, setSessionToken] = useState<SessionTokenRecord>(() => loadOrCreateSessionToken());
   const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
+  const [isRecoveringLegacyDeck, setIsRecoveringLegacyDeck] = useState(false);
   const [newActivityCount, setNewActivityCount] = useState(0);
   const latestDeckRef = useRef(state);
   const saveTimerRef = useRef<number | null>(null);
@@ -322,12 +346,74 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
     () => (workspaceMode.kind === "team" ? teams.find((team) => team.id === workspaceMode.teamId) ?? null : null),
     [teams, workspaceMode]
   );
-  const workspaceLabel = activeTeam ? `Team: ${activeTeam.name}` : "Personal vault";
+  const workspaceLabel = activeTeamWorkspace.type === "team" ? `Team: ${activeTeamWorkspace.name}` : activeTeam ? `Team: ${activeTeam.name}` : "Personal vault";
 
   useEffect(() => {
     latestDeckRef.current = state;
     saveCommandDeck(state, window.localStorage, authUserId);
   }, [authUserId, state]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+
+    const importKey = `${LEGACY_CLOUD_IMPORT_STORAGE_PREFIX}:${authUserId}`;
+    if (window.localStorage.getItem(importKey)) return;
+
+    let isCancelled = false;
+
+    async function importLegacyCloudDeck() {
+      try {
+        const payload = await fetchLegacyCommandDeck();
+        if (isCancelled || !payload) return;
+
+        const hasCurrentDeckData = hasMeaningfulDeckData(latestDeckRef.current);
+        dispatch({
+          type: hasCurrentDeckData ? "deck/merge-import" : "deck/import",
+          deck: payload.deck,
+          preserveLegacyGitHubProjects: true
+        });
+        window.localStorage.setItem(importKey, payload.updatedAt ?? new Date().toISOString());
+        setNotice(hasCurrentDeckData ? "Recovered and merged the command deck saved under your email." : "Recovered the command deck saved under your email.");
+      } catch {
+        // Legacy cloud import is best-effort; local account storage still works without it.
+      }
+    }
+
+    void importLegacyCloudDeck();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authUserId]);
+
+  const recoverLegacyEmailDeck = useCallback(async () => {
+    if (!authUserId) {
+      setNotice("Sign in first, then recover data saved under your email.");
+      return;
+    }
+
+    setIsRecoveringLegacyDeck(true);
+    try {
+      const payload = await fetchLegacyCommandDeck();
+      if (!payload) {
+        setNotice("No previous email data was found for this account yet.");
+        return;
+      }
+
+      const hasCurrentDeckData = hasMeaningfulDeckData(latestDeckRef.current);
+      dispatch({
+        type: hasCurrentDeckData ? "deck/merge-import" : "deck/import",
+        deck: payload.deck,
+        preserveLegacyGitHubProjects: true
+      });
+      window.localStorage.setItem(`${LEGACY_CLOUD_IMPORT_STORAGE_PREFIX}:${authUserId}`, payload.updatedAt ?? new Date().toISOString());
+      setNotice(hasCurrentDeckData ? "Recovered and merged the command deck saved under your email." : "Recovered the command deck saved under your email.");
+    } catch (error) {
+      setNotice(`Email data recovery failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsRecoveringLegacyDeck(false);
+    }
+  }, [authUserId]);
 
   useEffect(() => {
     if (!isSupabaseCloudConfigured || !supabase) return;
@@ -944,6 +1030,12 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
     setNotice("Session token rotated.");
   };
 
+  const switchExpressWorkspace = (workspace: TeamWorkspaceSelection) => {
+    saveActiveTeamWorkspace(workspace);
+    setActiveTeamWorkspace(workspace);
+    setNotice(workspace.type === "team" ? `Switched to ${workspace.name} workspace.` : "Switched to personal workspace.");
+  };
+
   if (isSessionTokenExpired(sessionToken)) {
     return <SessionExpiredScreen sessionToken={sessionToken} onRotate={rotateSessionToken} />;
   }
@@ -996,8 +1088,10 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
           settings={state.settings}
           cloudStatus={cloudStatus}
           workspaceLabel={workspaceLabel}
+          activeWorkspace={activeTeamWorkspace}
           authUser={authUser}
           onCommand={navigateFromSearch}
+          onWorkspaceChange={switchExpressWorkspace}
           onSignOut={signOut}
           onAuthLogout={onAuthLogout}
         />
@@ -1027,6 +1121,7 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
             <AccountModule
               state={state}
               cloudStatus={cloudStatus}
+              authUser={authUser}
               workspaceMode={workspaceMode}
               teams={teams}
               activeTeam={activeTeam}
@@ -1040,6 +1135,8 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
               onCreateInviteLink={createInviteLink}
               onUpdateMemberRole={updateMemberRole}
               onRemoveMember={removeMember}
+              onRecoverEmailDeck={recoverLegacyEmailDeck}
+              isRecoveringEmailDeck={isRecoveringLegacyDeck}
               onSignOut={signOut}
             />
           )}
@@ -1240,6 +1337,24 @@ function LegalInfoWindow({
       </section>
     </div>
   );
+}
+
+function loadActiveTeamWorkspace(): TeamWorkspaceSelection {
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_TEAM_WORKSPACE_STORAGE_KEY);
+    if (!stored) return { type: "personal" };
+    const parsed = JSON.parse(stored) as Partial<TeamWorkspaceSelection>;
+    if (parsed.type === "team" && typeof parsed.teamId === "string" && typeof parsed.slug === "string" && typeof parsed.name === "string") {
+      return { type: "team", teamId: parsed.teamId, slug: parsed.slug, name: parsed.name, role: typeof parsed.role === "string" ? parsed.role : "member" };
+    }
+  } catch {
+    // Use personal workspace when saved selection cannot be read.
+  }
+  return { type: "personal" };
+}
+
+function saveActiveTeamWorkspace(workspace: TeamWorkspaceSelection) {
+  window.localStorage.setItem(ACTIVE_TEAM_WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
 }
 
 function TelegramSettingsCard({ onNotice }: { onNotice: (message: string) => void }) {
@@ -1584,16 +1699,20 @@ function TopBar({
   settings,
   cloudStatus,
   workspaceLabel,
+  activeWorkspace,
   authUser,
   onCommand,
+  onWorkspaceChange,
   onSignOut,
   onAuthLogout
 }: {
   settings: DeckSettings;
   cloudStatus: CloudStatus;
   workspaceLabel: string;
+  activeWorkspace: TeamWorkspaceSelection;
   authUser?: AuthUser | null;
   onCommand: (query: string) => void;
+  onWorkspaceChange: (workspace: TeamWorkspaceSelection) => void;
   onSignOut: () => void;
   onAuthLogout?: () => void | Promise<void>;
 }) {
@@ -1637,6 +1756,8 @@ function TopBar({
           <Shield size={14} />
           {workspaceLabel}
         </span>
+        <WorkspaceSwitcher activeWorkspace={activeWorkspace} onWorkspaceChange={onWorkspaceChange as any} />
+        <NotificationBell />
         <span className={`cloud-status-pill ${cloudStatus.mode}`} title={cloudStatus.detail}>
           <Cloud size={14} />
           {cloudStatus.label}
@@ -1780,7 +1901,7 @@ function Dashboard({
   setNotice: (message: string) => void;
 }) {
   const openProjects = state.projects.filter((project) => project.status === "pending").slice(0, 4);
-  const topTasks = state.tasks.filter((task) => task.status === "todo").slice(0, 4);
+  const topTasks = state.tasks.filter((task) => task.status !== "done").slice(0, 4);
 
   return (
     <div className="dashboard-layout">
@@ -1809,7 +1930,7 @@ function Dashboard({
       <section className="github-scan-strip dashboard-scan">
         <Github size={18} />
         <div>
-          <strong>{state.githubScan.projectCount} GitHub repos imported from {state.githubScan.owner}</strong>
+          <strong>{state.projects.filter((project) => project.source === "github" && project.repositoryUrl).length} private GitHub repo links</strong>
           <span>Average project progress: {metrics.projectProgress}%</span>
         </div>
       </section>
@@ -1909,8 +2030,22 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
   const [priority, setPriority] = useState<Priority>("medium");
   const [dueDate, setDueDate] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const open = state.tasks.filter((task) => task.status === "todo");
-  const done = state.tasks.filter((task) => task.status === "done");
+  const [activeTab, setActiveTab] = useState<"all" | "active" | "in_progress" | "completed">("active");
+  const [sortBy, setSortBy] = useState<"priority" | "dueDate" | "createdAt" | "assignee">("priority");
+  const [isCompletedOpen, setIsCompletedOpen] = useState(false);
+  const activeTasks = state.tasks.filter((task) => isActiveTaskStatus(task.status));
+  const completedTasks = state.tasks.filter((task) => task.status === "done");
+  const visibleTasks = sortTasks(
+    state.tasks.filter((task) => {
+      if (activeTab === "all") return true;
+      if (activeTab === "active") return isActiveTaskStatus(task.status);
+      if (activeTab === "in_progress") return task.status === "in_progress";
+      if (activeTab === "completed") return task.status === "done";
+      return true;
+    }),
+    sortBy
+  );
+  const primaryVisibleTasks = activeTab === "completed" ? visibleTasks : visibleTasks.filter((task) => task.status !== "done");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1941,6 +2076,11 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
     setDueDate("");
   };
 
+  const clearCompleted = () => {
+    completedTasks.forEach((task) => dispatch({ type: "task/delete", id: task.id }));
+    setNotice("Completed tasks cleared.");
+  };
+
   return (
     <ModuleShell title="To Do List" description="Capture orders, finish them, clear the board.">
       <form className="command-form" onSubmit={submit}>
@@ -1961,40 +2101,166 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
         <button type="submit"><Plus size={16} /> {editingTaskId ? "Save task" : "Add task"}</button>
         {editingTaskId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
-      <TwoColumn titleLeft="Active" titleRight="Done">
-        <ItemList empty="No active tasks.">
-          {open.map((task) => (
-            <ActionRow key={task.id} title={task.title} meta={`${getKanbanPriorityLabel(task.kanbanPriority)}${task.dueDate ? ` - ${formatDate(task.dueDate)}` : ""}`} priority={task.kanbanPriority}>
-              <PriorityTagControls
-                value={task.kanbanPriority}
-                onChange={(nextPriority) => dispatch({ type: "task/kanban-priority", id: task.id, priority: nextPriority })}
-              />
-              <TelegramButton
-                payload={{ kind: "kanban-card", title: task.title, body: `Priority: ${getKanbanPriorityLabel(task.kanbanPriority)}`, meta: task.dueDate ? formatDate(task.dueDate) : "No due date" }}
+      <section className="deck-panel todo-panel">
+        <div className="todo-toolbar">
+          <div className="segmented-tabs" role="tablist" aria-label="Task status filters">
+            {[
+              ["all", `All (${state.tasks.length})`, "All"],
+              ["active", `Active (${activeTasks.length})`, "Active"],
+              ["in_progress", `In Progress (${state.tasks.filter((task) => task.status === "in_progress").length})`, "In Progress"],
+              ["completed", `Completed (${completedTasks.length})`, "Completed"]
+            ].map(([value, label, ariaLabel]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-label={ariaLabel}
+                aria-selected={activeTab === value}
+                className={activeTab === value ? "active" : ""}
+                onClick={() => setActiveTab(value as typeof activeTab)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <label className="market-sort">
+            <span>Sort</span>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} aria-label="Sort tasks">
+              <option value="priority">Priority</option>
+              <option value="dueDate">Due Date</option>
+              <option value="createdAt">Created Date</option>
+              <option value="assignee">Assignee</option>
+            </select>
+          </label>
+        </div>
+        {primaryVisibleTasks.length === 0 ? (
+          <div className="todo-empty-state">
+            <strong>{"\u2713"}</strong>
+            <span>You're all caught up.</span>
+            <button type="button" onClick={() => (document.querySelector<HTMLInputElement>("[aria-label='Task title']")?.focus())}>
+              <Plus size={16} /> Add a task
+            </button>
+          </div>
+        ) : (
+          <div className="todo-task-list">
+            {primaryVisibleTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onToggle={() => dispatch({ type: "task/toggle", id: task.id })}
+                onEdit={() => startEdit(task)}
+                onDelete={() => dispatch({ type: "task/delete", id: task.id })}
+                onPriority={(nextPriority) => dispatch({ type: "task/kanban-priority", id: task.id, priority: nextPriority })}
                 onNotice={setNotice}
               />
-              <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
-              <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Done</button>
-              <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
-            </ActionRow>
-          ))}
-        </ItemList>
-        <ItemList empty="No completed tasks.">
-          {done.map((task) => (
-            <ActionRow key={task.id} title={task.title} meta="completed" priority={task.kanbanPriority}>
-              <TelegramButton
-                payload={{ kind: "kanban-card", title: task.title, body: "Completed task", meta: getKanbanPriorityLabel(task.kanbanPriority) }}
-                onNotice={setNotice}
-              />
-              <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
-              <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Reopen</button>
-              <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
-            </ActionRow>
-          ))}
-        </ItemList>
-      </TwoColumn>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="deck-panel completed-task-panel">
+        <button className="completed-toggle" type="button" onClick={() => setIsCompletedOpen((open) => !open)}>
+          Completed ({completedTasks.length}) {isCompletedOpen ? "\u25B2" : "\u25BC"}
+        </button>
+        {isCompletedOpen && (
+          <>
+            {completedTasks.length > 0 && <button type="button" className="clear-completed-button" onClick={clearCompleted}>Clear completed</button>}
+            <div className="todo-task-list completed">
+              {completedTasks.length === 0 && <EmptyState>No completed tasks.</EmptyState>}
+              {completedTasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onToggle={() => dispatch({ type: "task/toggle", id: task.id })}
+                  onEdit={() => startEdit(task)}
+                  onDelete={() => dispatch({ type: "task/delete", id: task.id })}
+                  onPriority={(nextPriority) => dispatch({ type: "task/kanban-priority", id: task.id, priority: nextPriority })}
+                  onNotice={setNotice}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </section>
     </ModuleShell>
   );
+}
+
+function TaskCard({
+  task,
+  onToggle,
+  onEdit,
+  onDelete,
+  onPriority,
+  onNotice
+}: {
+  task: CommandDeckState["tasks"][number];
+  onToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onPriority: (priority: KanbanPriority) => void;
+  onNotice: (message: string) => void;
+}) {
+  const dueTone = getDueTone(task.dueDate);
+  const statusLabel = task.status === "in_progress" ? "In progress" : task.status === "done" ? "Done" : "Pending";
+  return (
+    <article className={`ops-row task-card-row task-status-${getTaskStatusClass(task.status)} kanban-priority-${task.kanbanPriority}`}>
+      <label className="task-complete-check">
+        <input aria-label={`Complete ${task.title}`} type="checkbox" checked={task.status === "done"} onChange={onToggle} />
+        <span>{task.status === "done" ? "\u2713" : ""}</span>
+      </label>
+      <div className="task-card-main">
+        <strong className={task.status === "done" ? "task-title-completed" : ""}>{task.title}</strong>
+        <div className="task-meta-line">
+          <span className={`priority-pill priority-${task.kanbanPriority}`}>{getKanbanPriorityLabel(task.kanbanPriority)}</span>
+          <span className="assignee-pill">Me</span>
+          {task.dueDate && <span className={`due-pill ${dueTone}`}>{formatDate(task.dueDate)}</span>}
+          <span className="status-pill">{statusLabel}</span>
+        </div>
+      </div>
+      <TelegramButton
+        payload={{ kind: "kanban-card", title: task.title, body: `Priority: ${getKanbanPriorityLabel(task.kanbanPriority)}`, meta: task.dueDate ? formatDate(task.dueDate) : "No due date" }}
+        onNotice={onNotice}
+      />
+      <details className="task-menu">
+        <summary aria-label={`Task menu for ${task.title}`}>...</summary>
+        <div>
+          <button type="button" onClick={onEdit}><Pencil size={15} /> Modify</button>
+          <button type="button" onClick={onDelete} aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
+          <button type="button" onClick={() => onPriority("urgent")}>URGENT</button>
+          <button type="button" onClick={() => onPriority("normal")}>NORMAL</button>
+          <button type="button" onClick={() => onPriority("later")}>LATER</button>
+        </div>
+      </details>
+    </article>
+  );
+}
+
+function isActiveTaskStatus(status: CommandDeckState["tasks"][number]["status"]): boolean {
+  return status === "pending" || status === "in_progress" || status === "todo";
+}
+
+function getTaskStatusClass(status: CommandDeckState["tasks"][number]["status"]): string {
+  if (status === "in_progress") return "in-progress";
+  if (status === "done") return "done";
+  return "pending";
+}
+
+function getDueTone(dueDate: string | null): string {
+  if (!dueDate) return "";
+  const today = getTodayInput();
+  if (dueDate < today) return "overdue";
+  if (dueDate === today) return "today";
+  return "";
+}
+
+function sortTasks(tasks: CommandDeckState["tasks"], sortBy: "priority" | "dueDate" | "createdAt" | "assignee") {
+  const priorityOrder: Record<KanbanPriority, number> = { urgent: 0, normal: 1, later: 2 };
+  return [...tasks].sort((left, right) => {
+    if (sortBy === "dueDate") return (left.dueDate ?? "9999-12-31").localeCompare(right.dueDate ?? "9999-12-31");
+    if (sortBy === "createdAt") return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    if (sortBy === "assignee") return left.title.localeCompare(right.title);
+    return priorityOrder[left.kanbanPriority] - priorityOrder[right.kanbanPriority];
+  });
 }
 
 function DailyModule({ state, dispatch, setNotice }: ModuleProps) {
@@ -2162,13 +2428,22 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
   const [nextAction, setNextAction] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [progress, setProgress] = useState("0");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [defaultBranch, setDefaultBranch] = useState("");
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const pending = state.projects.filter((project) => project.status === "pending");
   const done = state.projects.filter((project) => project.status === "done");
+  const linkedRepoCount = state.projects.filter((project) => project.source === "github" && project.repositoryUrl).length;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) return;
+    const cleanedRepositoryUrl = repositoryUrl.trim();
+    if (cleanedRepositoryUrl && !isGitHubRepositoryUrl(cleanedRepositoryUrl)) {
+      setNotice("Paste a valid GitHub repository URL.");
+      return;
+    }
+
     if (editingProjectId) {
       dispatch({
         type: "project/update",
@@ -2177,7 +2452,9 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         objective: objective.trim(),
         nextAction: nextAction.trim(),
         dueDate: dueDate || null,
-        progress: Number(progress)
+        progress: Number(progress),
+        repositoryUrl: cleanedRepositoryUrl,
+        defaultBranch: defaultBranch.trim()
       });
       setEditingProjectId(null);
       setNotice("Project updated.");
@@ -2187,15 +2464,19 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         name: name.trim(),
         objective: objective.trim(),
         nextAction: nextAction.trim(),
-        dueDate: dueDate || null
+        dueDate: dueDate || null,
+        repositoryUrl: cleanedRepositoryUrl,
+        defaultBranch: defaultBranch.trim()
       });
-      setNotice("Project added to pending.");
+      setNotice(cleanedRepositoryUrl ? "Project added and GitHub repo linked." : "Project added to pending.");
     }
     setName("");
     setObjective("");
     setNextAction("");
     setDueDate("");
     setProgress("0");
+    setRepositoryUrl("");
+    setDefaultBranch("");
   };
 
   const startEdit = (project: CommandDeckState["projects"][number]) => {
@@ -2205,6 +2486,8 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
     setNextAction(project.nextAction);
     setDueDate(project.dueDate ?? "");
     setProgress(String(project.progress));
+    setRepositoryUrl(project.repositoryUrl ?? "");
+    setDefaultBranch(project.defaultBranch ?? "");
   };
 
   const cancelEdit = () => {
@@ -2214,15 +2497,17 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
     setNextAction("");
     setDueDate("");
     setProgress("0");
+    setRepositoryUrl("");
+    setDefaultBranch("");
   };
 
   return (
-    <ModuleShell title="Projects" description="GitHub scan plus manual projects, with progress and next action visible.">
+    <ModuleShell title="Projects" description="Your private projects, optional GitHub repo links, progress, and next action.">
       <section className="github-scan-strip">
         <Github size={18} />
         <div>
-          <strong>{state.githubScan.projectCount} GitHub repos imported from {state.githubScan.owner}</strong>
-          <span>Last scan: {formatDateTime(state.githubScan.scannedAt)}</span>
+          <strong>{linkedRepoCount === 0 ? "No GitHub repos linked yet" : `${linkedRepoCount} linked GitHub repo${linkedRepoCount === 1 ? "" : "s"}`}</strong>
+          <span>Paste your own GitHub repository URL when adding or modifying a project.</span>
         </div>
       </section>
       <form className="command-form project-form" onSubmit={submit}>
@@ -2231,6 +2516,8 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         <label><span>Next action</span><input aria-label="Project next action" value={nextAction} onChange={(event) => setNextAction(event.target.value)} /></label>
         <label><span>Due</span><input aria-label="Project due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
         <label><span>Progress</span><input aria-label="Project progress" type="number" min="0" max="100" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
+        <label><span>GitHub repo URL</span><input aria-label="GitHub repository URL" placeholder="https://github.com/owner/repo" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} /></label>
+        <label><span>Branch</span><input aria-label="GitHub default branch" placeholder="main" value={defaultBranch} onChange={(event) => setDefaultBranch(event.target.value)} /></label>
         <button type="submit"><Plus size={16} /> {editingProjectId ? "Save project" : "Add project"}</button>
         {editingProjectId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
@@ -2259,6 +2546,8 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
 }
 
 function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
+  return <IntelPage onNotice={setNotice} />;
+
   const [title, setTitle] = useState("");
   const [symbol, setSymbol] = useState("");
   const [kind, setKind] = useState<IntelKind>("stock");
@@ -2277,7 +2566,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   const researchQueue = state.intel
     .filter((item) => item.signal === "researching" || item.signal === "high-priority")
     .slice(0, 4);
-  const lastAutopilotRun = state.intelAutopilot.lastRunAt ? formatDateTime(state.intelAutopilot.lastRunAt) : "Not run yet";
+  const lastAutopilotRun = state.intelAutopilot.lastRunAt ? formatDateTime(state.intelAutopilot.lastRunAt ?? "") : "Not run yet";
 
   const runAutonomousScan = useCallback((trigger: "auto" | "manual" = "manual") => {
     const scan = buildAutonomousIntelScan(state, getDeckMetrics(state));
@@ -2508,7 +2797,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                   <ExternalLink size={15} /> Market lookup
                 </a>
                 {selected.sourceUrl && (
-                  <a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source for ${selected.title}`}>
+                  <a href={selected.sourceUrl ?? undefined} target="_blank" rel="noreferrer" aria-label={`Open source for ${selected.title}`}>
                     <ExternalLink size={15} /> Source
                   </a>
                 )}
@@ -3352,6 +3641,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
 function AccountModule({
   state,
   cloudStatus,
+  authUser,
   workspaceMode,
   teams,
   activeTeam,
@@ -3365,10 +3655,13 @@ function AccountModule({
   onCreateInviteLink,
   onUpdateMemberRole,
   onRemoveMember,
+  onRecoverEmailDeck,
+  isRecoveringEmailDeck,
   onSignOut
 }: {
   state: CommandDeckState;
   cloudStatus: CloudStatus;
+  authUser?: AuthUser | null;
   workspaceMode: WorkspaceMode;
   teams: TeamWorkspace[];
   activeTeam: TeamWorkspace | null;
@@ -3382,13 +3675,15 @@ function AccountModule({
   onCreateInviteLink: () => Promise<void>;
   onUpdateMemberRole: (memberUserId: string, role: TeamRole) => Promise<void>;
   onRemoveMember: (memberUserId: string) => Promise<void>;
+  onRecoverEmailDeck: () => Promise<void>;
+  isRecoveringEmailDeck: boolean;
   onSignOut: () => void;
 }) {
   const [teamName, setTeamName] = useState("");
   const [teamCode, setTeamCode] = useState("");
   const lastSync = cloudStatus.lastSyncedAt ? formatDateTime(cloudStatus.lastSyncedAt) : "Not synced yet";
-  const userEmail = cloudStatus.userEmail ?? "Local operator";
-  const isCloudUser = Boolean(cloudStatus.userEmail);
+  const userEmail = cloudStatus.userEmail ?? authUser?.email ?? "Local operator";
+  const isCloudUser = Boolean(cloudStatus.userEmail || authUser?.email);
   const canManageTeam = activeTeam?.role === "owner";
   const activeTeamName = activeTeam?.name ?? "No team selected";
   const displayName = getDisplayName(state.settings);
@@ -3648,7 +3943,10 @@ function AccountModule({
         <section className="deck-panel account-panel">
           <PanelHead title="Session controls" />
           <div className="account-actions">
-            <button type="button" onClick={onSignOut} disabled={!cloudStatus.userEmail}>
+            <button type="button" onClick={() => void onRecoverEmailDeck()} disabled={!authUser || isRecoveringEmailDeck}>
+              <Cloud size={16} /> {isRecoveringEmailDeck ? "Recovering" : "Recover email data"}
+            </button>
+            <button type="button" onClick={onSignOut} disabled={!authUser && !cloudStatus.userEmail}>
               <LogOut size={16} /> Sign out
             </button>
           </div>
@@ -4310,6 +4608,34 @@ interface CloudStatus {
   userEmail: string | null;
 }
 
+async function fetchLegacyCommandDeck(): Promise<LegacyCommandDeckPayload | null> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(LEGACY_COMMAND_DECK_ENDPOINT, {
+    credentials: "include",
+    headers: { Accept: "application/json" },
+    cache: "no-store"
+  });
+
+  if (response.status === 204 || response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, `Legacy deck API returned ${response.status}.`));
+  }
+
+  const payload = await response.json() as { deck?: Partial<CommandDeckState> | null; updatedAt?: string | null };
+  if (!payload.deck) return null;
+
+  return {
+    deck: payload.deck,
+    updatedAt: payload.updatedAt ?? null
+  };
+}
+
 async function postToTelegram(payload: TelegramPayload): Promise<void> {
   if (typeof fetch !== "function") {
     throw new Error("fetch is unavailable in this browser.");
@@ -4605,7 +4931,7 @@ function composeAgentReply(
 
 function getPriorityTask(state: CommandDeckState): CommandDeckState["tasks"][number] | null {
   const priorityWeight: Record<Priority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-  const openTasks = state.tasks.filter((task) => task.status === "todo");
+  const openTasks = state.tasks.filter((task) => task.status !== "done");
   if (openTasks.length === 0) return null;
 
   return [...openTasks].sort((left, right) => {
@@ -4646,6 +4972,17 @@ function getPriorityProject(state: CommandDeckState): CommandDeckState["projects
     if (progressDelta !== 0) return progressDelta;
     return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
   })[0];
+}
+
+function isGitHubRepositoryUrl(value: string): boolean {
+  const prefixed = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const url = new URL(prefixed);
+    const [owner, repo] = url.pathname.split("/").filter(Boolean);
+    return url.hostname.toLowerCase() === "github.com" && Boolean(owner && repo);
+  } catch {
+    return false;
+  }
 }
 
 function getFocusTaskTitle(state: CommandDeckState): string {
@@ -4709,5 +5046,5 @@ function formatDateTime(value: string): string {
 }
 
 function formatMoney(value: number): string {
-  return new Intl.NumberFormat("en", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return toKSH(value);
 }

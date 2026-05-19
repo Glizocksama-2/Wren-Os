@@ -117,13 +117,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (input: { email: string; password: string; rememberMe: boolean }) => {
     const response = await authApi.login(input);
     applyAuthResponse(response);
-    navigate("/");
+    navigate(getAuthRedirectPath());
   }, [applyAuthResponse]);
 
   const register = useCallback(async (input: { email: string; displayName: string; password: string; confirmPassword: string; rememberMe: boolean }) => {
     const response = await authApi.register(input);
     applyAuthResponse(response);
-    navigate("/");
+    navigate(getAuthRedirectPath());
   }, [applyAuthResponse]);
 
   const logout = useCallback(async () => {
@@ -188,4 +188,9 @@ function isAuthExpiredError(error: unknown) {
 function navigate(path: string) {
   window.history.pushState(null, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
+}
+
+function getAuthRedirectPath() {
+  const redirect = new URLSearchParams(window.location.search).get("redirect");
+  return redirect?.startsWith("/") ? redirect : "/";
 }

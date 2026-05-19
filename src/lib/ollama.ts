@@ -136,7 +136,7 @@ export function buildOllamaMessages({
 
 export function buildDeckSummary(state: CommandDeckState, metrics: DeckMetrics): string {
   const topTasks = state.tasks
-    .filter((task) => task.status === "todo")
+    .filter((task) => task.status !== "done")
     .slice(0, 6)
     .map((task) => `- ${task.title} (${task.priority}${task.dueDate ? `, due ${task.dueDate}` : ""})`)
     .join("\n") || "- No open tasks";

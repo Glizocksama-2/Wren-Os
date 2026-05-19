@@ -7,6 +7,7 @@ import type {
   IntelItem,
   IntelSignal
 } from "../store/commandDeck";
+import { toKSH } from "../utils/currency";
 
 interface DeckMetricsSnapshot {
   openTasks: number;
@@ -107,7 +108,7 @@ function buildExecutionPressureFinding(
   now: Date
 ): AutonomousIntelFinding | null {
   const pressureTasks = tasks
-    .filter((task) => task.status === "todo" && (task.priority === "critical" || task.priority === "high"))
+    .filter((task) => task.status !== "done" && (task.priority === "critical" || task.priority === "high"))
     .slice(0, 4);
 
   if (pressureTasks.length === 0 && metrics.openTasks < 3) return null;
@@ -205,5 +206,5 @@ function formatScanTime(value: Date): string {
 }
 
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return toKSH(value);
 }

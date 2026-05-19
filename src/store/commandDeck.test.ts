@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMMAND_DECK_STORAGE_KEY, freshCommandDeck, loadCommandDeck, normalizeCommandDeck, reduceCommandDeck, type CommandDeckState } from "./commandDeck";
+import { COMMAND_DECK_STORAGE_KEY, freshCommandDeck, getCommandDeckStorageKey, loadCommandDeck, normalizeCommandDeck, reduceCommandDeck, type CommandDeckState } from "./commandDeck";
 
 function makeTask(title: string): CommandDeckState["tasks"][number] {
   const timestamp = "2026-05-12T09:00:00.000Z";
@@ -10,6 +10,29 @@ function makeTask(title: string): CommandDeckState["tasks"][number] {
     kanbanPriority: "urgent",
     dueDate: null,
     status: "todo",
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
+function makeProject(name: string): CommandDeckState["projects"][number] {
+  const timestamp = "2026-05-12T09:00:00.000Z";
+  return {
+    id: `project-${name.toLowerCase().replace(/\s+/g, "-")}`,
+    name,
+    objective: "Recovered objective",
+    nextAction: "Review recovered project",
+    status: "pending",
+    dueDate: null,
+    progress: 25,
+    source: "manual",
+    repositoryUrl: null,
+    language: null,
+    visibility: null,
+    defaultBranch: null,
+    lastPushedAt: null,
+    openIssues: 0,
+    openPullRequests: 0,
     createdAt: timestamp,
     updatedAt: timestamp
   };
@@ -137,6 +160,42 @@ describe("command deck cloud import", () => {
     expect(storage.getItem("wren-os.workspace.v1")).not.toBeNull();
   });
 
+  it("adopts the existing browser deck when a new authenticated account has no saved deck yet", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      COMMAND_DECK_STORAGE_KEY,
+      JSON.stringify({
+        ...freshCommandDeck,
+        tasks: [makeTask("Old browser task")],
+        settings: { ...freshCommandDeck.settings, callsign: "Original Operator" }
+      })
+    );
+
+    const deck = loadCommandDeck(storage, "user-1");
+
+    expect(deck.settings.callsign).toBe("Original Operator");
+    expect(deck.tasks.some((task) => task.title === "Old browser task")).toBe(true);
+    expect(storage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Old browser task");
+    expect(storage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Old browser task");
+  });
+
+  it("replaces a fresh authenticated deck with the previous browser deck to recover first-login data", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      COMMAND_DECK_STORAGE_KEY,
+      JSON.stringify({
+        ...freshCommandDeck,
+        tasks: [makeTask("Recover this task")]
+      })
+    );
+    storage.setItem(getCommandDeckStorageKey("user-1"), JSON.stringify(freshCommandDeck));
+
+    const deck = loadCommandDeck(storage, "user-1");
+
+    expect(deck.tasks.some((task) => task.title === "Recover this task")).toBe(true);
+    expect(storage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Recover this task");
+  });
+
   it("replaces the local deck with a normalized cloud deck", () => {
     const local = reduceCommandDeck(freshCommandDeck, {
       type: "task/add",
@@ -159,7 +218,142 @@ describe("command deck cloud import", () => {
     expect(next.settings.callsign).toBe("Cloud");
     expect(next.tasks).toHaveLength(1);
     expect(next.tasks[0].title).toBe("Synced cloud task");
-    expect(next.projects.some((project) => project.source === "github")).toBe(true);
+    expect(next.projects).toHaveLength(0);
+  });
+
+  it("merges a recovered cloud deck without losing current account data", () => {
+    const current = reduceCommandDeck(freshCommandDeck, {
+      type: "task/add",
+      title: "Current account task",
+      priority: "medium",
+      dueDate: null
+    });
+    const recovered: Partial<CommandDeckState> = {
+      ...freshCommandDeck,
+      tasks: [makeTask("Recovered email task")],
+      projects: [
+        {
+          ...makeProject("Recovered project"),
+          repositoryUrl: "https://github.com/glizocksama/recovered-project",
+          source: "github"
+        }
+      ],
+      settings: {
+        ...freshCommandDeck.settings,
+        callsign: "Email Vault"
+      }
+    };
+
+    const next = reduceCommandDeck(current, { type: "deck/merge-import", deck: recovered });
+
+    expect(next.tasks.some((task) => task.title === "Current account task")).toBe(true);
+    expect(next.tasks.some((task) => task.title === "Recovered email task")).toBe(true);
+    expect(next.projects.some((project) => project.name === "Recovered project")).toBe(true);
+    expect(next.settings.callsign).toBe("Email Vault");
+  });
+
+  it("does not seed private GitHub repos into a fresh or normalized deck", () => {
+    expect(freshCommandDeck.projects).toHaveLength(0);
+    expect(normalizeCommandDeck({}).projects).toHaveLength(0);
+    expect(normalizeCommandDeck({}).githubScan).toMatchObject({ owner: "", projectCount: 0 });
+  });
+
+  it("preserves legacy GitHub projects only for authenticated email recovery", () => {
+    const legacyDeck: Partial<CommandDeckState> = {
+      ...freshCommandDeck,
+      githubScan: { owner: "Glizocksama-2", scannedAt: "2026-05-19T13:59:20.008Z", projectCount: 1 },
+      projects: [
+        {
+          ...makeProject("Recovered repo"),
+          source: "github",
+          repositoryUrl: "https://github.com/glizocksama/recovered-repo"
+        }
+      ]
+    };
+
+    expect(normalizeCommandDeck(legacyDeck).projects).toHaveLength(0);
+
+    const recovered = reduceCommandDeck(freshCommandDeck, {
+      type: "deck/import",
+      deck: legacyDeck,
+      preserveLegacyGitHubProjects: true
+    });
+
+    expect(recovered.projects).toHaveLength(1);
+    expect(recovered.projects[0].name).toBe("Recovered repo");
+    expect(recovered.githubScan.owner).toBe("Glizocksama-2");
+  });
+
+  it("prunes the legacy baked-in GitHub scan from existing browser decks", () => {
+    const deck = normalizeCommandDeck({
+      ...freshCommandDeck,
+      githubScan: { owner: "Glizocksama-2", scannedAt: "2026-05-12T00:00:00+03:00", projectCount: 1 },
+      projects: [
+        {
+          id: "github-old",
+          name: "Should not leak",
+          objective: "Private repo",
+          nextAction: "Hidden",
+          status: "pending",
+          dueDate: null,
+          progress: 50,
+          source: "github",
+          repositoryUrl: "https://github.com/example/private",
+          language: null,
+          visibility: "private",
+          defaultBranch: "main",
+          lastPushedAt: null,
+          openIssues: 0,
+          openPullRequests: 0,
+          createdAt: "2026-05-12T09:00:00.000Z",
+          updatedAt: "2026-05-12T09:00:00.000Z"
+        },
+        {
+          id: "manual-safe",
+          name: "Client project",
+          objective: "Keep this",
+          nextAction: "Next",
+          status: "pending",
+          dueDate: null,
+          progress: 10,
+          source: "manual",
+          repositoryUrl: null,
+          language: null,
+          visibility: null,
+          defaultBranch: null,
+          lastPushedAt: null,
+          openIssues: 0,
+          openPullRequests: 0,
+          createdAt: "2026-05-12T09:00:00.000Z",
+          updatedAt: "2026-05-12T09:00:00.000Z"
+        }
+      ]
+    });
+
+    expect(deck.projects.map((project) => project.name)).toEqual(["Client project"]);
+    expect(deck.githubScan).toMatchObject({ owner: "", projectCount: 0 });
+  });
+
+  it("lets users link and delete their own GitHub repository projects", () => {
+    let deck = reduceCommandDeck(freshCommandDeck, {
+      type: "project/add",
+      name: "Client Portal",
+      objective: "Build client dashboard",
+      nextAction: "Wire repo",
+      dueDate: null,
+      repositoryUrl: "github.com/client-org/client-portal.git",
+      defaultBranch: "develop"
+    });
+
+    expect(deck.projects[0]).toMatchObject({
+      name: "Client Portal",
+      source: "github",
+      repositoryUrl: "https://github.com/client-org/client-portal",
+      defaultBranch: "develop"
+    });
+
+    deck = reduceCommandDeck(deck, { type: "project/delete", id: deck.projects[0].id });
+    expect(deck.projects).toHaveLength(0);
   });
 
   it("adds market intel items and research notes", () => {

@@ -1,0 +1,125 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  InviteAcceptPage,
+  NotificationBell,
+  TeamCreatePage,
+  TeamDashboardPage,
+  TeamSettingsPage,
+  WorkspaceSwitcher
+} from "./TeamPages.jsx";
+
+describe("Northwatch team UI", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("lets a user create a team from a name with an editable generated slug", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ team: { id: "team-1", name: "Birunda Farms", slug: "birunda-farms", role: "owner" } }, 201));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TeamCreatePage />);
+
+    fireEvent.change(screen.getByLabelText("Team name"), { target: { value: "Birunda Farms" } });
+    expect(screen.getByLabelText("Team slug")).toHaveValue("birunda-farms");
+    fireEvent.click(screen.getByRole("button", { name: /create team/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/teams", expect.objectContaining({ method: "POST", credentials: "include" })));
+    expect(window.location.pathname).toBe("/team/birunda-farms");
+  });
+
+  it("shows a workspace switcher with personal, team, and create/join options", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ teams: [{ id: "team-1", name: "Birunda Farms", slug: "birunda-farms", role: "admin" }] })));
+    const onWorkspaceChange = vi.fn();
+
+    render(<WorkspaceSwitcher activeWorkspace={{ type: "personal" }} onWorkspaceChange={onWorkspaceChange} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /workspace personal/i }));
+    expect(screen.getByRole("link", { name: /create or join team/i })).toHaveAttribute("href", "/team/create");
+    fireEvent.click(screen.getByRole("option", { name: /birunda farms admin/i }));
+
+    expect(onWorkspaceChange).toHaveBeenCalledWith({ type: "team", teamId: "team-1", slug: "birunda-farms", name: "Birunda Farms", role: "admin" });
+  });
+
+  it("renders a team dashboard with members, recent activity, and workspace shortcuts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          team: { id: "team-1", name: "Birunda Farms", slug: "birunda-farms", role: "member" },
+          members: [{ userId: "user-1", displayName: "Sam", role: "member", joinedAt: "2026-05-19T12:00:00.000Z" }],
+          activity: [{ id: "activity-1", actorName: "Sam", action: "created task", itemName: "Fix n8n node", createdAt: "2026-05-19T12:00:00.000Z" }]
+        })
+      )
+    );
+
+    render(<TeamDashboardPage slug="birunda-farms" />);
+
+    expect(await screen.findByRole("heading", { name: "Birunda Farms" })).toBeInTheDocument();
+    expect(screen.getByText(/Sam created task Fix n8n node/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open kanban/i })).toHaveAttribute("href", "/?workspace=team&team=birunda-farms&section=kanban");
+  });
+
+  it("renders team settings with member management, invites, and owner delete confirmation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            team: { id: "team-1", name: "Birunda Farms", slug: "birunda-farms", role: "owner", memberLimit: 10 },
+            members: [{ userId: "owner-1", displayName: "Owner", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }]
+          })
+        )
+        .mockResolvedValueOnce(jsonResponse({ invites: [{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending" }] }))
+    );
+
+    render(<TeamSettingsPage slug="birunda-farms" />);
+
+    expect(await screen.findByRole("heading", { name: /team settings/i })).toBeInTheDocument();
+    expect(screen.getByText("Owner")).toBeInTheDocument();
+    expect(screen.getByText("brian@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /delete team/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Confirm team name"), { target: { value: "Birunda Farms" } });
+    expect(screen.getByRole("button", { name: /delete team/i })).not.toBeDisabled();
+  });
+
+  it("previews invites publicly and redirects unauthenticated users to credential auth links", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ invite: { teamName: "Birunda Farms", inviterName: "Admin", role: "member", status: "pending" } }))
+    );
+
+    render(<InviteAcceptPage token="invite-token" isAuthenticated={false} />);
+
+    expect(await screen.findByText(/Admin invited you to join Birunda Farms/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /sign in/i })).toHaveAttribute("href", "/login?redirect=%2Finvite%2Finvite-token");
+    expect(screen.getByRole("link", { name: /sign up/i })).toHaveAttribute("href", "/register?redirect=%2Finvite%2Finvite-token");
+  });
+
+  it("shows unread notifications in a bell dropdown and can mark them read", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ unreadCount: 1, notifications: [{ id: "note-1", message: "You were added to Birunda Farms", link: "/team/birunda-farms", isRead: false, createdAt: "2026-05-19T12:00:00.000Z" }] }))
+      .mockResolvedValueOnce(jsonResponse({ updated: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ unreadCount: 0, notifications: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<NotificationBell />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /notifications 1 unread/i }));
+    expect(screen.getByText(/You were added/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /mark all as read/i }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/notifications/read-all", expect.objectContaining({ method: "POST" })));
+  });
+});
+
+function jsonResponse(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body
+  };
+}

@@ -56,24 +56,29 @@ describe("Northwatch command deck", () => {
     expect(screen.getByText("Northwatch Tactical Ledger")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /your command deck, live/i })).toBeInTheDocument();
     expect(screen.queryByText("Mercer Ventures")).not.toBeInTheDocument();
-    expect(screen.getByText("8 GitHub repos imported from Glizocksama-2")).toBeInTheDocument();
+    expect(screen.getByText("0 private GitHub repo links")).toBeInTheDocument();
     expect(screen.getByText(/credential auth: active/i)).toBeInTheDocument();
     expect(window.localStorage.getItem("wren-os.workspace.v1")).not.toBeNull();
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Operator");
-    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("EStarzFc");
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).not.toContain("EStarzFc");
   });
 
   it("adds and completes to do items", () => {
     render(<App />);
 
     clickNav("To Do");
+    expect(screen.getByRole("tab", { name: "Active" })).toHaveAttribute("aria-selected", "true");
     fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Secure morning plan" } });
     fireEvent.change(screen.getByLabelText("Task priority"), { target: { value: "critical" } });
     fireEvent.click(screen.getByRole("button", { name: /add task/i }));
 
     expect(screen.getAllByText("Secure morning plan").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(within(screen.getByRole("heading", { name: "Done" }).closest(".deck-panel") as HTMLElement).getByText("Secure morning plan")).toBeInTheDocument();
+    expect(screen.getByText("Me")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Complete Secure morning plan"));
+    expect(screen.queryByText("Secure morning plan")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /completed \(1\)/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /completed \(1\)/i }));
+    expect(screen.getByText("Secure morning plan")).toHaveClass("task-title-completed");
   });
 
   it("adds daily and selected-day repetitive routines", () => {
@@ -145,6 +150,8 @@ describe("Northwatch command deck", () => {
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Launch black deck" } });
     fireEvent.change(screen.getByLabelText("Project objective"), { target: { value: "Rebuild Northwatch around life command." } });
     fireEvent.change(screen.getByLabelText("Project next action"), { target: { value: "Finish UI pass" } });
+    fireEvent.change(screen.getByLabelText("GitHub repository URL"), { target: { value: "https://github.com/client-org/launch-black-deck" } });
+    fireEvent.change(screen.getByLabelText("GitHub default branch"), { target: { value: "main" } });
     fireEvent.click(screen.getByRole("button", { name: /add project/i }));
 
     const projectRow = screen
@@ -152,10 +159,15 @@ describe("Northwatch command deck", () => {
       .find((item) => item.closest(".project-row"))
       ?.closest(".project-row") as HTMLElement;
     expect(projectRow).toBeInTheDocument();
+    expect(within(projectRow).getByText("GitHub")).toBeInTheDocument();
+    expect(within(projectRow).getByRole("link", { name: /open launch black deck on github/i })).toHaveAttribute(
+      "href",
+      "https://github.com/client-org/launch-black-deck"
+    );
     fireEvent.click(within(projectRow).getByRole("button", { name: "Complete" }));
     expect(within(screen.getByText("Done Projects").closest(".deck-panel") as HTMLElement).getByText("Launch black deck")).toBeInTheDocument();
-    expect(screen.getByText("EStarzFc")).toBeInTheDocument();
-    expect(screen.getAllByText("GitHub").length).toBeGreaterThan(0);
+    expect(screen.queryByText("EStarzFc")).not.toBeInTheDocument();
+    expect(screen.getByText("1 linked GitHub repo")).toBeInTheDocument();
   });
 
   it("adds calendar, workout, book, journal, and finance records", () => {
@@ -200,50 +212,34 @@ describe("Northwatch command deck", () => {
     fireEvent.change(screen.getByLabelText("Finance amount"), { target: { value: "500" } });
     fireEvent.click(screen.getByRole("button", { name: /add finance/i }));
     expect(screen.getByText("Client payment")).toBeInTheDocument();
-    expect(screen.getAllByText("$500").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/KSh 500.00/).length).toBeGreaterThan(0);
   });
 
-  it("tracks market intel watchlist items and research notes", () => {
+  it("renders the live intel market engine", async () => {
+    mockLiveIntelFetch();
     render(<App />);
 
     clickNav("Intel");
-    expect(screen.getByRole("heading", { name: "Watchtower" })).toBeInTheDocument();
-    expect(screen.getByText("Signal board")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Intel title"), { target: { value: "NVIDIA" } });
-    fireEvent.change(screen.getByLabelText("Ticker or topic"), { target: { value: "NVDA" } });
-    fireEvent.change(screen.getByLabelText("Intel type"), { target: { value: "stock" } });
-    fireEvent.change(screen.getByLabelText("Intel signal"), { target: { value: "researching" } });
-    fireEvent.change(screen.getByLabelText("Intel thesis"), { target: { value: "AI chips and data center demand." } });
-    fireEvent.change(screen.getByLabelText("Intel source URL"), { target: { value: "https://example.com/nvda" } });
-    fireEvent.click(screen.getByRole("button", { name: /add intel/i }));
-
-    const intelRow = screen.getAllByText("NVIDIA").find((item) => item.closest(".intel-row"))?.closest(".intel-row") as HTMLElement;
-    expect(intelRow).toBeInTheDocument();
-    expect(within(intelRow).getByText(/NVDA - stock - researching/i)).toBeInTheDocument();
-    expect(within(intelRow).getByText("AI chips and data center demand.")).toBeInTheDocument();
-
-    fireEvent.click(within(intelRow).getByRole("button", { name: "Focus" }));
-    fireEvent.change(screen.getByLabelText("Intel note"), { target: { value: "Check earnings call and margin trend." } });
-    fireEvent.click(screen.getByRole("button", { name: /add note/i }));
-
-    expect(screen.getByText("Check earnings call and margin trend.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /news search for NVIDIA/i })).toHaveAttribute("href", expect.stringContaining("NVDA"));
+    expect(screen.getByRole("heading", { name: "Market Intel" })).toBeInTheDocument();
+    expect(await screen.findByText("Bitcoin")).toBeInTheDocument();
+    expect(screen.getByText(/KSh 13,000,000.00/)).toBeInTheDocument();
+    expect(screen.getByText("Safaricom")).toBeInTheDocument();
+    expect(screen.getByText("Kenya fintech funding rises")).toBeInTheDocument();
+    expect(screen.getByText(/1 USD = KSh 130.00/)).toBeInTheDocument();
   });
 
-  it("runs an autonomous intel scan from deck state", async () => {
+  it("can manually refresh live crypto intel", async () => {
+    const fetchMock = mockLiveIntelFetch();
     render(<App />);
 
     clickNav("Intel");
-    expect(screen.getByText("Sentinel autopilot")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /scan now/i }));
+    await screen.findByText("Bitcoin");
 
-    expect(await screen.findByText(/Autonomous scan produced/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/^Repo:/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Autonomous scan/i).length).toBeGreaterThan(0);
+    const cryptoPanel = screen.getByRole("heading", { name: "Crypto Prices" }).closest(".deck-panel") as HTMLElement;
+    fireEvent.click(within(cryptoPanel).getByRole("button", { name: /refresh/i }));
 
-    fireEvent.click(screen.getByRole("button", { name: /pause autopilot/i }));
-    expect(screen.getByRole("button", { name: /enable autopilot/i })).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/intel/refresh/crypto", expect.objectContaining({ method: "POST" })));
   });
 
   it("shows agent health and can send a kanban card to Telegram", async () => {
@@ -366,8 +362,8 @@ describe("Northwatch command deck", () => {
     expect(screen.getByText("Ledger stream")).toBeInTheDocument();
 
     clickNav("Intel");
-    expect(screen.getByRole("heading", { name: "Watchtower" })).toBeInTheDocument();
-    expect(screen.getByText("Research queue")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Market Intel" })).toBeInTheDocument();
+    expect(screen.getByText("News Feed")).toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "Primary" });
     expect(within(nav).queryByRole("button", { name: "Customize" })).not.toBeInTheDocument();
@@ -378,6 +374,103 @@ describe("Northwatch command deck", () => {
 
 function clickNav(name: string) {
   fireEvent.click(within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name }));
+}
+
+function mockLiveIntelFetch() {
+  const payload = {
+    crypto: {
+      status: "live",
+      updatedAt: "2026-05-19T08:00:00.000Z",
+      items: [
+        {
+          id: "bitcoin",
+          name: "Bitcoin",
+          symbol: "BTC",
+          image: "https://example.com/btc.png",
+          priceKes: 13000000,
+          priceUsd: 100000,
+          change24h: 2.5,
+          marketCapKes: 250000000000000
+        }
+      ]
+    },
+    stocksKenya: {
+      status: "live",
+      marketOpen: true,
+      updatedAt: "2026-05-19T08:00:00.000Z",
+      items: [
+        {
+          ticker: "SCOM",
+          company: "Safaricom",
+          currency: "KES",
+          price: 28.5,
+          change: 0.5,
+          changePercent: 1.7,
+          volume: 1200000,
+          weekHigh52: 31,
+          weekLow52: 20
+        }
+      ]
+    },
+    stocksGlobal: { status: "live", updatedAt: "2026-05-19T08:00:00.000Z", items: [] },
+    news: {
+      status: "live",
+      updatedAt: "2026-05-19T08:00:00.000Z",
+      items: [
+        {
+          id: "news-1",
+          title: "Kenya fintech funding rises",
+          summary: "Funding moved higher across Kenyan fintech.",
+          source: "TechCabal",
+          region: "kenya",
+          category: "business",
+          publishedAt: "2026-05-19T08:00:00.000Z",
+          url: "https://techcabal.com/a"
+        }
+      ]
+    },
+    forex: {
+      status: "live",
+      base: "KES",
+      updatedAt: "2026-05-19T08:00:00.000Z",
+      rates: [
+        { code: "USD", flag: "US", oneKesEquals: 0.0076923, kesPerUnit: 130 },
+        { code: "EUR", flag: "EU", oneKesEquals: 0.0071, kesPerUnit: 140.84 },
+        { code: "GBP", flag: "GB", oneKesEquals: 0.006, kesPerUnit: 166.67 }
+      ]
+    },
+    indicators: {
+      status: "live",
+      updatedAt: "2026-05-19T08:00:00.000Z",
+      items: [
+        { label: "CBK Rate", value: "10.00", unit: "%", updatedAt: "2026-05-19T08:00:00.000Z" },
+        { label: "Inflation", value: "4.10", unit: "%", updatedAt: "2026-05-19T08:00:00.000Z" },
+        { label: "NSE 20 Index", value: "1800", unit: "", updatedAt: "2026-05-19T08:00:00.000Z" }
+      ],
+      mpesaRates: [{ range: "1 - 100", fee: 0 }]
+    }
+  };
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes("/api/intel/all")) return { ok: true, status: 200, json: async () => payload };
+    if (url.includes("/api/intel/refresh/crypto")) return { ok: true, status: 200, json: async () => payload.crypto };
+    if (url.includes("/api/intel/forex")) return { ok: true, status: 200, json: async () => payload.forex };
+    if (url.includes("/health")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          agents: [
+            { id: "sentinel", status: "alive", checkedAt: "2026-05-19T08:00:00.000Z", detail: "ok" },
+            { id: "ollama", status: "idle", checkedAt: "2026-05-19T08:00:00.000Z", detail: "idle" },
+            { id: "telegram", status: "alive", checkedAt: "2026-05-19T08:00:00.000Z", detail: "ok" }
+          ]
+        })
+      };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 function acceptLegalTermsForTests() {
