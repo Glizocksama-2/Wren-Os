@@ -269,8 +269,8 @@ describe("Northwatch command deck", () => {
     fireEvent.click(within(taskRow).getByRole("button", { name: /send to telegram/i }));
     await waitFor(() =>
       expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-        "/api/telegram/glizocksamabot",
-        expect.objectContaining({ method: "POST" })
+        "/api/telegram/send",
+        expect.objectContaining({ method: "POST", credentials: "include" })
       )
     );
   });
@@ -327,6 +327,20 @@ describe("Northwatch command deck", () => {
     fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
     fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Privacy Policy" }));
     expect(screen.getByRole("heading", { name: "Privacy Policy" })).toBeInTheDocument();
+  });
+
+  it("shows per-user Telegram setup instructions in Settings", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Settings" }));
+
+    expect(screen.getByRole("heading", { name: "Connect your Telegram bot" })).toBeInTheDocument();
+    expect(screen.getByText(/Step 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/@BotFather/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Telegram bot token")).toBeInTheDocument();
+    expect(screen.getByLabelText("Telegram chat id")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /save bot/i })).toBeInTheDocument();
   });
 
   it("renders richer life modules while account and customize stay out of the rail", () => {

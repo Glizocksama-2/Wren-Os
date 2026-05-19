@@ -572,7 +572,8 @@ p {
 
 .workspace-status-pill,
 .cloud-status-pill,
-.topbar-icon-button {
+.topbar-icon-button,
+.auth-user-chip {
   display: inline-flex;
   min-height: 30px;
   align-items: center;
@@ -585,6 +586,31 @@ p {
   padding: 0 10px;
   font-size: 11px;
   font-weight: 900;
+}
+
+.auth-user-chip {
+  max-width: 220px;
+  color: var(--text);
+}
+
+.auth-user-chip > span {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgb(var(--accent-rgb) / 0.18);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.auth-user-chip strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workspace-status-pill {
@@ -634,6 +660,10 @@ p {
   background: linear-gradient(180deg, rgb(21 29 26 / 0.96), rgb(8 12 11 / 0.98));
   box-shadow: var(--shadow);
   padding: 32px;
+}
+
+.auth-panel-wide {
+  width: min(560px, 100%);
 }
 
 .auth-mark {
@@ -1372,6 +1402,116 @@ p {
   color: var(--muted);
   font-size: 12px;
   font-weight: 900;
+}
+
+.auth-stack-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-stack-form label:not(.auth-check) {
+  display: grid;
+  gap: 7px;
+}
+
+.auth-stack-form span,
+.auth-check span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.auth-stack-form input {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #070a09;
+  color: var(--text);
+  outline: 0;
+  padding: 8px 10px;
+}
+
+.auth-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.auth-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.auth-stack-form button,
+.auth-modal button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.38);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent);
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.auth-stack-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.auth-error {
+  border: 1px solid rgb(255 94 77 / 0.32);
+  border-radius: var(--radius);
+  background: rgb(255 94 77 / 0.08);
+  color: var(--danger);
+  padding: 10px 12px;
+}
+
+.auth-switch-link {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.auth-spinner {
+  border-radius: 999px;
+  border-top-color: transparent;
+  animation: orbit-spin 1s linear infinite;
+}
+
+.auth-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.62);
+  padding: 18px;
+}
+
+.auth-modal {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 12px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.34);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgb(21 29 26 / 0.98), rgb(8 12 11 / 0.98));
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.auth-modal h2 {
+  font-size: 22px;
+}
+
+.auth-modal p {
+  color: var(--muted);
 }
 
 .autopilot-toggle:hover {
@@ -2711,6 +2851,130 @@ p {
   padding: 10px 12px;
 }
 
+.telegram-settings-card {
+  gap: 12px;
+}
+
+.telegram-card-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.telegram-status-pill,
+.telegram-help-link,
+.telegram-action-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.telegram-status-pill {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 6px 9px;
+}
+
+.telegram-status-pill.connected {
+  border-color: rgb(68 204 139 / 0.42);
+  background: rgb(68 204 139 / 0.12);
+  color: #70e3a9;
+}
+
+.telegram-status-pill.idle {
+  background: rgb(255 255 255 / 0.04);
+}
+
+.telegram-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.telegram-steps li {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.03);
+  padding: 9px;
+}
+
+.telegram-steps strong {
+  color: var(--accent);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.telegram-steps span {
+  min-width: 0;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.telegram-steps code {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.telegram-help-link {
+  width: fit-content;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.telegram-config-status,
+.telegram-config-error {
+  margin: 0;
+  font-size: 12px;
+}
+
+.telegram-config-error {
+  color: #ff8787;
+}
+
+.telegram-config-form {
+  display: grid;
+  gap: 10px;
+}
+
+.telegram-config-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.telegram-config-form label span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.telegram-config-form input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #03080c;
+  color: var(--text);
+  padding: 10px 11px;
+}
+
+.telegram-action-row {
+  flex-wrap: wrap;
+}
+
 .shortcut-overlay {
   position: fixed;
   inset: 0;
@@ -3534,6 +3798,7 @@ p {
 .deck-app[data-background="white"] .custom-card input,
 .deck-app[data-background="white"] .auth-form input,
 .deck-app[data-background="white"] .agent-input input,
+.deck-app[data-background="white"] .telegram-config-form input,
 .deck-app[data-background="white"] .reading-stepper-grid input {
   border-color: rgb(5 53 72 / 0.16);
   background: rgb(255 255 255 / 0.84);

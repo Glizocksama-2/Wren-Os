@@ -60,6 +60,7 @@ import {
   rememberAuthAccount,
   type RememberedAuthAccount
 } from "./lib/authMemory";
+import type { AuthUser } from "./auth/AuthContext";
 import { buildAutonomousIntelScan } from "./lib/intelAutopilot";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
@@ -104,6 +105,11 @@ import {
   reduceCommandDeck,
   saveCommandDeck
 } from "./store/commandDeck";
+
+interface AppProps {
+  authUser?: AuthUser | null;
+  onAuthLogout?: () => void | Promise<void>;
+}
 
 const navItems: Array<{ view: DeckView; label: string; icon: ReactNode; terms: string[] }> = [
   { view: "dashboard", label: "Command", icon: <Grid2X2 size={18} />, terms: ["command", "dashboard", "home", "deck"] },
@@ -175,7 +181,9 @@ export const SESSION_TOKEN_STORAGE_KEY = "northwatch.session-token.v1";
 export const SESSION_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const AGENT_HEALTH_POLL_MS = 30000;
 const ACTIVITY_FEED_POLL_MS = 60000;
-const TELEGRAM_WEBHOOK_ENDPOINT = "/api/telegram/glizocksamabot";
+const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL?.trim() ?? "").replace(/\/$/, "");
+const TELEGRAM_SEND_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/send`;
+const TELEGRAM_CONFIG_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/config`;
 
 type LegalPanel = "settings" | "help" | "privacy" | "terms";
 type AgentHealthStatus = "alive" | "dead" | "idle";
@@ -212,6 +220,13 @@ interface TelegramPayload {
   title: string;
   body: string;
   meta?: string;
+}
+
+interface TelegramConfigStatus {
+  configured: boolean;
+  botUsername: string | null;
+  chatId: string | null;
+  updatedAt: string | null;
 }
 
 function loadLegalConsent(): LegalConsentRecord | null {
@@ -280,8 +295,9 @@ const agentQuickPrompts = [
   "Create focus task"
 ];
 
-export default function App() {
-  const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeck());
+export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
+  const authUserId = authUser?.id ?? null;
+  const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeck(window.localStorage, authUserId));
   const [view, setView] = useState<DeckView>("dashboard");
   const [notice, setNotice] = useState("Fresh command deck initialized.");
   const [session, setSession] = useState<WrenSession | null>(null);
@@ -316,8 +332,8 @@ export default function App() {
 
   useEffect(() => {
     latestDeckRef.current = state;
-    saveCommandDeck(state);
-  }, [state]);
+    saveCommandDeck(state, window.localStorage, authUserId);
+  }, [authUserId, state]);
 
   useEffect(() => {
     if (!supabaseConfig.isConfigured || !supabase) return;
@@ -1016,7 +1032,15 @@ export default function App() {
       </aside>
 
       <main className="deck-screen">
-        <TopBar settings={state.settings} cloudStatus={cloudStatus} workspaceLabel={workspaceLabel} onCommand={navigateFromSearch} onSignOut={signOut} />
+        <TopBar
+          settings={state.settings}
+          cloudStatus={cloudStatus}
+          workspaceLabel={workspaceLabel}
+          authUser={authUser}
+          onCommand={navigateFromSearch}
+          onSignOut={signOut}
+          onAuthLogout={onAuthLogout}
+        />
         {newActivityCount > 0 && (
           <ActivityFeedBanner
             count={newActivityCount}
@@ -1075,6 +1099,7 @@ export default function App() {
           consentRecord={legalConsent}
           sessionToken={sessionToken}
           onRotateSessionToken={rotateSessionToken}
+          onNotice={setNotice}
           onClose={() => setLegalPanel(null)}
         />
       )}
@@ -1197,12 +1222,14 @@ function LegalInfoWindow({
   consentRecord,
   sessionToken,
   onRotateSessionToken,
+  onNotice,
   onClose
 }: {
   panel: LegalPanel;
   consentRecord: LegalConsentRecord | null;
   sessionToken: SessionTokenRecord;
   onRotateSessionToken: () => void;
+  onNotice: (message: string) => void;
   onClose: () => void;
 }) {
   const content = getLegalPanelContent(panel, consentRecord);
@@ -1244,6 +1271,7 @@ function LegalInfoWindow({
               </button>
             </article>
           )}
+          {panel === "settings" && <TelegramSettingsCard onNotice={onNotice} />}
         </div>
         <div className="legal-window-foot">
           <span>Terms v{TERMS_VERSION}</span>
@@ -1251,6 +1279,159 @@ function LegalInfoWindow({
         </div>
       </section>
     </div>
+  );
+}
+
+function TelegramSettingsCard({ onNotice }: { onNotice: (message: string) => void }) {
+  const [status, setStatus] = useState<TelegramConfigStatus>({ configured: false, botUsername: null, chatId: null, updatedAt: null });
+  const [botToken, setBotToken] = useState("");
+  const [chatId, setChatId] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadConfig() {
+      setIsLoading(true);
+      try {
+        const nextStatus = await fetchTelegramConfig();
+        if (!cancelled) {
+          setStatus(nextStatus);
+          setError(null);
+        }
+      } catch (loadError) {
+        if (!cancelled) setError(getErrorMessage(loadError));
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    loadConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveBot = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSaving(true);
+    setError(null);
+    try {
+      const nextStatus = await saveTelegramConfig({ botToken, chatId });
+      setStatus(nextStatus);
+      setBotToken("");
+      onNotice("Telegram bot connected for this account.");
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteBot = async () => {
+    setIsDeleting(true);
+    setError(null);
+    try {
+      await deleteTelegramConfig();
+      setStatus({ configured: false, botUsername: null, chatId: null, updatedAt: null });
+      setBotToken("");
+      setChatId("");
+      onNotice("Telegram bot removed from this account.");
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const sendTest = async () => {
+    setIsTesting(true);
+    setError(null);
+    try {
+      await postToTelegram({
+        kind: "agent-alert",
+        title: "Northwatch Telegram test",
+        body: "Your personal Telegram bot is connected and ready for cards, docs, and agent alerts.",
+        meta: "Settings test"
+      });
+      onNotice("Telegram test sent.");
+    } catch (testError) {
+      setError(getErrorMessage(testError));
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const statusText = isLoading
+    ? "Checking Telegram connection..."
+    : status.configured
+      ? `Connected to ${status.botUsername ? `@${status.botUsername}` : "Telegram"}${status.chatId ? ` - ${status.chatId}` : ""}`
+      : "No personal Telegram bot connected yet.";
+
+  return (
+    <article className="session-token-card telegram-settings-card">
+      <div className="telegram-card-head">
+        <div>
+          <h3>Connect your Telegram bot</h3>
+          <p>Each Northwatch user can save their own bot. The token is encrypted on the Express API and never stored in this browser.</p>
+        </div>
+        <span className={`telegram-status-pill ${status.configured ? "connected" : "idle"}`}>
+          <Bot size={14} /> {status.configured ? "Connected" : "Not connected"}
+        </span>
+      </div>
+      <ol className="telegram-steps">
+        <li><strong>Step 1</strong><span>Open Telegram and search for <code>@BotFather</code>.</span></li>
+        <li><strong>Step 2</strong><span>Send <code>/newbot</code>, choose a name, then choose a username ending in <code>bot</code>.</span></li>
+        <li><strong>Step 3</strong><span>Copy the HTTP API token BotFather gives you.</span></li>
+        <li><strong>Step 4</strong><span>Open your new bot in Telegram and send it any message. For a group, add the bot to the group and send a message there.</span></li>
+        <li><strong>Step 5</strong><span>Visit <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> and copy the <code>chat.id</code> value.</span></li>
+        <li><strong>Step 6</strong><span>Paste the token and chat id below, save, then send a test from Northwatch.</span></li>
+      </ol>
+      <a className="telegram-help-link" href="https://t.me/BotFather" target="_blank" rel="noreferrer">
+        <ExternalLink size={14} /> Open BotFather
+      </a>
+      <p className="telegram-config-status">{statusText}</p>
+      {status.updatedAt && <p className="telegram-config-status">Last updated {formatDateTime(status.updatedAt)}.</p>}
+      {error && <p className="telegram-config-error">{error}</p>}
+      <form className="telegram-config-form" onSubmit={saveBot}>
+        <label>
+          <span>Telegram bot token</span>
+          <input
+            aria-label="Telegram bot token"
+            autoComplete="off"
+            placeholder="123456:ABC-DEF..."
+            type="password"
+            value={botToken}
+            onChange={(event) => setBotToken(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Telegram chat id</span>
+          <input
+            aria-label="Telegram chat id"
+            autoComplete="off"
+            placeholder="987654321"
+            value={chatId}
+            onChange={(event) => setChatId(event.target.value)}
+          />
+        </label>
+        <div className="telegram-action-row">
+          <button type="submit" disabled={isSaving || !botToken.trim() || !chatId.trim()}>
+            <KeyRound size={15} /> {isSaving ? "Saving" : "Save bot"}
+          </button>
+          <button type="button" disabled={isTesting || !status.configured} onClick={sendTest}>
+            <Send size={15} /> {isTesting ? "Sending" : "Send test"}
+          </button>
+          <button type="button" disabled={isDeleting || !status.configured} onClick={deleteBot}>
+            <Trash2 size={15} /> {isDeleting ? "Deleting" : "Delete bot"}
+          </button>
+        </div>
+      </form>
+    </article>
   );
 }
 
@@ -1443,14 +1624,18 @@ function TopBar({
   settings,
   cloudStatus,
   workspaceLabel,
+  authUser,
   onCommand,
-  onSignOut
+  onSignOut,
+  onAuthLogout
 }: {
   settings: DeckSettings;
   cloudStatus: CloudStatus;
   workspaceLabel: string;
+  authUser?: AuthUser | null;
   onCommand: (query: string) => void;
   onSignOut: () => void;
+  onAuthLogout?: () => void | Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const checkedAt = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" }).format(new Date());
@@ -1496,8 +1681,20 @@ function TopBar({
           <Cloud size={14} />
           {cloudStatus.label}
         </span>
-        {cloudStatus.userEmail && (
-          <button className="topbar-icon-button" type="button" aria-label="Sign out of Northwatch" onClick={onSignOut}>
+        {authUser && <AuthUserChip user={authUser} />}
+        {(authUser || cloudStatus.userEmail) && (
+          <button
+            className="topbar-icon-button"
+            type="button"
+            aria-label="Sign out of Northwatch"
+            onClick={() => {
+              if (authUser && onAuthLogout) {
+                void onAuthLogout();
+                return;
+              }
+              onSignOut();
+            }}
+          >
             <LogOut size={15} />
           </button>
         )}
@@ -1506,6 +1703,15 @@ function TopBar({
         <strong>72%</strong>
       </div>
     </header>
+  );
+}
+
+function AuthUserChip({ user }: { user: AuthUser }) {
+  return (
+    <span className="auth-user-chip" title={user.email}>
+      <span>{getProfileInitials(user.displayName)}</span>
+      <strong>{user.displayName}</strong>
+    </span>
   );
 }
 
@@ -4254,8 +4460,9 @@ async function postToTelegram(payload: TelegramPayload): Promise<void> {
     throw new Error("fetch is unavailable in this browser.");
   }
 
-  const response = await fetch(TELEGRAM_WEBHOOK_ENDPOINT, {
+  const response = await fetch(TELEGRAM_SEND_ENDPOINT, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...payload,
@@ -4265,7 +4472,73 @@ async function postToTelegram(payload: TelegramPayload): Promise<void> {
   });
 
   if (!response.ok) {
-    throw new Error(`webhook returned ${response.status}`);
+    throw new Error(await readApiError(response, `Telegram API returned ${response.status}.`));
+  }
+}
+
+async function fetchTelegramConfig(): Promise<TelegramConfigStatus> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_CONFIG_ENDPOINT, { credentials: "include" });
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Telegram settings are unavailable."));
+  }
+
+  return normalizeTelegramConfig(await response.json());
+}
+
+async function saveTelegramConfig(input: { botToken: string; chatId: string }): Promise<TelegramConfigStatus> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_CONFIG_ENDPOINT, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Telegram bot could not be saved."));
+  }
+
+  return normalizeTelegramConfig(await response.json());
+}
+
+async function deleteTelegramConfig(): Promise<void> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_CONFIG_ENDPOINT, {
+    method: "DELETE",
+    credentials: "include"
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Telegram bot could not be deleted."));
+  }
+}
+
+function normalizeTelegramConfig(value: unknown): TelegramConfigStatus {
+  const record = value && typeof value === "object" ? value as Partial<TelegramConfigStatus> : {};
+  return {
+    configured: Boolean(record.configured),
+    botUsername: typeof record.botUsername === "string" ? record.botUsername : null,
+    chatId: typeof record.chatId === "string" ? record.chatId : null,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null
+  };
+}
+
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const parsed = await response.json() as { error?: string; errors?: string[] };
+    return parsed.error ?? parsed.errors?.join(" ") ?? fallback;
+  } catch {
+    return fallback;
   }
 }
 

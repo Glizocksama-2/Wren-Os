@@ -1,10 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
+import ProtectedNorthwatch from "./auth/ProtectedNorthwatch";
 import "./styles/app.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ProtectedNorthwatch />
   </StrictMode>
 );

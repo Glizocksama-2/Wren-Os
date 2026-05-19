@@ -22,6 +22,12 @@ npm install
 npm run dev
 ```
 
+Run the Express auth API in a second terminal when using cookie-based multi-user auth:
+
+```bash
+npm run dev:api
+```
+
 ## Local Ollama Agent
 
 Sentinel can use a local Ollama model from the floating agent panel. The checked-in default is:
@@ -42,21 +48,26 @@ Open the logo button > Customize to change the Sentinel endpoint or model after 
 
 If the app is served from a different local origin and the browser blocks Ollama, add that origin to `OLLAMA_ORIGINS`, then restart Ollama. For Vite development, allow the current local app origin such as `http://127.0.0.1:5174`, `http://127.0.0.1:5173`, or the matching `localhost` URL.
 
-## Telegram Bridge
+## Telegram Bot Setup
 
-Kanban cards, journal docs, and agent alerts can be sent to `@glizocksamabot` through the Vercel serverless bridge at `/api/telegram/glizocksamabot`.
+Every signed-in Northwatch user can connect their own Telegram bot from the logo button > Settings. Bot tokens are saved only on the Express API, encrypted with `TELEGRAM_SECRET_KEY`, and scoped to the authenticated user through the `agent_configs` table.
 
-Configure one of these server-side env options in Vercel:
+Required server env for personal bots:
 
 ```bash
-TELEGRAM_WEBHOOK_URL=https://your-existing-webhook.example
-
-# Or use Telegram's sendMessage API directly:
-TELEGRAM_BOT_TOKEN=123456:bot-token
-TELEGRAM_CHAT_ID=123456789
+TELEGRAM_SECRET_KEY=use-at-least-32-random-characters
 ```
 
-The `/health` endpoint reports whether the Telegram bridge is configured.
+User setup steps:
+
+1. Open Telegram and search for `@BotFather`.
+2. Send `/newbot`, choose a display name, then choose a username ending in `bot`.
+3. Copy the HTTP API token BotFather gives you.
+4. Open your new bot in Telegram and send it any message. For a group, add the bot to the group and send a message there.
+5. Visit `https://api.telegram.org/bot<token>/getUpdates` and copy the `chat.id` value.
+6. Paste the token and chat id into Northwatch Settings, save, then send a test.
+
+The authenticated Express routes are `/api/telegram/config` and `/api/telegram/send`. The older Vercel serverless bridge at `/api/telegram/glizocksamabot` can still be configured as a global fallback with `TELEGRAM_WEBHOOK_URL` or `TELEGRAM_BOT_TOKEN` plus `TELEGRAM_CHAT_ID`, and `/health` reports whether that legacy bridge is configured.
 
 To refresh GitHub/Vercel project sources from authenticated local CLIs:
 
@@ -90,6 +101,34 @@ VITE_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
 Use the legacy `VITE_SUPABASE_ANON_KEY` only if your project has not moved to publishable keys yet. Never put a `service_role` or secret key in this Vite app.
+
+## Express Password Auth
+
+Northwatch also includes an Express auth API for email/password accounts, httpOnly JWT cookies, seven-day expiry, silent refresh, server-side logout revocation, and per-user PostgreSQL isolation.
+
+Required server env vars:
+
+```bash
+DATABASE_URL=postgres://user:password@host:5432/northwatch
+JWT_SECRET=use-a-long-random-secret
+TELEGRAM_SECRET_KEY=use-at-least-32-random-characters
+CORS_ORIGIN=http://127.0.0.1:5173,http://127.0.0.1:5174
+PORT=4000
+```
+
+Optional frontend env var when the API is on a separate origin:
+
+```bash
+VITE_AUTH_API_BASE_URL=http://127.0.0.1:4000
+```
+
+Apply the PostgreSQL schema and RLS policies from:
+
+```bash
+server/db/northwatch_auth_rls.sql
+```
+
+Protected API data routes live under `/api/:resource` for `kanban-cards`, `projects`, `content-queue`, `documents`, `activity-feed`, `agent-configs`, and `api-tokens`. The backend ignores any `user_id` sent by the client and scopes each query with `WHERE user_id = req.userId` plus the RLS `app.current_user_id` setting.
 
 ## Local-first Data Warning
 

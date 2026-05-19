@@ -745,9 +745,26 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
   }
 }
 
-export function loadCommandDeck(storage: Storage = window.localStorage): CommandDeckState {
+export function getCommandDeckStorageKey(userId?: string | null): string {
+  if (!userId) return COMMAND_DECK_STORAGE_KEY;
+  return `${COMMAND_DECK_STORAGE_KEY}:${userId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+export function loadCommandDeck(storage: Storage = window.localStorage, userId?: string | null): CommandDeckState {
+  const storageKey = getCommandDeckStorageKey(userId);
+  if (userId) {
+    const rawUserDeck = storage.getItem(storageKey);
+    if (!rawUserDeck) return createFreshDeck();
+
+    try {
+      return normalizeCommandDeck(JSON.parse(rawUserDeck) as Partial<CommandDeckState>);
+    } catch {
+      return createFreshDeck();
+    }
+  }
+
   const migratedLegacyDeck = migrateLegacyWorkspace(storage.getItem(LEGACY_WORKSPACE_KEY));
-  const raw = storage.getItem(COMMAND_DECK_STORAGE_KEY) ?? storage.getItem(LEGACY_COMMAND_DECK_KEY);
+  const raw = storage.getItem(storageKey) ?? storage.getItem(LEGACY_COMMAND_DECK_KEY);
   if (!raw) return migratedLegacyDeck ?? createFreshDeck();
 
   try {
@@ -763,8 +780,8 @@ export function loadCommandDeck(storage: Storage = window.localStorage): Command
   }
 }
 
-export function saveCommandDeck(state: CommandDeckState, storage: Storage = window.localStorage): void {
-  storage.setItem(COMMAND_DECK_STORAGE_KEY, JSON.stringify(state));
+export function saveCommandDeck(state: CommandDeckState, storage: Storage = window.localStorage, userId?: string | null): void {
+  storage.setItem(getCommandDeckStorageKey(userId), JSON.stringify(state));
 }
 
 export function getDeckMetrics(state: CommandDeckState) {
