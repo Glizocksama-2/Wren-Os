@@ -1029,6 +1029,7 @@ p {
 .week-strip,
 .heat-strip,
 .book-spines,
+.routine-day-row,
 .prompt-stack,
 .tag-cloud,
 .setting-stack,
@@ -1665,6 +1666,7 @@ p {
 }
 
 .book-grid,
+.routine-grid,
 .custom-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1672,17 +1674,152 @@ p {
 }
 
 .book-card,
+.routine-card,
 .custom-card {
   padding: 13px;
 }
 
-.book-card {
+.book-card,
+.routine-card {
   display: grid;
   gap: 11px;
 }
 
-.book-card h3 {
+.book-card h3,
+.routine-card h3 {
   font-size: 16px;
+}
+
+.routine-form {
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.35fr) minmax(280px, 1fr) auto;
+}
+
+.routine-day-picker {
+  display: flex;
+  min-width: 0;
+  align-items: end;
+  gap: 7px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.routine-day-picker legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.routine-day-picker label {
+  display: grid;
+  min-width: 32px;
+  min-height: 36px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(2 8 12 / 0.55);
+  color: var(--muted);
+}
+
+.routine-day-picker input {
+  position: absolute;
+  opacity: 0;
+}
+
+.routine-day-picker label:has(input:checked) {
+  border-color: rgb(var(--accent-rgb) / 0.48);
+  background: rgb(var(--accent-rgb) / 0.14);
+  color: var(--accent);
+}
+
+.routine-orbit {
+  display: grid;
+  width: 142px;
+  aspect-ratio: 1;
+  place-items: center;
+  align-content: center;
+  border: 1px solid rgb(var(--accent-rgb) / 0.38);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 50%, rgb(var(--accent-rgb) / 0.18), transparent 62%),
+    rgb(2 8 12 / 0.44);
+  box-shadow: inset 0 0 38px rgb(var(--accent-rgb) / 0.08);
+}
+
+.routine-orbit strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.routine-orbit span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.routine-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(11 26 35 / 0.78), rgb(4 10 14 / 0.82)),
+    radial-gradient(circle at top right, rgb(var(--accent-rgb) / 0.08), transparent 18rem);
+  box-shadow: var(--shadow);
+}
+
+.routine-card > div:first-child {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.routine-card > div:first-child svg {
+  color: var(--accent);
+}
+
+.routine-card p {
+  grid-column: 2;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.routine-card.done {
+  border-color: rgb(85 210 131 / 0.36);
+}
+
+.routine-day-row span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--faint);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.routine-day-row span.active {
+  border-color: rgb(var(--accent-rgb) / 0.42);
+  background: rgb(var(--accent-rgb) / 0.1);
+  color: var(--accent);
+}
+
+.routine-card-meta {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.routine-card-meta span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 5px 8px;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .book-card input[type="range"] {
@@ -2550,6 +2687,7 @@ p {
 .deck-app[data-background="white"] .metric-tile,
 .deck-app[data-background="white"] .custom-card,
 .deck-app[data-background="white"] .book-card,
+.deck-app[data-background="white"] .routine-card,
 .deck-app[data-background="white"] .finance-summary div,
 .deck-app[data-background="white"] .life-hero,
 .deck-app[data-background="white"] .account-hero,
@@ -2579,6 +2717,8 @@ p {
 .deck-app[data-background="white"] .repo-link,
 .deck-app[data-background="white"] .orbit-core,
 .deck-app[data-background="white"] .theme-preview,
+.deck-app[data-background="white"] .routine-orbit,
+.deck-app[data-background="white"] .routine-day-picker label,
 .deck-app[data-background="white"] .team-empty-state,
 .deck-app[data-background="white"] .team-member-row,
 .deck-app[data-background="white"] .agent-context div,
@@ -2718,6 +2858,7 @@ p {
 
   .metric-grid,
   .book-grid,
+  .routine-grid,
   .custom-grid,
   .finance-summary,
   .journal-archive {
@@ -2727,6 +2868,7 @@ p {
   .command-form,
   .project-form,
   .intel-form,
+  .routine-form,
   .journal-form {
     grid-template-columns: 1fr 1fr;
   }
@@ -2809,6 +2951,7 @@ p {
 
   .metric-grid,
   .book-grid,
+  .routine-grid,
   .custom-grid,
   .journal-archive,
   .finance-summary,
@@ -2823,6 +2966,7 @@ p {
   .project-form,
   .intel-form,
   .intel-note-form,
+  .routine-form,
   .journal-form,
   .auth-form {
     grid-template-columns: 1fr;

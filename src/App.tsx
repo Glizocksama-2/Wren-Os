@@ -33,6 +33,7 @@ import {
   PiggyBank,
   Plus,
   Radar,
+  Repeat2,
   RotateCcw,
   Search,
   Send,
@@ -87,6 +88,8 @@ import {
   type IntelSignal,
   type LogoStyle,
   type Priority,
+  type RoutineCadence,
+  type RoutineDay,
   freshCommandDeck,
   getDeckMetrics,
   loadCommandDeck,
@@ -97,6 +100,7 @@ import {
 const navItems: Array<{ view: DeckView; label: string; icon: ReactNode; terms: string[] }> = [
   { view: "dashboard", label: "Command", icon: <Grid2X2 size={18} />, terms: ["command", "dashboard", "home", "deck"] },
   { view: "todo", label: "To Do", icon: <ListTodo size={18} />, terms: ["todo", "task", "tasks", "list"] },
+  { view: "daily", label: "Daily", icon: <Repeat2 size={18} />, terms: ["daily", "routine", "routines", "repeat", "habit", "habits"] },
   { view: "projects", label: "Projects", icon: <Target size={18} />, terms: ["project", "projects", "pending", "done"] },
   { view: "intel", label: "Intel", icon: <Newspaper size={18} />, terms: ["intel", "news", "stock", "stocks", "market", "watchlist", "invest", "investing"] },
   { view: "calendar", label: "Calendar", icon: <CalendarDays size={18} />, terms: ["calendar", "event", "schedule"] },
@@ -113,6 +117,15 @@ const financeTypes: FinanceType[] = ["income", "expense", "savings"];
 const eventTypes: CalendarEntry["type"][] = ["mission", "training", "finance", "personal"];
 const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
 const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
+const routineDayOptions: Array<{ value: RoutineDay; label: string; short: string }> = [
+  { value: "mon", label: "Monday", short: "Mon" },
+  { value: "tue", label: "Tuesday", short: "Tue" },
+  { value: "wed", label: "Wednesday", short: "Wed" },
+  { value: "thu", label: "Thursday", short: "Thu" },
+  { value: "fri", label: "Friday", short: "Fri" },
+  { value: "sat", label: "Saturday", short: "Sat" },
+  { value: "sun", label: "Sunday", short: "Sun" }
+];
 const accentOptions: Array<{ value: Accent; label: string }> = [
   { value: "amber", label: "Amber" },
   { value: "cyan", label: "Cyan" },
@@ -679,6 +692,7 @@ export default function App() {
         <section className="deck-content">
           {view === "dashboard" && <Dashboard state={state} metrics={metrics} dispatch={dispatch} setView={setView} setNotice={setNotice} />}
           {view === "todo" && <TodoModule state={state} dispatch={dispatch} setNotice={setNotice} />}
+          {view === "daily" && <DailyModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "projects" && <ProjectsModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "intel" && <IntelModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "calendar" && <CalendarModule state={state} dispatch={dispatch} setNotice={setNotice} />}
@@ -899,12 +913,14 @@ function Dashboard({
           </p>
           <div className="hero-actions">
             <button type="button" onClick={() => setView("todo")}>Add to do</button>
+            <button type="button" onClick={() => setView("daily")}>Daily list</button>
             <button type="button" onClick={() => setView("projects")}>Open projects</button>
           </div>
           <div className="hero-signal-row" aria-label="Northwatch live systems">
             <span><Bot size={14} /> Sentinel agent online</span>
             <span><Radar size={14} /> {metrics.intelItems} intel targets</span>
             <span><Zap size={14} /> {metrics.openTasks} active orders</span>
+            <span><Repeat2 size={14} /> {metrics.routinesDoneToday}/{metrics.routinesDueToday} daily systems</span>
           </div>
         </div>
         {state.settings.showOrbit && <OrbitGauge value={metrics.readiness} />}
@@ -984,6 +1000,7 @@ function Dashboard({
 function MetricGrid({ metrics }: { metrics: ReturnType<typeof getDeckMetrics> }) {
   const items = [
     ["To do", metrics.openTasks],
+    ["Daily done", `${metrics.routinesDoneToday}/${metrics.routinesDueToday}`],
     ["Pending projects", metrics.pendingProjects],
     ["Done projects", metrics.doneProjects],
     ["GitHub progress", `${metrics.projectProgress}%`],
@@ -1084,6 +1101,165 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
           ))}
         </ItemList>
       </TwoColumn>
+    </ModuleShell>
+  );
+}
+
+function DailyModule({ state, dispatch, setNotice }: ModuleProps) {
+  const [title, setTitle] = useState("");
+  const [cadence, setCadence] = useState<RoutineCadence>("daily");
+  const [selectedDays, setSelectedDays] = useState<RoutineDay[]>([]);
+  const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
+  const today = getTodayInput();
+  const todayDay = getRoutineDayForDate(today);
+  const dueToday = state.routines.filter((routine) => routine.days.includes(todayDay));
+  const doneToday = dueToday.filter((routine) => routine.completions.includes(today));
+  const completion = dueToday.length === 0 ? 0 : Math.round((doneToday.length / dueToday.length) * 100);
+  const longestStreak = state.routines.reduce((max, routine) => Math.max(max, routine.streak), 0);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim()) return;
+    if (editingRoutineId) {
+      dispatch({ type: "routine/update", id: editingRoutineId, title: title.trim(), cadence, days: cadence === "daily" ? [] : selectedDays });
+      setEditingRoutineId(null);
+      setNotice("Routine updated.");
+    } else {
+      dispatch({ type: "routine/add", title: title.trim(), cadence, days: cadence === "daily" ? [] : selectedDays });
+      setNotice("Routine added.");
+    }
+    setTitle("");
+    setCadence("daily");
+    setSelectedDays([]);
+  };
+
+  const startEdit = (routine: CommandDeckState["routines"][number]) => {
+    setEditingRoutineId(routine.id);
+    setTitle(routine.title);
+    setCadence(routine.cadence);
+    setSelectedDays(routine.cadence === "daily" ? [] : routine.days);
+  };
+
+  const cancelEdit = () => {
+    setEditingRoutineId(null);
+    setTitle("");
+    setCadence("daily");
+    setSelectedDays([]);
+  };
+
+  const toggleDay = (day: RoutineDay) => {
+    setSelectedDays((current) =>
+      current.includes(day) ? current.filter((item) => item !== day) : [...current, day].sort((left, right) => getRoutineDayIndex(left) - getRoutineDayIndex(right))
+    );
+  };
+
+  return (
+    <ModuleShell title="Daily To Do" description="Repeatable routines for daily work and the tasks that need to happen a few times each week.">
+      <section className="life-layout routine-layout">
+        <article className="life-hero">
+          <div>
+            <span className="micro-label">Repeat command</span>
+            <h2>Daily Systems</h2>
+            <p>{dueToday.length === 0 ? "No routines are scheduled for today." : `${doneToday.length} of ${dueToday.length} routines cleared today.`}</p>
+          </div>
+          <div className="routine-orbit" aria-label="Routine completion">
+            <strong>{completion}%</strong>
+            <span>{doneToday.length} completed today</span>
+          </div>
+        </article>
+        <section className="deck-panel life-panel">
+          <PanelHead title="Today" />
+          <div className="big-readout">
+            <strong>{doneToday.length}/{dueToday.length}</strong>
+            <span>done today</span>
+          </div>
+          <div className="long-meter"><span style={{ width: `${completion}%` }} /></div>
+        </section>
+        <section className="deck-panel life-panel">
+          <PanelHead title="Streak" />
+          <div className="big-readout">
+            <strong>{longestStreak}</strong>
+            <span>best active streak</span>
+          </div>
+        </section>
+      </section>
+
+      <form className="command-form routine-form" onSubmit={submit}>
+        <label><span>Routine</span><input aria-label="Routine title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Morning reset" /></label>
+        <label>
+          <span>Cadence</span>
+          <select
+            aria-label="Routine cadence"
+            value={cadence}
+            onChange={(event) => {
+              setCadence(event.target.value as RoutineCadence);
+              setSelectedDays([]);
+            }}
+          >
+            <option value="daily">Every day</option>
+            <option value="weekly">Selected days</option>
+          </select>
+        </label>
+        {cadence === "weekly" && (
+          <fieldset className="routine-day-picker">
+            <legend>Days</legend>
+            {routineDayOptions.map((day) => (
+              <label key={day.value}>
+                <input
+                  aria-label={day.label}
+                  checked={selectedDays.includes(day.value)}
+                  onChange={() => toggleDay(day.value)}
+                  type="checkbox"
+                />
+                <span>{day.short}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        <button type="submit" disabled={cadence === "weekly" && selectedDays.length === 0}>
+          <Plus size={16} /> {editingRoutineId ? "Save routine" : "Add routine"}
+        </button>
+        {editingRoutineId && <button type="button" onClick={cancelEdit}>Cancel</button>}
+      </form>
+
+      <section className="routine-grid">
+        {state.routines.map((routine) => {
+          const done = routine.completions.includes(today);
+          const days = getRoutineDaysLabel(routine.days);
+          return (
+            <article className={`routine-card ${done ? "done" : ""}`} key={routine.id}>
+              <div>
+                <Repeat2 size={18} />
+                <h3>{routine.title}</h3>
+                <p>{routine.cadence === "daily" ? "Daily" : days}</p>
+              </div>
+              <div className="routine-day-row" aria-label={`${routine.title} schedule`}>
+                {routineDayOptions.map((day) => (
+                  <span className={routine.days.includes(day.value) ? "active" : ""} key={day.value}>{day.short.slice(0, 1)}</span>
+                ))}
+              </div>
+              <div className="routine-card-meta">
+                <span>{routine.streak} day streak</span>
+                <span>{routine.completions.length} total clears</span>
+              </div>
+              <div className="card-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    dispatch({ type: "routine/toggle", id: routine.id });
+                    setNotice(done ? "Routine reopened for today." : "Routine cleared for today.");
+                  }}
+                >
+                  <CircleCheck size={15} /> {done ? "Reopen today" : "Done today"}
+                </button>
+                <button type="button" onClick={() => startEdit(routine)}><Pencil size={15} /> Modify</button>
+                <button type="button" aria-label={`Delete ${routine.title}`} onClick={() => dispatch({ type: "routine/delete", id: routine.id })}><Trash2 size={15} /> Delete</button>
+              </div>
+            </article>
+          );
+        })}
+        {state.routines.length === 0 && <EmptyState>No repetitive routines yet.</EmptyState>}
+      </section>
     </ModuleShell>
   );
 }
@@ -3067,6 +3243,23 @@ function getPriorityTask(state: CommandDeckState): CommandDeckState["tasks"][num
     if (right.dueDate) return 1;
     return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
   })[0];
+}
+
+function getTodayInput(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getRoutineDayForDate(date: string): RoutineDay {
+  const dayIndex = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+  return routineDayOptions[dayIndex === 0 ? 6 : dayIndex - 1].value;
+}
+
+function getRoutineDayIndex(day: RoutineDay): number {
+  return routineDayOptions.findIndex((option) => option.value === day);
+}
+
+function getRoutineDaysLabel(days: RoutineDay[]): string {
+  return routineDayOptions.filter((option) => days.includes(option.value)).map((option) => option.short).join(" ");
 }
 
 function getPriorityProject(state: CommandDeckState): CommandDeckState["projects"][number] | null {

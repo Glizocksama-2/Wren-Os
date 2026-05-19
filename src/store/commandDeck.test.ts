@@ -285,6 +285,46 @@ describe("command deck cloud import", () => {
 
     expect(deck.settings).toMatchObject({ accent: "pink", background: "white" });
   });
+
+  it("tracks repetitive daily and selected-day routines", () => {
+    let deck: CommandDeckState = { ...freshCommandDeck, tasks: [], projects: [], routines: [], calendar: [], workouts: [], books: [], journal: [], finances: [], intel: [] };
+
+    deck = reduceCommandDeck(deck, {
+      type: "routine/add",
+      title: "Morning reset",
+      cadence: "daily",
+      days: []
+    });
+
+    expect(deck.routines[0]).toMatchObject({
+      title: "Morning reset",
+      cadence: "daily",
+      days: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+      completions: [],
+      streak: 0
+    });
+
+    deck = reduceCommandDeck(deck, { type: "routine/toggle", id: deck.routines[0].id, date: "2026-05-19" });
+    expect(deck.routines[0].completions).toContain("2026-05-19");
+    expect(deck.routines[0].streak).toBe(1);
+
+    deck = reduceCommandDeck(deck, { type: "routine/toggle", id: deck.routines[0].id, date: "2026-05-19" });
+    expect(deck.routines[0].completions).not.toContain("2026-05-19");
+    expect(deck.routines[0].streak).toBe(0);
+
+    deck = reduceCommandDeck(deck, {
+      type: "routine/add",
+      title: "Strength work",
+      cadence: "weekly",
+      days: ["mon", "wed", "fri"]
+    });
+
+    expect(deck.routines[0]).toMatchObject({
+      title: "Strength work",
+      cadence: "weekly",
+      days: ["mon", "wed", "fri"]
+    });
+  });
 });
 
 function createMemoryStorage(): Storage {

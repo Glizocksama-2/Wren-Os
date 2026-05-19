@@ -3,6 +3,7 @@ import { githubProjectSeed, githubScanSummary } from "../data/githubProjects";
 export type DeckView =
   | "dashboard"
   | "todo"
+  | "daily"
   | "projects"
   | "intel"
   | "calendar"
@@ -22,6 +23,8 @@ export type LogoStyle = "sentinel" | "monolith" | "radar" | "spire";
 export type ProjectSource = "manual" | "github";
 export type IntelKind = "stock" | "crypto" | "fund" | "company" | "trend" | "news";
 export type IntelSignal = "watching" | "researching" | "high-priority" | "on-hold";
+export type RoutineCadence = "daily" | "weekly";
+export type RoutineDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
 export interface CommandTask {
   id: string;
@@ -81,6 +84,17 @@ export interface WorkoutEntry {
   day: string;
   focus: string;
   status: "planned" | "done";
+}
+
+export interface RoutineEntry {
+  id: string;
+  title: string;
+  cadence: RoutineCadence;
+  days: RoutineDay[];
+  completions: string[];
+  streak: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface BookEntry {
@@ -158,6 +172,7 @@ export interface CommandDeckState {
     projectCount: number;
   };
   tasks: CommandTask[];
+  routines: RoutineEntry[];
   projects: CommandProject[];
   calendar: CalendarEntry[];
   workouts: WorkoutEntry[];
@@ -173,6 +188,10 @@ export type CommandDeckAction =
   | { type: "task/update"; id: string; title: string; priority: Priority; dueDate: string | null }
   | { type: "task/toggle"; id: string }
   | { type: "task/delete"; id: string }
+  | { type: "routine/add"; title: string; cadence: RoutineCadence; days: RoutineDay[] }
+  | { type: "routine/update"; id: string; title: string; cadence: RoutineCadence; days: RoutineDay[] }
+  | { type: "routine/toggle"; id: string; date?: string }
+  | { type: "routine/delete"; id: string }
   | { type: "project/add"; name: string; objective: string; nextAction: string; dueDate: string | null }
   | { type: "project/update"; id: string; name: string; objective: string; nextAction: string; dueDate: string | null; progress: number }
   | { type: "project/complete"; id: string }
@@ -216,6 +235,7 @@ const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority",
 const logoStyles: LogoStyle[] = ["sentinel", "monolith", "radar", "spire"];
 const accents: Accent[] = ["amber", "cyan", "green", "red", "pink"];
 const backgroundModes: BackgroundMode[] = ["black", "white"];
+const routineDays: RoutineDay[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 export const freshCommandDeck: CommandDeckState = {
   version: SCHEMA_VERSION,
@@ -223,6 +243,7 @@ export const freshCommandDeck: CommandDeckState = {
   updatedAt: nowIso(),
   githubScan: githubScanSummary,
   tasks: [],
+  routines: [],
   projects: [],
   calendar: [],
   workouts: [],
@@ -290,6 +311,67 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
 
     case "task/delete":
       return touch({ ...state, tasks: state.tasks.filter((task) => task.id !== action.id) }, timestamp);
+
+    case "routine/add": {
+      const days = normalizeRoutineDays(action.days, action.cadence);
+      return touch({
+        ...state,
+        routines: [
+          {
+            id: makeId("routine"),
+            title: action.title,
+            cadence: action.cadence,
+            days,
+            completions: [],
+            streak: 0,
+            createdAt: timestamp,
+            updatedAt: timestamp
+          },
+          ...state.routines
+        ]
+      }, timestamp);
+    }
+
+    case "routine/update": {
+      const days = normalizeRoutineDays(action.days, action.cadence);
+      return touch({
+        ...state,
+        routines: state.routines.map((routine) =>
+          routine.id === action.id
+            ? {
+                ...routine,
+                title: action.title,
+                cadence: action.cadence,
+                days,
+                updatedAt: timestamp
+              }
+            : routine
+        )
+      }, timestamp);
+    }
+
+    case "routine/toggle": {
+      const date = normalizeCompletionDate(action.date) ?? todayInput();
+      return touch({
+        ...state,
+        routines: state.routines.map((routine) => {
+          if (routine.id !== action.id) return routine;
+          const completions = routine.completions.includes(date)
+            ? routine.completions.filter((item) => item !== date)
+            : [...routine.completions, date].sort();
+
+          return {
+            ...routine,
+            completions,
+            streak: calculateRoutineStreak(completions),
+            updatedAt: timestamp
+          };
+        })
+      }, timestamp);
+    }
+
+    case "routine/delete":
+      return touch({ ...state, routines: state.routines.filter((routine) => routine.id !== action.id) }, timestamp);
 
     case "project/add":
       return touch({
@@ -615,13 +697,17 @@ export function saveCommandDeck(state: CommandDeckState, storage: Storage = wind
 export function getDeckMetrics(state: CommandDeckState) {
   const openTasks = state.tasks.filter((task) => task.status === "todo");
   const doneTasks = state.tasks.filter((task) => task.status === "done");
+  const today = todayInput();
+  const todayDay = getRoutineDay(today);
+  const routinesDueToday = state.routines.filter((routine) => routine.days.includes(todayDay));
+  const routinesDoneToday = routinesDueToday.filter((routine) => routine.completions.includes(today));
   const pendingProjects = state.projects.filter((project) => project.status === "pending");
   const doneProjects = state.projects.filter((project) => project.status === "done");
   const income = state.finances.filter((entry) => entry.type === "income").reduce((total, entry) => total + entry.amount, 0);
   const expenses = state.finances.filter((entry) => entry.type === "expense").reduce((total, entry) => total + entry.amount, 0);
   const savings = state.finances.filter((entry) => entry.type === "savings").reduce((total, entry) => total + entry.amount, 0);
-  const totalActions = state.tasks.length + state.projects.length + state.workouts.length + state.books.length + state.journal.length + state.intel.length;
-  const completedActions = doneTasks.length + doneProjects.length + state.workouts.filter((entry) => entry.status === "done").length;
+  const totalActions = state.tasks.length + state.routines.length + state.projects.length + state.workouts.length + state.books.length + state.journal.length + state.intel.length;
+  const completedActions = doneTasks.length + routinesDoneToday.length + doneProjects.length + state.workouts.filter((entry) => entry.status === "done").length;
   const projectProgress =
     state.projects.length === 0
       ? 0
@@ -630,6 +716,8 @@ export function getDeckMetrics(state: CommandDeckState) {
   return {
     openTasks: openTasks.length,
     doneTasks: doneTasks.length,
+    routinesDueToday: routinesDueToday.length,
+    routinesDoneToday: routinesDoneToday.length,
     pendingProjects: pendingProjects.length,
     doneProjects: doneProjects.length,
     calendarEvents: state.calendar.length,
@@ -656,6 +744,7 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     ...value,
     version: SCHEMA_VERSION,
     tasks: Array.isArray(value.tasks) ? value.tasks : [],
+    routines: Array.isArray(value.routines) ? value.routines.map(normalizeRoutine) : [],
     githubScan: value.githubScan ?? githubScanSummary,
     projects: mergeGitHubProjects(
       Array.isArray(value.projects) ? value.projects.map(normalizeProject) : [],
@@ -686,6 +775,7 @@ function createFreshDeck(): CommandDeckState {
     updatedAt: timestamp,
     githubScan: githubScanSummary,
     tasks: [],
+    routines: [],
     projects: mergeGitHubProjects([], githubProjectSeed),
     calendar: [],
     workouts: [],
@@ -858,6 +948,7 @@ function normalizeLogoStyle(value: unknown, version: number): LogoStyle {
 function hasUserDeckData(state: CommandDeckState): boolean {
   return (
     state.tasks.length > 0 ||
+    state.routines.length > 0 ||
     state.projects.some((project) => project.source !== "github") ||
     state.calendar.length > 0 ||
     state.workouts.length > 0 ||
@@ -913,6 +1004,70 @@ function normalizeIntelItem(item: Partial<IntelItem>): IntelItem {
     createdAt: item.createdAt ?? timestamp,
     updatedAt: item.updatedAt ?? timestamp
   };
+}
+
+function normalizeRoutine(routine: Partial<RoutineEntry>): RoutineEntry {
+  const timestamp = nowIso();
+  const cadence = routine.cadence === "weekly" ? "weekly" : "daily";
+  const completions = Array.isArray(routine.completions)
+    ? Array.from(new Set(routine.completions.map(normalizeCompletionDate).filter((date): date is string => Boolean(date)))).sort()
+    : [];
+
+  return {
+    id: routine.id ?? makeId("routine"),
+    title: routine.title ?? "Untitled routine",
+    cadence,
+    days: normalizeRoutineDays(routine.days ?? [], cadence),
+    completions,
+    streak: calculateRoutineStreak(completions),
+    createdAt: routine.createdAt ?? timestamp,
+    updatedAt: routine.updatedAt ?? timestamp
+  };
+}
+
+function normalizeRoutineDays(days: unknown[], cadence: RoutineCadence): RoutineDay[] {
+  if (cadence === "daily") return routineDays;
+  const normalized = days.filter((day): day is RoutineDay => routineDays.includes(day as RoutineDay));
+  return Array.from(new Set(normalized));
+}
+
+function normalizeCompletionDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+function calculateRoutineStreak(completions: string[]): number {
+  if (completions.length === 0) return 0;
+  const completionSet = new Set(completions);
+  const latest = completions.slice().sort().at(-1);
+  if (!latest) return 0;
+
+  let streak = 0;
+  let cursor = parseDateInput(latest);
+  while (completionSet.has(formatDateInput(cursor))) {
+    streak += 1;
+    cursor = addUtcDays(cursor, -1);
+  }
+
+  return streak;
+}
+
+function getRoutineDay(date: string): RoutineDay {
+  return routineDays[parseDateInput(date).getUTCDay() === 0 ? 6 : parseDateInput(date).getUTCDay() - 1];
+}
+
+function parseDateInput(date: string): Date {
+  return new Date(`${date}T00:00:00.000Z`);
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function formatDateInput(date: Date): string {
+  return date.toISOString().slice(0, 10);
 }
 
 function normalizeBook(book: Partial<BookEntry>): BookEntry {

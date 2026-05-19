@@ -36,6 +36,32 @@ describe("Northwatch command deck", () => {
     expect(within(screen.getByRole("heading", { name: "Done" }).closest(".deck-panel") as HTMLElement).getByText("Secure morning plan")).toBeInTheDocument();
   });
 
+  it("adds daily and selected-day repetitive routines", () => {
+    render(<App />);
+
+    clickNav("Daily");
+    fireEvent.change(screen.getByLabelText("Routine title"), { target: { value: "Morning reset" } });
+    fireEvent.click(screen.getByRole("button", { name: /add routine/i }));
+
+    expect(screen.getByText("Morning reset")).toBeInTheDocument();
+    expect(screen.getByText("Daily")).toBeInTheDocument();
+    expect(screen.getByText("0 completed today")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done today" }));
+    expect(screen.getByText("1 completed today")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen today" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Routine title"), { target: { value: "Strength work" } });
+    fireEvent.change(screen.getByLabelText("Routine cadence"), { target: { value: "weekly" } });
+    fireEvent.click(screen.getByLabelText("Monday"));
+    fireEvent.click(screen.getByLabelText("Wednesday"));
+    fireEvent.click(screen.getByLabelText("Friday"));
+    fireEvent.click(screen.getByRole("button", { name: /add routine/i }));
+
+    expect(screen.getByText("Strength work")).toBeInTheDocument();
+    expect(screen.getByText("Mon Wed Fri")).toBeInTheDocument();
+  });
+
   it("modifies and deletes visible task and finance records", () => {
     render(<App />);
 
