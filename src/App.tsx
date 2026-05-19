@@ -687,11 +687,13 @@ export default function App() {
     return <CloudBootScreen status={cloudStatus} />;
   }
 
+  const commandCenterName = getCommandCenterName(state.settings);
+
   return (
     <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
       <TechBackdrop metrics={metrics} />
       <aside className="tactical-rail" aria-label="Primary">
-        <div className="rail-brand" aria-label="Northwatch">
+        <div className="rail-brand" aria-label={commandCenterName}>
           <LogoMark variant={state.settings.logoStyle} />
         </div>
         <nav className="rail-nav" aria-label="Primary">
@@ -705,16 +707,17 @@ export default function App() {
               onClick={() => setView(item.view)}
             >
               {item.icon}
+              <span className="rail-label" data-label={item.label} aria-hidden="true" />
             </button>
           ))}
         </nav>
         <div className="rail-footer">
-          <span>{state.settings.callsign.slice(0, 1).toUpperCase()}</span>
+          <ProfileAvatar settings={state.settings} compact ariaHidden />
         </div>
       </aside>
 
       <main className="deck-screen">
-        <TopBar callsign={state.settings.callsign} cloudStatus={cloudStatus} workspaceLabel={workspaceLabel} onCommand={navigateFromSearch} onSignOut={signOut} />
+        <TopBar settings={state.settings} cloudStatus={cloudStatus} workspaceLabel={workspaceLabel} onCommand={navigateFromSearch} onSignOut={signOut} />
         <section className="deck-content">
           {view === "dashboard" && <Dashboard state={state} metrics={metrics} dispatch={dispatch} setView={setView} setNotice={setNotice} />}
           {view === "todo" && <TodoModule state={state} dispatch={dispatch} setNotice={setNotice} />}
@@ -737,6 +740,7 @@ export default function App() {
               teamMembers={teamMembers}
               teamInviteLink={teamInviteLink}
               isTeamBusy={isTeamBusy}
+              dispatch={dispatch}
               onSwitchWorkspace={switchWorkspace}
               onCreateTeam={createTeam}
               onJoinTeam={joinTeam}
@@ -781,13 +785,13 @@ function isViewEnabled(view: DeckView, settings: DeckSettings): boolean {
 }
 
 function TopBar({
-  callsign,
+  settings,
   cloudStatus,
   workspaceLabel,
   onCommand,
   onSignOut
 }: {
-  callsign: string;
+  settings: DeckSettings;
   cloudStatus: CloudStatus;
   workspaceLabel: string;
   onCommand: (query: string) => void;
@@ -795,6 +799,12 @@ function TopBar({
 }) {
   const [query, setQuery] = useState("");
   const checkedAt = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" }).format(new Date());
+  const displayName = getDisplayName(settings);
+  const commandCenterName = getCommandCenterName(settings);
+  const organizationLabel = settings.organizationName.trim() || "Personal command";
+  const profileDetails = [settings.age.trim() ? `Age ${settings.age.trim()}` : "", settings.phoneNumber.trim()]
+    .filter(Boolean)
+    .join(" / ");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -804,9 +814,13 @@ function TopBar({
 
   return (
     <header className="deck-topbar">
-      <div>
-        <span className="micro-label">Hello {callsign}</span>
-        <strong>Northwatch Tactical Ledger</strong>
+      <div className="profile-bar" title={profileDetails || undefined}>
+        <ProfileAvatar settings={settings} />
+        <div className="profile-copy">
+          <span className="micro-label">{organizationLabel}</span>
+          <strong>{displayName}</strong>
+          <small>{commandCenterName} Tactical Ledger</small>
+        </div>
       </div>
       <form className="deck-search" onSubmit={submit}>
         <Gauge size={16} />
@@ -837,6 +851,17 @@ function TopBar({
         <strong>72%</strong>
       </div>
     </header>
+  );
+}
+
+function ProfileAvatar({ settings, compact = false, ariaHidden = false }: { settings: DeckSettings; compact?: boolean; ariaHidden?: boolean }) {
+  const displayName = getDisplayName(settings);
+  const avatarUrl = settings.avatarUrl.trim();
+
+  return (
+    <div className={`profile-avatar ${compact ? "compact" : ""}`} aria-hidden={ariaHidden || undefined}>
+      {avatarUrl ? <img src={avatarUrl} alt={ariaHidden ? "" : `${displayName} avatar`} /> : <span>{getProfileInitials(displayName)}</span>}
+    </div>
   );
 }
 
@@ -2491,6 +2516,7 @@ function AccountModule({
   teamMembers,
   teamInviteLink,
   isTeamBusy,
+  dispatch,
   onSwitchWorkspace,
   onCreateTeam,
   onJoinTeam,
@@ -2507,6 +2533,7 @@ function AccountModule({
   teamMembers: TeamMember[];
   teamInviteLink: string;
   isTeamBusy: boolean;
+  dispatch: React.Dispatch<CommandDeckAction>;
   onSwitchWorkspace: (workspace: WorkspaceMode) => Promise<void>;
   onCreateTeam: (name: string) => Promise<void>;
   onJoinTeam: (teamCode: string) => Promise<void>;
@@ -2522,6 +2549,12 @@ function AccountModule({
   const isCloudUser = supabaseConfig.isConfigured && Boolean(cloudStatus.userEmail);
   const canManageTeam = activeTeam?.role === "owner";
   const activeTeamName = activeTeam?.name ?? "No team selected";
+  const displayName = getDisplayName(state.settings);
+  const commandCenterName = getCommandCenterName(state.settings);
+  const profileStats = [
+    state.settings.age.trim() ? `Age ${state.settings.age.trim()}` : "",
+    state.settings.phoneNumber.trim()
+  ].filter(Boolean);
 
   const submitCreateTeam = async (event: FormEvent) => {
     event.preventDefault();
@@ -2539,15 +2572,68 @@ function AccountModule({
     <ModuleShell title="Account Settings" description="Identity, cloud sync, privacy posture, and deployment readiness.">
       <section className="account-layout">
         <article className="account-hero">
-          <div className="account-avatar">
-            <UserRound size={34} />
-          </div>
+          <ProfileAvatar settings={state.settings} />
           <div>
             <span className="micro-label">Identity and sync</span>
-            <h2>{state.settings.callsign}</h2>
-            <p>{userEmail}</p>
+            <h2>{displayName}</h2>
+            <p>{state.settings.organizationName.trim() || userEmail}</p>
+            <small>{profileStats.length > 0 ? profileStats.join(" / ") : `${commandCenterName} command profile`}</small>
           </div>
         </article>
+        <section className="deck-panel account-panel profile-settings-panel">
+          <PanelHead title="Profile bar" />
+          <div className="profile-settings-grid">
+            <label className="custom-card">
+              <span>Name</span>
+              <input
+                aria-label="Profile name"
+                value={state.settings.callsign}
+                onChange={(event) => dispatch({ type: "settings/update", payload: { callsign: event.target.value } })}
+              />
+            </label>
+            <label className="custom-card">
+              <span>Avatar URL</span>
+              <input
+                aria-label="Avatar URL"
+                value={state.settings.avatarUrl}
+                onChange={(event) => dispatch({ type: "settings/update", payload: { avatarUrl: event.target.value } })}
+              />
+            </label>
+            <label className="custom-card">
+              <span>Age</span>
+              <input
+                aria-label="Age"
+                inputMode="numeric"
+                value={state.settings.age}
+                onChange={(event) => dispatch({ type: "settings/update", payload: { age: event.target.value } })}
+              />
+            </label>
+            <label className="custom-card">
+              <span>Phone number</span>
+              <input
+                aria-label="Phone number"
+                value={state.settings.phoneNumber}
+                onChange={(event) => dispatch({ type: "settings/update", payload: { phoneNumber: event.target.value } })}
+              />
+            </label>
+            <label className="custom-card">
+              <span>Organization or company</span>
+              <input
+                aria-label="Organization or company"
+                value={state.settings.organizationName}
+                onChange={(event) => dispatch({ type: "settings/update", payload: { organizationName: event.target.value } })}
+              />
+            </label>
+            <label className="custom-card">
+              <span>Command centre name</span>
+              <input
+                aria-label="Command centre name"
+                value={state.settings.commandCenterName}
+                onChange={(event) => dispatch({ type: "settings/update", payload: { commandCenterName: event.target.value } })}
+              />
+            </label>
+          </div>
+        </section>
         <section className="deck-panel account-panel">
           <PanelHead title="Access state" />
           <div className="account-status-grid">
@@ -3373,6 +3459,20 @@ function getFocusTaskTitle(state: CommandDeckState): string {
   if (intel) return `Research ${intel.title}${intel.symbol ? ` (${intel.symbol})` : ""}`;
 
   return "Run a 30 minute Northwatch review";
+}
+
+function getDisplayName(settings: DeckSettings): string {
+  return settings.callsign.trim() || "Operator";
+}
+
+function getCommandCenterName(settings: DeckSettings): string {
+  return settings.commandCenterName.trim() || "Northwatch";
+}
+
+function getProfileInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "O";
+  return parts.slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 
 function shiftDate(daysFromToday: number): string {

@@ -215,6 +215,33 @@ describe("Northwatch command deck", () => {
     expect(screen.getByDisplayValue("Operator")).toBeInTheDocument();
   });
 
+  it("personalizes the visible profile bar and command centre identity", () => {
+    render(<App />);
+
+    const journalRailLabel = screen.getByRole("navigation", { name: "Primary" }).querySelector('.rail-label[data-label="Journal"]');
+    expect(journalRailLabel).not.toBeNull();
+    expect(journalRailLabel).toHaveClass("rail-label");
+
+    clickNav("Account");
+    fireEvent.change(screen.getByLabelText("Profile name"), { target: { value: "Blossom Utonium" } });
+    fireEvent.change(screen.getByLabelText("Age"), { target: { value: "24" } });
+    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "+254700000001" } });
+    fireEvent.change(screen.getByLabelText("Organization or company"), { target: { value: "Townsville Labs" } });
+    fireEvent.change(screen.getByLabelText("Command centre name"), { target: { value: "Powerpuff Girls" } });
+    fireEvent.change(screen.getByLabelText("Avatar URL"), { target: { value: "https://example.com/avatar.png" } });
+
+    expect(screen.getAllByText("Blossom Utonium").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Townsville Labs").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Powerpuff Girls Tactical Ledger").length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("img", { name: "Blossom Utonium avatar" }).length).toBeGreaterThan(0);
+
+    clickNav("Journal");
+    expect(screen.getAllByText("Blossom Utonium").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Powerpuff Girls Tactical Ledger").length).toBeGreaterThan(0);
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"commandCenterName\":\"Powerpuff Girls\"");
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"organizationName\":\"Townsville Labs\"");
+  });
+
   it("renders richer life modules and account settings", () => {
     render(<App />);
 

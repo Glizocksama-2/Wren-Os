@@ -146,6 +146,11 @@ export interface IntelItem {
 
 export interface DeckSettings {
   callsign: string;
+  avatarUrl: string;
+  age: string;
+  phoneNumber: string;
+  organizationName: string;
+  commandCenterName: string;
   logoStyle: LogoStyle;
   accent: Accent;
   density: Density;
@@ -253,6 +258,11 @@ export const freshCommandDeck: CommandDeckState = {
   intel: [],
   settings: {
     callsign: "Operator",
+    avatarUrl: "",
+    age: "",
+    phoneNumber: "",
+    organizationName: "",
+    commandCenterName: "Northwatch",
     logoStyle: "radar",
     accent: "amber",
     density: "comfortable",
@@ -759,6 +769,12 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     settings: {
       ...fresh.settings,
       ...incomingSettings,
+      callsign: getString(incomingSettings.callsign) ?? fresh.settings.callsign,
+      avatarUrl: getString(incomingSettings.avatarUrl) ?? fresh.settings.avatarUrl,
+      age: getString(incomingSettings.age) ?? fresh.settings.age,
+      phoneNumber: getString(incomingSettings.phoneNumber) ?? fresh.settings.phoneNumber,
+      organizationName: getString(incomingSettings.organizationName) ?? fresh.settings.organizationName,
+      commandCenterName: getString(incomingSettings.commandCenterName) ?? fresh.settings.commandCenterName,
       accent: normalizeAccent(incomingSettings.accent),
       background: normalizeBackground(incomingSettings.background),
       logoStyle: normalizeLogoStyle(incomingSettings.logoStyle, incomingVersion)
@@ -823,6 +839,7 @@ function migrateLegacyWorkspace(raw: string | null): CommandDeckState | null {
       settings: {
         ...freshCommandDeck.settings,
         callsign: getString(workspace.owner) ?? getString(workspace.name) ?? freshCommandDeck.settings.callsign,
+        commandCenterName: getString(workspace.name) ?? freshCommandDeck.settings.commandCenterName,
         logoStyle: "radar"
       }
     };
