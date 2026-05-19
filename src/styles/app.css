@@ -1700,9 +1700,49 @@ p {
 
 .command-form label,
 .journal-form label,
+.mood-picker,
 .custom-card {
   display: grid;
   gap: 6px;
+}
+
+.mood-picker {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.mood-picker legend {
+  margin: 0 0 6px;
+  padding: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.mood-option-bar {
+  display: flex;
+  min-height: 36px;
+  align-content: flex-start;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mood-option-bar button {
+  min-height: 30px;
+  border-color: var(--line);
+  background: rgb(7 10 9 / 0.82);
+  color: var(--muted);
+  padding: 0 10px;
+}
+
+.mood-option-bar button:hover,
+.mood-option-bar button.active {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: rgb(var(--accent-rgb) / 0.14);
+  color: var(--accent);
 }
 
 .command-form input,
@@ -2411,6 +2451,7 @@ p {
 .command-form select,
 .journal-form input,
 .journal-form textarea,
+.mood-option-bar button,
 .custom-card input,
 .auth-form input {
   border-color: rgb(79 231 255 / 0.16);
@@ -2808,6 +2849,7 @@ p {
 .deck-app[data-background="white"] .command-form select,
 .deck-app[data-background="white"] .journal-form input,
 .deck-app[data-background="white"] .journal-form textarea,
+.deck-app[data-background="white"] .mood-option-bar button,
 .deck-app[data-background="white"] .custom-card input,
 .deck-app[data-background="white"] .auth-form input,
 .deck-app[data-background="white"] .agent-input input,

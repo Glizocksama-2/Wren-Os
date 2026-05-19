@@ -146,10 +146,13 @@ describe("Northwatch command deck", () => {
     expect(screen.getByText("Progress 25%")).toBeInTheDocument();
 
     clickNav("Journal");
-    fireEvent.change(screen.getByLabelText("Journal mood"), { target: { value: "Locked in" } });
+    expect(screen.getByRole("button", { name: "Use Focused mood" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Use Locked in mood" }));
+    expect(screen.getByRole("button", { name: "Use Locked in mood" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.change(screen.getByLabelText("Journal entry"), { target: { value: "Built the new operating base." } });
     fireEvent.click(screen.getByRole("button", { name: /save entry/i }));
-    expect(screen.getByText("Locked in")).toBeInTheDocument();
+    const journalCard = screen.getByText("Built the new operating base.").closest(".journal-card") as HTMLElement;
+    expect(within(journalCard).getByRole("heading", { name: "Locked in" })).toBeInTheDocument();
 
     clickNav("Finances");
     fireEvent.change(screen.getByLabelText("Finance label"), { target: { value: "Client payment" } });

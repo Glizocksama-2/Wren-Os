@@ -123,6 +123,7 @@ const financeTypes: FinanceType[] = ["income", "expense", "savings"];
 const eventTypes: CalendarEntry["type"][] = ["mission", "training", "finance", "personal"];
 const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
 const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
+const journalMoodOptions = ["Focused", "Locked in", "Clear", "Restless", "Tired", "Stressed", "Grateful", "Low energy"];
 const routineDayOptions: Array<{ value: RoutineDay; label: string; short: string }> = [
   { value: "mon", label: "Monday", short: "Mon" },
   { value: "tue", label: "Tuesday", short: "Tue" },
@@ -2075,6 +2076,7 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
     acc[entry.mood] = (acc[entry.mood] ?? 0) + 1;
     return acc;
   }, {});
+  const visibleMoodOptions = journalMoodOptions.includes(mood) ? journalMoodOptions : [mood, ...journalMoodOptions];
   const prompts = ["What moved today?", "What is the next clean action?", "What pattern is repeating?"];
 
   const submit = (event: FormEvent) => {
@@ -2132,7 +2134,23 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
         </section>
       </section>
       <form className="journal-form" onSubmit={submit}>
-        <label><span>Mood</span><input aria-label="Journal mood" value={mood} onChange={(event) => setMood(event.target.value)} /></label>
+        <fieldset className="mood-picker">
+          <legend>Mood</legend>
+          <div className="mood-option-bar" aria-label="Journal mood">
+            {visibleMoodOptions.map((option) => (
+              <button
+                className={mood === option ? "active" : ""}
+                type="button"
+                key={option}
+                aria-label={`Use ${option} mood`}
+                aria-pressed={mood === option}
+                onClick={() => setMood(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </fieldset>
         <label><span>Entry</span><textarea aria-label="Journal entry" value={body} onChange={(event) => setBody(event.target.value)} rows={8} /></label>
         <button type="submit"><Plus size={16} /> {editingJournalId ? "Save changes" : "Save entry"}</button>
         {editingJournalId && <button type="button" onClick={cancelEdit}>Cancel</button>}
