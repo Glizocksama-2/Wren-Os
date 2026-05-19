@@ -94,6 +94,31 @@ p {
   --accent-rgb: 255 94 77;
 }
 
+.deck-app[data-accent="pink"] {
+  --accent: #ff4fbf;
+  --accent-rgb: 255 79 191;
+}
+
+.deck-app[data-background="white"] {
+  color-scheme: light;
+  --bg: #f6fbff;
+  --bg-2: #e8f2f7;
+  --surface: #ffffff;
+  --surface-2: #eef7fb;
+  --surface-3: #dbeaf1;
+  --line: #c9dbe5;
+  --line-strong: #88a9b8;
+  --text: #071017;
+  --muted: #455f6b;
+  --faint: #6f8792;
+  --shadow: 0 18px 60px rgb(22 48 62 / 0.13);
+  --glass: rgb(255 255 255 / 0.78);
+  background:
+    radial-gradient(circle at 72% 8%, rgb(var(--accent-rgb) / 0.18), transparent 28rem),
+    radial-gradient(circle at 16% 86%, rgb(79 231 255 / 0.15), transparent 24rem),
+    linear-gradient(135deg, #f9fcff 0%, var(--bg) 54%, #e9f3f8 100%);
+}
+
 .deck-app[data-density="compact"] {
   font-size: 13px;
 }
@@ -1250,8 +1275,10 @@ p {
 }
 
 .theme-preview strong,
-.theme-preview span {
+.theme-preview span,
+.theme-preview em {
   color: var(--text);
+  font-style: normal;
   font-weight: 900;
   text-transform: capitalize;
 }
@@ -1663,6 +1690,61 @@ p {
   width: 100%;
 }
 
+.reading-progress-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  border: 1px solid rgb(79 231 255 / 0.14);
+  border-radius: var(--radius);
+  background: rgb(2 8 12 / 0.42);
+  padding: 10px;
+}
+
+.reading-progress-detail .micro-label {
+  color: var(--accent);
+}
+
+.reading-progress-detail strong {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  border: 1px solid rgb(var(--accent-rgb) / 0.22);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.08);
+  color: var(--text);
+  padding: 0 9px;
+  font-size: 12px;
+}
+
+.reading-stepper-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reading-stepper-grid label {
+  display: grid;
+  gap: 5px;
+}
+
+.reading-stepper-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.reading-stepper-grid input {
+  min-width: 0;
+  min-height: 34px;
+  border: 1px solid rgb(79 231 255 / 0.16);
+  border-radius: var(--radius);
+  background: rgb(2 8 12 / 0.72);
+  color: var(--text);
+  outline: 0;
+  padding: 6px 8px;
+}
+
 .finance-summary {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1804,6 +1886,10 @@ p {
 
 .swatch-red {
   background: #ff5e4d;
+}
+
+.swatch-pink {
+  background: #ff4fbf;
 }
 
 .segmented button {
@@ -2421,6 +2507,128 @@ p {
     radial-gradient(circle at 50% 18%, rgb(var(--accent-rgb) / 0.2), transparent 62%),
     rgb(7 19 27 / 0.84);
   box-shadow: inset 0 0 28px rgb(var(--accent-rgb) / 0.06);
+}
+
+.deck-app[data-background="white"] .tech-backdrop {
+  background:
+    radial-gradient(circle at 58% 36%, rgb(var(--accent-rgb) / 0.16), transparent 16rem),
+    radial-gradient(circle at 82% 70%, rgb(79 231 255 / 0.12), transparent 20rem),
+    linear-gradient(135deg, rgb(248 252 255 / 0.94), rgb(232 243 248 / 0.96));
+}
+
+.deck-app[data-background="white"] .backdrop-grid {
+  background:
+    linear-gradient(rgb(5 53 72 / 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(5 53 72 / 0.08) 1px, transparent 1px);
+}
+
+.deck-app[data-background="white"] .backdrop-sweep {
+  background: linear-gradient(110deg, transparent 0 44%, rgb(var(--accent-rgb) / 0.12) 50%, transparent 56% 100%);
+  mix-blend-mode: multiply;
+}
+
+.deck-app[data-background="white"] .backdrop-core strong {
+  color: rgb(7 16 23 / 0.1);
+}
+
+.deck-app[data-background="white"] .circuit-web {
+  stroke: rgb(5 53 72 / 0.22);
+}
+
+.deck-app[data-background="white"] .tactical-rail,
+.deck-app[data-background="white"] .deck-topbar {
+  background:
+    linear-gradient(90deg, rgb(255 255 255 / 0.82), rgb(235 246 250 / 0.72)),
+    linear-gradient(180deg, rgb(255 255 255 / 0.72), transparent);
+  box-shadow: 12px 0 40px rgb(22 48 62 / 0.08);
+}
+
+.deck-app[data-background="white"] .hero-command,
+.deck-app[data-background="white"] .readiness-panel,
+.deck-app[data-background="white"] .battery-card,
+.deck-app[data-background="white"] .deck-panel,
+.deck-app[data-background="white"] .metric-tile,
+.deck-app[data-background="white"] .custom-card,
+.deck-app[data-background="white"] .book-card,
+.deck-app[data-background="white"] .finance-summary div,
+.deck-app[data-background="white"] .life-hero,
+.deck-app[data-background="white"] .account-hero,
+.deck-app[data-background="white"] .journal-card,
+.deck-app[data-background="white"] .agent-dock {
+  border-color: rgb(5 53 72 / 0.15);
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.86), rgb(239 248 252 / 0.82)),
+    radial-gradient(circle at top right, rgb(var(--accent-rgb) / 0.1), transparent 18rem);
+  box-shadow: var(--shadow), inset 0 1px 0 rgb(255 255 255 / 0.72);
+}
+
+.deck-app[data-background="white"] .command-form,
+.deck-app[data-background="white"] .journal-form {
+  border-color: rgb(5 53 72 / 0.14);
+  background: rgb(255 255 255 / 0.72);
+}
+
+.deck-app[data-background="white"] .deck-search,
+.deck-app[data-background="white"] .cloud-status-pill,
+.deck-app[data-background="white"] .topbar-icon-button,
+.deck-app[data-background="white"] .workspace-status-pill,
+.deck-app[data-background="white"] .signal-card,
+.deck-app[data-background="white"] .week-node,
+.deck-app[data-background="white"] .timeline-item,
+.deck-app[data-background="white"] .source-pill,
+.deck-app[data-background="white"] .repo-link,
+.deck-app[data-background="white"] .orbit-core,
+.deck-app[data-background="white"] .theme-preview,
+.deck-app[data-background="white"] .team-empty-state,
+.deck-app[data-background="white"] .team-member-row,
+.deck-app[data-background="white"] .agent-context div,
+.deck-app[data-background="white"] .agent-message,
+.deck-app[data-background="white"] .agent-header button,
+.deck-app[data-background="white"] .agent-input button,
+.deck-app[data-background="white"] .agent-route-row button,
+.deck-app[data-background="white"] .agent-quick-row button,
+.deck-app[data-background="white"] .logo-options .logo-option,
+.deck-app[data-background="white"] .reading-progress-detail {
+  border-color: rgb(5 53 72 / 0.14);
+  background: rgb(255 255 255 / 0.68);
+  box-shadow: inset 0 0 24px rgb(79 231 255 / 0.035);
+}
+
+.deck-app[data-background="white"] .command-form input,
+.deck-app[data-background="white"] .command-form select,
+.deck-app[data-background="white"] .journal-form input,
+.deck-app[data-background="white"] .journal-form textarea,
+.deck-app[data-background="white"] .custom-card input,
+.deck-app[data-background="white"] .auth-form input,
+.deck-app[data-background="white"] .agent-input input,
+.deck-app[data-background="white"] .reading-stepper-grid input {
+  border-color: rgb(5 53 72 / 0.16);
+  background: rgb(255 255 255 / 0.84);
+  color: var(--text);
+}
+
+.deck-app[data-background="white"] .segmented button,
+.deck-app[data-background="white"] .rail-footer span {
+  border-color: rgb(5 53 72 / 0.14);
+  background: rgb(255 255 255 / 0.78);
+  color: var(--muted);
+}
+
+.deck-app[data-background="white"] .segmented button.active {
+  border-color: rgb(var(--accent-rgb) / 0.44);
+  background: rgb(var(--accent-rgb) / 0.14);
+  color: var(--accent);
+}
+
+.deck-app[data-background="white"] .long-meter,
+.deck-app[data-background="white"] .mini-progress {
+  background: rgb(218 232 239 / 0.9);
+}
+
+.deck-app[data-background="white"] .deck-status-strip strong,
+.deck-app[data-background="white"] .deck-toast {
+  background: rgb(255 255 255 / 0.88);
+  color: var(--text);
 }
 
 @keyframes grid-drift {

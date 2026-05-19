@@ -109,8 +109,15 @@ describe("Northwatch command deck", () => {
     clickNav("Books");
     fireEvent.change(screen.getByLabelText("Book title"), { target: { value: "Deep Work" } });
     fireEvent.change(screen.getByLabelText("Book author"), { target: { value: "Cal Newport" } });
+    fireEvent.change(screen.getByLabelText("Current chapter"), { target: { value: "3" } });
+    fireEvent.change(screen.getByLabelText("Total chapters"), { target: { value: "12" } });
+    fireEvent.change(screen.getByLabelText("Current page"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("Total pages"), { target: { value: "320" } });
     fireEvent.click(screen.getByRole("button", { name: /add book/i }));
     expect(screen.getByText("Deep Work")).toBeInTheDocument();
+    expect(screen.getByText("Chapter 3 / 12")).toBeInTheDocument();
+    expect(screen.getByText("Page 80 / 320")).toBeInTheDocument();
+    expect(screen.getByText("Progress 25%")).toBeInTheDocument();
 
     clickNav("Journal");
     fireEvent.change(screen.getByLabelText("Journal mood"), { target: { value: "Locked in" } });
@@ -161,13 +168,16 @@ describe("Northwatch command deck", () => {
     clickNav("Customize");
     fireEvent.change(screen.getByLabelText("Callsign"), { target: { value: "Ghost" } });
     fireEvent.click(screen.getByRole("button", { name: "Use Cyan accent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use Pink accent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use White background" }));
     fireEvent.click(screen.getByRole("button", { name: "Compact" }));
     fireEvent.click(screen.getByRole("button", { name: "Use Orbit Watch logo" }));
     fireEvent.change(screen.getByLabelText("Ollama model"), { target: { value: "mistral" } });
     fireEvent.change(screen.getByLabelText("Ollama endpoint"), { target: { value: "http://localhost:11434" } });
 
     expect(screen.getByDisplayValue("Ghost")).toBeInTheDocument();
-    expect(document.querySelector(".deck-app")).toHaveAttribute("data-accent", "cyan");
+    expect(document.querySelector(".deck-app")).toHaveAttribute("data-accent", "pink");
+    expect(document.querySelector(".deck-app")).toHaveAttribute("data-background", "white");
     expect(document.querySelector(".deck-app")).toHaveAttribute("data-density", "compact");
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"logoStyle\":\"radar\"");
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"ollamaModel\":\"mistral\"");

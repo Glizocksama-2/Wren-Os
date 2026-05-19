@@ -15,8 +15,9 @@ export type DeckView =
 export type Priority = "low" | "medium" | "high" | "critical";
 export type ProjectStatus = "pending" | "done";
 export type FinanceType = "income" | "expense" | "savings";
-export type Accent = "amber" | "cyan" | "green" | "red";
+export type Accent = "amber" | "cyan" | "green" | "red" | "pink";
 export type Density = "comfortable" | "compact";
+export type BackgroundMode = "black" | "white";
 export type LogoStyle = "sentinel" | "monolith" | "radar" | "spire";
 export type ProjectSource = "manual" | "github";
 export type IntelKind = "stock" | "crypto" | "fund" | "company" | "trend" | "news";
@@ -88,6 +89,10 @@ export interface BookEntry {
   author: string;
   status: "queued" | "reading" | "done";
   progress: number;
+  currentChapter: number;
+  totalChapters: number;
+  currentPage: number;
+  totalPages: number;
 }
 
 export interface JournalEntry {
@@ -130,6 +135,7 @@ export interface DeckSettings {
   logoStyle: LogoStyle;
   accent: Accent;
   density: Density;
+  background: BackgroundMode;
   ollamaEnabled: boolean;
   ollamaEndpoint: string;
   ollamaModel: string;
@@ -179,9 +185,9 @@ export type CommandDeckAction =
   | { type: "workout/update"; id: string; name: string; day: string; focus: string }
   | { type: "workout/toggle"; id: string }
   | { type: "workout/delete"; id: string }
-  | { type: "book/add"; title: string; author: string }
-  | { type: "book/update"; id: string; title: string; author: string; progress: number }
-  | { type: "book/progress"; id: string; progress: number }
+  | { type: "book/add"; title: string; author: string; currentChapter: number; totalChapters: number; currentPage: number; totalPages: number }
+  | { type: "book/update"; id: string; title: string; author: string; currentChapter: number; totalChapters: number; currentPage: number; totalPages: number }
+  | { type: "book/progress"; id: string; currentChapter: number; totalChapters: number; currentPage: number; totalPages: number }
   | { type: "book/delete"; id: string }
   | { type: "journal/add"; mood: string; body: string }
   | { type: "journal/update"; id: string; mood: string; body: string }
@@ -208,6 +214,8 @@ const makeId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${Math.
 const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
 const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
 const logoStyles: LogoStyle[] = ["sentinel", "monolith", "radar", "spire"];
+const accents: Accent[] = ["amber", "cyan", "green", "red", "pink"];
+const backgroundModes: BackgroundMode[] = ["black", "white"];
 
 export const freshCommandDeck: CommandDeckState = {
   version: SCHEMA_VERSION,
@@ -227,6 +235,7 @@ export const freshCommandDeck: CommandDeckState = {
     logoStyle: "radar",
     accent: "amber",
     density: "comfortable",
+    background: "black",
     ollamaEnabled: true,
     ollamaEndpoint: "http://127.0.0.1:11434",
     ollamaModel: "qwen2.5:1.5b",
@@ -395,12 +404,27 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
       return touch({ ...state, workouts: state.workouts.filter((entry) => entry.id !== action.id) }, timestamp);
 
     case "book/add":
+      const addedBookProgress = calculateBookProgress(action.currentChapter, action.totalChapters, action.currentPage, action.totalPages);
       return touch({
         ...state,
-        books: [{ id: makeId("book"), title: action.title, author: action.author, status: "reading", progress: 0 }, ...state.books]
+        books: [
+          {
+            id: makeId("book"),
+            title: action.title,
+            author: action.author,
+            status: addedBookProgress >= 100 ? "done" : "reading",
+            progress: addedBookProgress,
+            currentChapter: clampCount(action.currentChapter),
+            totalChapters: clampCount(action.totalChapters),
+            currentPage: clampCount(action.currentPage),
+            totalPages: clampCount(action.totalPages)
+          },
+          ...state.books
+        ]
       }, timestamp);
 
-    case "book/update":
+    case "book/update": {
+      const updatedBookProgress = calculateBookProgress(action.currentChapter, action.totalChapters, action.currentPage, action.totalPages);
       return touch({
         ...state,
         books: state.books.map((book) =>
@@ -409,20 +433,37 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
                 ...book,
                 title: action.title,
                 author: action.author,
-                progress: clampProgress(action.progress),
-                status: action.progress >= 100 ? "done" : "reading"
+                progress: updatedBookProgress,
+                currentChapter: clampCount(action.currentChapter),
+                totalChapters: clampCount(action.totalChapters),
+                currentPage: clampCount(action.currentPage),
+                totalPages: clampCount(action.totalPages),
+                status: updatedBookProgress >= 100 ? "done" : "reading"
               }
             : book
         )
       }, timestamp);
+    }
 
-    case "book/progress":
+    case "book/progress": {
+      const progress = calculateBookProgress(action.currentChapter, action.totalChapters, action.currentPage, action.totalPages);
       return touch({
         ...state,
         books: state.books.map((book) =>
-          book.id === action.id ? { ...book, progress: clampProgress(action.progress), status: action.progress >= 100 ? "done" : "reading" } : book
+          book.id === action.id
+            ? {
+                ...book,
+                progress,
+                currentChapter: clampCount(action.currentChapter),
+                totalChapters: clampCount(action.totalChapters),
+                currentPage: clampCount(action.currentPage),
+                totalPages: clampCount(action.totalPages),
+                status: progress >= 100 ? "done" : "reading"
+              }
+            : book
         )
       }, timestamp);
+    }
 
     case "book/delete":
       return touch({ ...state, books: state.books.filter((book) => book.id !== action.id) }, timestamp);
@@ -622,13 +663,15 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     ),
     calendar: Array.isArray(value.calendar) ? value.calendar : [],
     workouts: Array.isArray(value.workouts) ? value.workouts : [],
-    books: Array.isArray(value.books) ? value.books : [],
+    books: Array.isArray(value.books) ? value.books.map(normalizeBook) : [],
     journal: Array.isArray(value.journal) ? value.journal : [],
     finances: Array.isArray(value.finances) ? value.finances : [],
     intel: Array.isArray(value.intel) ? value.intel.map(normalizeIntelItem) : [],
     settings: {
       ...fresh.settings,
       ...incomingSettings,
+      accent: normalizeAccent(incomingSettings.accent),
+      background: normalizeBackground(incomingSettings.background),
       logoStyle: normalizeLogoStyle(incomingSettings.logoStyle, incomingVersion)
     },
     updatedAt: value.updatedAt ?? fresh.updatedAt
@@ -796,6 +839,14 @@ function normalizePriority(value: unknown): Priority {
   return value === "low" || value === "medium" || value === "high" || value === "critical" ? value : "medium";
 }
 
+function normalizeAccent(value: unknown): Accent {
+  return accents.includes(value as Accent) ? value as Accent : freshCommandDeck.settings.accent;
+}
+
+function normalizeBackground(value: unknown): BackgroundMode {
+  return backgroundModes.includes(value as BackgroundMode) ? value as BackgroundMode : freshCommandDeck.settings.background;
+}
+
 function normalizeLogoStyle(value: unknown, version: number): LogoStyle {
   if (logoStyles.includes(value as LogoStyle)) {
     return version < SCHEMA_VERSION && value === "sentinel" ? "radar" : value as LogoStyle;
@@ -864,9 +915,53 @@ function normalizeIntelItem(item: Partial<IntelItem>): IntelItem {
   };
 }
 
+function normalizeBook(book: Partial<BookEntry>): BookEntry {
+  const currentChapter = clampCount(book.currentChapter ?? 0);
+  const totalChapters = clampCount(book.totalChapters ?? 0);
+  const currentPage = clampCount(book.currentPage ?? 0);
+  const totalPages = clampCount(book.totalPages ?? 0);
+  const progress = totalPages > 0 || totalChapters > 0
+    ? calculateBookProgress(currentChapter, totalChapters, currentPage, totalPages)
+    : clampProgress(book.progress ?? 0);
+
+  return {
+    id: book.id ?? makeId("book"),
+    title: book.title ?? "Untitled book",
+    author: book.author ?? "Unknown",
+    status: progress >= 100 ? "done" : book.status ?? "reading",
+    progress,
+    currentChapter,
+    totalChapters,
+    currentPage,
+    totalPages
+  };
+}
+
+function calculateBookProgress(currentChapter: number, totalChapters: number, currentPage: number, totalPages: number): number {
+  const safeCurrentPage = clampCount(currentPage);
+  const safeTotalPages = clampCount(totalPages);
+  const safeCurrentChapter = clampCount(currentChapter);
+  const safeTotalChapters = clampCount(totalChapters);
+
+  if (safeTotalPages > 0) {
+    return clampProgress((Math.min(safeCurrentPage, safeTotalPages) / safeTotalPages) * 100);
+  }
+
+  if (safeTotalChapters > 0) {
+    return clampProgress((Math.min(safeCurrentChapter, safeTotalChapters) / safeTotalChapters) * 100);
+  }
+
+  return 0;
+}
+
 function clampProgress(progress: number): number {
   if (!Number.isFinite(progress)) return 0;
   return Math.min(100, Math.max(0, Math.round(progress)));
+}
+
+function clampCount(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.round(value));
 }
 
 function mergeGitHubProjects(currentProjects: CommandProject[], seeds: GitHubProjectSeed[]): CommandProject[] {

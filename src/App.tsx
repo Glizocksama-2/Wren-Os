@@ -75,6 +75,7 @@ import {
 } from "./store/cloudDeck";
 import {
   type Accent,
+  type BackgroundMode,
   type CalendarEntry,
   type CommandDeckAction,
   type CommandDeckState,
@@ -116,7 +117,13 @@ const accentOptions: Array<{ value: Accent; label: string }> = [
   { value: "amber", label: "Amber" },
   { value: "cyan", label: "Cyan" },
   { value: "green", label: "Green" },
-  { value: "red", label: "Red" }
+  { value: "red", label: "Red" },
+  { value: "pink", label: "Pink" }
+];
+
+const backgroundOptions: Array<{ value: BackgroundMode; label: string }> = [
+  { value: "black", label: "Black" },
+  { value: "white", label: "White" }
 ];
 
 const logoOptions: Array<{ value: LogoStyle; label: string; description: string }> = [
@@ -642,7 +649,7 @@ export default function App() {
   }
 
   return (
-    <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density}>
+    <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
       <TechBackdrop metrics={metrics} />
       <aside className="tactical-rail" aria-label="Primary">
         <div className="rail-brand" aria-label="Northwatch">
@@ -1643,7 +1650,10 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
 function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
-  const [progress, setProgress] = useState("0");
+  const [currentChapter, setCurrentChapter] = useState("0");
+  const [totalChapters, setTotalChapters] = useState("0");
+  const [currentPage, setCurrentPage] = useState("0");
+  const [totalPages, setTotalPages] = useState("0");
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const reading = state.books.filter((book) => book.status === "reading");
   const done = state.books.filter((book) => book.status === "done");
@@ -1654,30 +1664,57 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
     event.preventDefault();
     if (!title.trim()) return;
     if (editingBookId) {
-      dispatch({ type: "book/update", id: editingBookId, title: title.trim(), author: author.trim() || "Unknown", progress: Number(progress) });
+      dispatch({
+        type: "book/update",
+        id: editingBookId,
+        title: title.trim(),
+        author: author.trim() || "Unknown",
+        currentChapter: Number(currentChapter),
+        totalChapters: Number(totalChapters),
+        currentPage: Number(currentPage),
+        totalPages: Number(totalPages)
+      });
       setEditingBookId(null);
       setNotice("Book updated.");
     } else {
-      dispatch({ type: "book/add", title: title.trim(), author: author.trim() || "Unknown" });
+      dispatch({
+        type: "book/add",
+        title: title.trim(),
+        author: author.trim() || "Unknown",
+        currentChapter: Number(currentChapter),
+        totalChapters: Number(totalChapters),
+        currentPage: Number(currentPage),
+        totalPages: Number(totalPages)
+      });
       setNotice("Book added.");
     }
     setTitle("");
     setAuthor("");
-    setProgress("0");
+    resetReadingFields();
   };
 
   const startEdit = (book: CommandDeckState["books"][number]) => {
     setEditingBookId(book.id);
     setTitle(book.title);
     setAuthor(book.author);
-    setProgress(String(book.progress));
+    setCurrentChapter(String(book.currentChapter));
+    setTotalChapters(String(book.totalChapters));
+    setCurrentPage(String(book.currentPage));
+    setTotalPages(String(book.totalPages));
   };
 
   const cancelEdit = () => {
     setEditingBookId(null);
     setTitle("");
     setAuthor("");
-    setProgress("0");
+    resetReadingFields();
+  };
+
+  const resetReadingFields = () => {
+    setCurrentChapter("0");
+    setTotalChapters("0");
+    setCurrentPage("0");
+    setTotalPages("0");
   };
 
   return (
@@ -1687,7 +1724,7 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
           <div>
             <span className="micro-label">Knowledge intake</span>
             <h2>Reading Radar</h2>
-            <p>{topBook ? `${topBook.title} is leading the stack at ${topBook.progress}%.` : "Start a reading stack and keep the signal moving."}</p>
+            <p>{topBook ? `${topBook.title} is leading the stack at ${topBook.progress}% from page and chapter tracking.` : "Start a reading stack and keep the signal moving."}</p>
           </div>
           <div className="book-spines" aria-label="Reading stack visualization">
             {(state.books.length ? state.books.slice(0, 6) : [{ id: "empty", progress: 12, title: "No book" }]).map((book) => (
@@ -1711,7 +1748,10 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
       <form className="command-form" onSubmit={submit}>
         <label><span>Title</span><input aria-label="Book title" value={title} onChange={(event) => setTitle(event.target.value)} /></label>
         <label><span>Author</span><input aria-label="Book author" value={author} onChange={(event) => setAuthor(event.target.value)} /></label>
-        <label><span>Progress</span><input aria-label="Book progress" type="number" min="0" max="100" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
+        <label><span>Current chapter</span><input aria-label="Current chapter" type="number" min="0" value={currentChapter} onChange={(event) => setCurrentChapter(event.target.value)} /></label>
+        <label><span>Total chapters</span><input aria-label="Total chapters" type="number" min="0" value={totalChapters} onChange={(event) => setTotalChapters(event.target.value)} /></label>
+        <label><span>Current page</span><input aria-label="Current page" type="number" min="0" value={currentPage} onChange={(event) => setCurrentPage(event.target.value)} /></label>
+        <label><span>Total pages</span><input aria-label="Total pages" type="number" min="0" value={totalPages} onChange={(event) => setTotalPages(event.target.value)} /></label>
         <button type="submit"><Plus size={16} /> {editingBookId ? "Save book" : "Add book"}</button>
         {editingBookId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
@@ -1724,17 +1764,51 @@ function BooksModule({ state, dispatch, setNotice }: ModuleProps) {
               <p>{book.author}</p>
             </div>
             <div className="long-meter"><span style={{ width: `${book.progress}%` }} /></div>
-            <label>
+            <div className="reading-progress-detail">
               <span className="micro-label">Progress {book.progress}%</span>
-              <input
-                aria-label={`${book.title} progress`}
-                type="range"
-                min="0"
-                max="100"
-                value={book.progress}
-                onChange={(event) => dispatch({ type: "book/progress", id: book.id, progress: Number(event.target.value) })}
-              />
-            </label>
+              <strong>Chapter {book.currentChapter} / {book.totalChapters || "?"}</strong>
+              <strong>Page {book.currentPage} / {book.totalPages || "?"}</strong>
+            </div>
+            <div className="reading-stepper-grid">
+              <label>
+                <span>Chapter</span>
+                <input
+                  aria-label={`${book.title} current chapter`}
+                  type="number"
+                  min="0"
+                  value={book.currentChapter}
+                  onChange={(event) =>
+                    dispatch({
+                      type: "book/progress",
+                      id: book.id,
+                      currentChapter: Number(event.target.value),
+                      totalChapters: book.totalChapters,
+                      currentPage: book.currentPage,
+                      totalPages: book.totalPages
+                    })
+                  }
+                />
+              </label>
+              <label>
+                <span>Page</span>
+                <input
+                  aria-label={`${book.title} current page`}
+                  type="number"
+                  min="0"
+                  value={book.currentPage}
+                  onChange={(event) =>
+                    dispatch({
+                      type: "book/progress",
+                      id: book.id,
+                      currentChapter: book.currentChapter,
+                      totalChapters: book.totalChapters,
+                      currentPage: Number(event.target.value),
+                      totalPages: book.totalPages
+                    })
+                  }
+                />
+              </label>
+            </div>
             <div className="card-actions">
               <button type="button" onClick={() => startEdit(book)}><Pencil size={15} /> Modify</button>
               <button type="button" aria-label={`Delete ${book.title}`} onClick={() => dispatch({ type: "book/delete", id: book.id })}><Trash2 size={15} /> Delete</button>
@@ -1989,6 +2063,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
             <Palette size={22} />
             <span>{state.settings.accent}</span>
             <strong>{state.settings.density}</strong>
+            <em>{state.settings.background}</em>
           </div>
         </article>
         <section className="deck-panel life-panel">
@@ -2049,6 +2124,21 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
             >
               Compact
             </button>
+          </div>
+        </div>
+        <div className="custom-card">
+          <span>Background</span>
+          <div className="segmented">
+            {backgroundOptions.map((option) => (
+              <button
+                className={state.settings.background === option.value ? "active" : ""}
+                key={option.value}
+                onClick={() => dispatch({ type: "settings/update", payload: { background: option.value } })}
+                type="button"
+              >
+                Use {option.label} background
+              </button>
+            ))}
           </div>
         </div>
         <div className="custom-card logo-select-card">

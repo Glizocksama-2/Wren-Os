@@ -210,9 +210,26 @@ describe("command deck cloud import", () => {
     deck = reduceCommandDeck(deck, { type: "workout/delete", id: deck.workouts[0].id });
     expect(deck.workouts).toHaveLength(0);
 
-    deck = reduceCommandDeck(deck, { type: "book/add", title: "Deep Work", author: "Cal Newport" });
-    deck = reduceCommandDeck(deck, { type: "book/update", id: deck.books[0].id, title: "Slow Productivity", author: "Cal Newport", progress: 45 });
-    expect(deck.books[0]).toMatchObject({ title: "Slow Productivity", progress: 45 });
+    deck = reduceCommandDeck(deck, {
+      type: "book/add",
+      title: "Deep Work",
+      author: "Cal Newport",
+      currentChapter: 1,
+      totalChapters: 12,
+      currentPage: 40,
+      totalPages: 320
+    });
+    deck = reduceCommandDeck(deck, {
+      type: "book/update",
+      id: deck.books[0].id,
+      title: "Slow Productivity",
+      author: "Cal Newport",
+      currentChapter: 4,
+      totalChapters: 10,
+      currentPage: 90,
+      totalPages: 300
+    });
+    expect(deck.books[0]).toMatchObject({ title: "Slow Productivity", currentChapter: 4, totalChapters: 10, currentPage: 90, totalPages: 300, progress: 30 });
     deck = reduceCommandDeck(deck, { type: "book/delete", id: deck.books[0].id });
     expect(deck.books).toHaveLength(0);
 
@@ -233,6 +250,40 @@ describe("command deck cloud import", () => {
     expect(deck.intel[0]).toMatchObject({ title: "AMD", symbol: "AMD", kind: "company", signal: "researching", thesis: "GPU watch.", sourceUrl: "https://example.com" });
     deck = reduceCommandDeck(deck, { type: "intel/delete", id: deck.intel[0].id });
     expect(deck.intel).toHaveLength(0);
+  });
+
+  it("tracks reading progress from pages and chapters", () => {
+    let deck: CommandDeckState = { ...freshCommandDeck, tasks: [], projects: [], calendar: [], workouts: [], books: [], journal: [], finances: [], intel: [] };
+
+    deck = reduceCommandDeck(deck, {
+      type: "book/add",
+      title: "Atomic Habits",
+      author: "James Clear",
+      currentChapter: 2,
+      totalChapters: 20,
+      currentPage: 50,
+      totalPages: 250
+    });
+
+    expect(deck.books[0]).toMatchObject({ currentChapter: 2, totalChapters: 20, currentPage: 50, totalPages: 250, progress: 20 });
+
+    deck = reduceCommandDeck(deck, {
+      type: "book/progress",
+      id: deck.books[0].id,
+      currentChapter: 7,
+      totalChapters: 14,
+      currentPage: 0,
+      totalPages: 0
+    });
+
+    expect(deck.books[0]).toMatchObject({ currentChapter: 7, totalChapters: 14, currentPage: 0, totalPages: 0, progress: 50 });
+
+    deck = reduceCommandDeck(deck, {
+      type: "settings/update",
+      payload: { accent: "pink", background: "white" }
+    });
+
+    expect(deck.settings).toMatchObject({ accent: "pink", background: "white" });
   });
 });
 
