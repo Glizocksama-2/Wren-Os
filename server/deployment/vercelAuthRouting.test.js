@@ -25,4 +25,8 @@ describe("Vercel auth routing", () => {
       expect(fs.existsSync(path.join(rootDir, "api", "auth", `${route}.js`))).toBe(true);
     }
   });
+
+  it("publishes the legacy cloud import API as a concrete Vercel function", () => {
+    expect(fs.existsSync(path.join(rootDir, "api", "legacy-command-deck.js"))).toBe(true);
+  });
 });
