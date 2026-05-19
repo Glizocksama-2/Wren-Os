@@ -1117,7 +1117,7 @@ function hasUserDeckData(state: CommandDeckState): boolean {
   );
 }
 
-function hasMeaningfulDeckData(state: CommandDeckState): boolean {
+export function hasMeaningfulDeckData(state: CommandDeckState): boolean {
   return hasUserDeckData(state) || hasCustomizedSettings(state);
 }
 

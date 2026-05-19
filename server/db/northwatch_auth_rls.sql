@@ -296,3 +296,19 @@ drop policy if exists api_tokens_delete_own on api_tokens;
 create policy api_tokens_delete_own on api_tokens
 for delete
 using (user_id = nullif(current_setting('app.current_user_id', true), '')::uuid);
+
+create or replace function public.northwatch_legacy_command_deck_for_email(check_email text)
+returns table(deck jsonb, updated_at timestamptz)
+language sql
+security definer
+set search_path = public, auth
+as $$
+  select cd.deck, cd.updated_at
+  from public.command_decks cd
+  join auth.users au on au.id = cd.user_id
+  where lower(au.email) = lower(check_email)
+  order by cd.updated_at desc
+  limit 1;
+$$;
+
+grant execute on function public.northwatch_legacy_command_deck_for_email(text) to northwatch_app;

@@ -94,6 +94,7 @@ import {
   type RoutineDay,
   freshCommandDeck,
   getDeckMetrics,
+  hasMeaningfulDeckData,
   loadCommandDeck,
   reduceCommandDeck,
   saveCommandDeck
@@ -177,7 +178,9 @@ const ACTIVITY_FEED_POLL_MS = 60000;
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL?.trim() ?? "").replace(/\/$/, "");
 const TELEGRAM_SEND_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/send`;
 const TELEGRAM_CONFIG_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/config`;
+const LEGACY_COMMAND_DECK_ENDPOINT = `${AUTH_API_BASE_URL}/api/legacy-command-deck`;
 const LEGACY_SUPABASE_CLOUD_SYNC_ENABLED = false;
+const LEGACY_CLOUD_IMPORT_STORAGE_PREFIX = "northwatch.legacy-cloud-import.v1";
 
 type LegalPanel = "settings" | "help" | "privacy" | "terms";
 type AgentHealthStatus = "alive" | "dead" | "idle";
@@ -328,6 +331,49 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
     latestDeckRef.current = state;
     saveCommandDeck(state, window.localStorage, authUserId);
   }, [authUserId, state]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+
+    const importKey = `${LEGACY_CLOUD_IMPORT_STORAGE_PREFIX}:${authUserId}`;
+    if (window.localStorage.getItem(importKey)) return;
+
+    let isCancelled = false;
+
+    async function importLegacyCloudDeck() {
+      if (hasMeaningfulDeckData(latestDeckRef.current)) return;
+
+      try {
+        const response = await fetch(LEGACY_COMMAND_DECK_ENDPOINT, {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+          cache: "no-store"
+        });
+
+        if (response.status === 204 || response.status === 404) {
+          window.localStorage.setItem(importKey, "none");
+          return;
+        }
+
+        if (!response.ok) return;
+
+        const payload = await response.json() as { deck?: Partial<CommandDeckState> | null; updatedAt?: string | null };
+        if (isCancelled || !payload.deck || hasMeaningfulDeckData(latestDeckRef.current)) return;
+
+        dispatch({ type: "deck/import", deck: payload.deck });
+        window.localStorage.setItem(importKey, payload.updatedAt ?? new Date().toISOString());
+        setNotice("Recovered the command deck saved under your email.");
+      } catch {
+        // Legacy cloud import is best-effort; local account storage still works without it.
+      }
+    }
+
+    void importLegacyCloudDeck();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [authUserId]);
 
   useEffect(() => {
     if (!isSupabaseCloudConfigured || !supabase) return;

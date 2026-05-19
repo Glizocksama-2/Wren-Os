@@ -180,6 +180,13 @@ export function createPostgresUserDataDb(pool) {
         const result = await client.query("delete from agent_configs where user_id = $1 and title = $2 returning id", [userId, TELEGRAM_CONFIG_TITLE]);
         return result.rowCount > 0;
       });
+    },
+    async findLegacyCommandDeckByEmail(email) {
+      const result = await pool.query(
+        "select deck, updated_at from northwatch_legacy_command_deck_for_email($1) limit 1",
+        [email]
+      );
+      return result.rows[0] ?? null;
     }
   };
 }

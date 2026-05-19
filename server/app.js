@@ -6,6 +6,7 @@ import { createAuthService } from "./auth/authService.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { createPool, createPostgresAuthDb, createPostgresUserDataDb } from "./db/postgres.js";
 import { createAuthRouter } from "./routes/auth.js";
+import { createLegacyCommandDeckRouter } from "./routes/legacyCommandDeck.js";
 import { createTelegramRouter } from "./routes/telegram.js";
 import { createUserDataRouter } from "./routes/userData.js";
 
@@ -29,6 +30,7 @@ export function createApp(options = {}) {
   if (userDataDb) {
     const protectedApi = authenticate({ authService });
     app.use("/api/telegram", protectedApi, createTelegramRouter({ express, db: userDataDb }));
+    app.use("/api/legacy-command-deck", protectedApi, createLegacyCommandDeckRouter({ express, db: userDataDb }));
     app.use("/api", protectedApi, createUserDataRouter({ express, db: userDataDb }));
   }
 

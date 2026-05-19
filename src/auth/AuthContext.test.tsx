@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
-import { COMMAND_DECK_STORAGE_KEY, getCommandDeckStorageKey } from "../store/commandDeck";
+import { COMMAND_DECK_STORAGE_KEY, freshCommandDeck, getCommandDeckStorageKey } from "../store/commandDeck";
 import { AuthProvider, useAuth, type AuthUser } from "./AuthContext";
 import { LoginPage, RegisterPage } from "./AuthPages";
 import ProtectedNorthwatch from "./ProtectedNorthwatch";
@@ -134,6 +134,45 @@ describe("Northwatch React auth", () => {
     expect(within(topbar).getByText("SO")).toBeInTheDocument();
     expect(window.localStorage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Old Browser User");
     expect(screen.getByText("Old Browser User")).toBeInTheDocument();
+  });
+
+  it("imports the legacy Supabase deck saved under the same email when the account is empty", async () => {
+    const legacyTask = {
+      id: "legacy-cloud-task",
+      title: "Recovered cloud task",
+      priority: "critical",
+      kanbanPriority: "urgent",
+      dueDate: null,
+      status: "todo",
+      createdAt: "2026-05-19T13:59:20.008Z",
+      updatedAt: "2026-05-19T13:59:20.008Z"
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/api/legacy-command-deck") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              deck: {
+                ...freshCommandDeck,
+                tasks: [legacyTask],
+                settings: { ...freshCommandDeck.settings, callsign: "Email Vault" }
+              },
+              updatedAt: "2026-05-19T13:59:20.008Z"
+            })
+          };
+        }
+
+        return { ok: true, status: 200, json: async () => ({}) };
+      })
+    );
+
+    render(<App authUser={authUser} onAuthLogout={vi.fn()} />);
+
+    expect(await screen.findByText("Recovered cloud task")).toBeInTheDocument();
+    await waitFor(() => expect(window.localStorage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Recovered cloud task"));
   });
 });
 
