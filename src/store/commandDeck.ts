@@ -1,4 +1,4 @@
-import { githubProjectSeed, githubScanSummary } from "../data/githubProjects";
+import { githubScanSummary } from "../data/githubProjects";
 
 export type DeckView =
   | "dashboard"
@@ -218,8 +218,8 @@ export type CommandDeckAction =
   | { type: "routine/update"; id: string; title: string; cadence: RoutineCadence; days: RoutineDay[] }
   | { type: "routine/toggle"; id: string; date?: string }
   | { type: "routine/delete"; id: string }
-  | { type: "project/add"; name: string; objective: string; nextAction: string; dueDate: string | null }
-  | { type: "project/update"; id: string; name: string; objective: string; nextAction: string; dueDate: string | null; progress: number }
+  | { type: "project/add"; name: string; objective: string; nextAction: string; dueDate: string | null; repositoryUrl?: string; defaultBranch?: string }
+  | { type: "project/update"; id: string; name: string; objective: string; nextAction: string; dueDate: string | null; progress: number; repositoryUrl?: string; defaultBranch?: string }
   | { type: "project/complete"; id: string }
   | { type: "project/delete"; id: string }
   | { type: "github/import"; projects: GitHubProjectSeed[]; owner: string; scannedAt: string }
@@ -431,23 +431,24 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "routine/delete":
       return touch({ ...state, routines: state.routines.filter((routine) => routine.id !== action.id) }, timestamp);
 
-    case "project/add":
+    case "project/add": {
+      const repoLink = normalizeGitHubRepositoryLink(action.repositoryUrl, action.defaultBranch);
       return touch({
         ...state,
         projects: [
           {
             id: makeId("project"),
-            name: action.name,
+            name: action.name || repoLink?.name || "Untitled project",
             objective: action.objective,
             nextAction: action.nextAction,
             status: "pending",
             dueDate: action.dueDate,
             progress: 0,
-            source: "manual",
-            repositoryUrl: null,
+            source: repoLink ? "github" : "manual",
+            repositoryUrl: repoLink?.url ?? null,
             language: null,
             visibility: null,
-            defaultBranch: null,
+            defaultBranch: repoLink?.defaultBranch ?? null,
             lastPushedAt: null,
             openIssues: 0,
             openPullRequests: 0,
@@ -457,6 +458,7 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
           ...state.projects
         ]
       }, timestamp);
+    }
 
     case "project/complete":
       return touch({
@@ -469,19 +471,22 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "project/update":
       return touch({
         ...state,
-        projects: state.projects.map((project) =>
-          project.id === action.id
-            ? {
-                ...project,
-                name: action.name,
-                objective: action.objective,
-                nextAction: action.nextAction,
-                dueDate: action.dueDate,
-                progress: clampProgress(action.progress),
-                updatedAt: timestamp
-              }
-            : project
-        )
+        projects: state.projects.map((project) => {
+          if (project.id !== action.id) return project;
+          const repoLink = normalizeGitHubRepositoryLink(action.repositoryUrl, action.defaultBranch);
+          return {
+            ...project,
+            name: action.name || repoLink?.name || project.name,
+            objective: action.objective,
+            nextAction: action.nextAction,
+            dueDate: action.dueDate,
+            progress: clampProgress(action.progress),
+            source: repoLink ? "github" : "manual",
+            repositoryUrl: repoLink?.url ?? null,
+            defaultBranch: repoLink?.defaultBranch ?? null,
+            updatedAt: timestamp
+          };
+        })
       }, timestamp);
 
     case "project/delete":
@@ -852,17 +857,15 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
   const fresh = createFreshDeck();
   const incomingSettings: Partial<DeckSettings> = value.settings ?? {};
   const incomingVersion = typeof value.version === "number" ? value.version : 0;
+  const projects = getSafeNormalizedProjects(value);
   return {
     ...fresh,
     ...value,
     version: SCHEMA_VERSION,
     tasks: Array.isArray(value.tasks) ? value.tasks.map(normalizeTask) : [],
     routines: Array.isArray(value.routines) ? value.routines.map(normalizeRoutine) : [],
-    githubScan: value.githubScan ?? githubScanSummary,
-    projects: mergeGitHubProjects(
-      Array.isArray(value.projects) ? value.projects.map(normalizeProject) : [],
-      githubProjectSeed
-    ),
+    githubScan: normalizeGithubScan(value.githubScan, projects),
+    projects,
     calendar: Array.isArray(value.calendar) ? value.calendar : [],
     workouts: Array.isArray(value.workouts) ? value.workouts : [],
     books: Array.isArray(value.books) ? value.books.map(normalizeBook) : [],
@@ -896,7 +899,7 @@ function createFreshDeck(): CommandDeckState {
     githubScan: githubScanSummary,
     tasks: [],
     routines: [],
-    projects: mergeGitHubProjects([], githubProjectSeed),
+    projects: [],
     calendar: [],
     workouts: [],
     books: [],
@@ -1107,7 +1110,7 @@ function hasUserDeckData(state: CommandDeckState): boolean {
   return (
     state.tasks.length > 0 ||
     state.routines.length > 0 ||
-    state.projects.some((project) => project.source !== "github") ||
+    state.projects.length > 0 ||
     state.calendar.length > 0 ||
     state.workouts.length > 0 ||
     state.books.length > 0 ||
@@ -1411,7 +1414,32 @@ function mergeGitHubProjects(currentProjects: CommandProject[], seeds: GitHubPro
   });
 }
 
+function getSafeNormalizedProjects(value: Partial<CommandDeckState>): CommandProject[] {
+  const projects = Array.isArray(value.projects) ? value.projects.map(normalizeProject) : [];
+  if (isLegacySeededGitHubScan(value.githubScan)) {
+    return projects.filter((project) => project.source !== "github");
+  }
+
+  return projects;
+}
+
+function normalizeGithubScan(scan: CommandDeckState["githubScan"] | undefined, projects: CommandProject[]): CommandDeckState["githubScan"] {
+  if (!scan || isLegacySeededGitHubScan(scan)) {
+    return {
+      ...githubScanSummary,
+      projectCount: projects.filter((project) => project.source === "github").length
+    };
+  }
+
+  return {
+    owner: scan.owner ?? "",
+    scannedAt: scan.scannedAt ?? "",
+    projectCount: projects.filter((project) => project.source === "github").length
+  };
+}
+
 function normalizeProject(project: Partial<CommandProject>): CommandProject {
+  const repoLink = normalizeGitHubRepositoryLink(project.repositoryUrl, project.defaultBranch);
   return {
     id: project.id ?? makeId("project"),
     name: project.name ?? "Untitled project",
@@ -1420,17 +1448,44 @@ function normalizeProject(project: Partial<CommandProject>): CommandProject {
     status: project.status ?? "pending",
     dueDate: project.dueDate ?? null,
     progress: clampProgress(project.progress ?? 0),
-    source: project.source ?? "manual",
-    repositoryUrl: project.repositoryUrl ?? null,
+    source: repoLink ? "github" : project.source ?? "manual",
+    repositoryUrl: repoLink?.url ?? null,
     language: project.language ?? null,
     visibility: project.visibility ?? null,
-    defaultBranch: project.defaultBranch ?? null,
+    defaultBranch: repoLink?.defaultBranch ?? project.defaultBranch ?? null,
     lastPushedAt: project.lastPushedAt ?? null,
     openIssues: project.openIssues ?? 0,
     openPullRequests: project.openPullRequests ?? 0,
     createdAt: project.createdAt ?? nowIso(),
     updatedAt: project.updatedAt ?? nowIso()
   };
+}
+
+function normalizeGitHubRepositoryLink(repositoryUrl?: string | null, defaultBranch?: string | null): { name: string; url: string; defaultBranch: string | null } | null {
+  const raw = repositoryUrl?.trim();
+  if (!raw) return null;
+
+  const prefixed = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(prefixed);
+    if (url.hostname.toLowerCase() !== "github.com") return null;
+    const [owner, repoWithSuffix] = url.pathname.split("/").filter(Boolean);
+    if (!owner || !repoWithSuffix) return null;
+
+    const repo = repoWithSuffix.replace(/\.git$/i, "");
+    if (!repo || owner.includes("..") || repo.includes("..")) return null;
+    return {
+      name: repo,
+      url: `https://github.com/${owner}/${repo}`,
+      defaultBranch: defaultBranch?.trim() || null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isLegacySeededGitHubScan(scan: CommandDeckState["githubScan"] | undefined): boolean {
+  return scan?.owner === "Glizocksama-2";
 }
 
 function getGitHubProjectId(name: string): string {

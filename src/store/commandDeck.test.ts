@@ -195,7 +195,85 @@ describe("command deck cloud import", () => {
     expect(next.settings.callsign).toBe("Cloud");
     expect(next.tasks).toHaveLength(1);
     expect(next.tasks[0].title).toBe("Synced cloud task");
-    expect(next.projects.some((project) => project.source === "github")).toBe(true);
+    expect(next.projects).toHaveLength(0);
+  });
+
+  it("does not seed private GitHub repos into a fresh or normalized deck", () => {
+    expect(freshCommandDeck.projects).toHaveLength(0);
+    expect(normalizeCommandDeck({}).projects).toHaveLength(0);
+    expect(normalizeCommandDeck({}).githubScan).toMatchObject({ owner: "", projectCount: 0 });
+  });
+
+  it("prunes the legacy baked-in GitHub scan from existing browser decks", () => {
+    const deck = normalizeCommandDeck({
+      ...freshCommandDeck,
+      githubScan: { owner: "Glizocksama-2", scannedAt: "2026-05-12T00:00:00+03:00", projectCount: 1 },
+      projects: [
+        {
+          id: "github-old",
+          name: "Should not leak",
+          objective: "Private repo",
+          nextAction: "Hidden",
+          status: "pending",
+          dueDate: null,
+          progress: 50,
+          source: "github",
+          repositoryUrl: "https://github.com/example/private",
+          language: null,
+          visibility: "private",
+          defaultBranch: "main",
+          lastPushedAt: null,
+          openIssues: 0,
+          openPullRequests: 0,
+          createdAt: "2026-05-12T09:00:00.000Z",
+          updatedAt: "2026-05-12T09:00:00.000Z"
+        },
+        {
+          id: "manual-safe",
+          name: "Client project",
+          objective: "Keep this",
+          nextAction: "Next",
+          status: "pending",
+          dueDate: null,
+          progress: 10,
+          source: "manual",
+          repositoryUrl: null,
+          language: null,
+          visibility: null,
+          defaultBranch: null,
+          lastPushedAt: null,
+          openIssues: 0,
+          openPullRequests: 0,
+          createdAt: "2026-05-12T09:00:00.000Z",
+          updatedAt: "2026-05-12T09:00:00.000Z"
+        }
+      ]
+    });
+
+    expect(deck.projects.map((project) => project.name)).toEqual(["Client project"]);
+    expect(deck.githubScan).toMatchObject({ owner: "", projectCount: 0 });
+  });
+
+  it("lets users link and delete their own GitHub repository projects", () => {
+    let deck = reduceCommandDeck(freshCommandDeck, {
+      type: "project/add",
+      name: "Client Portal",
+      objective: "Build client dashboard",
+      nextAction: "Wire repo",
+      dueDate: null,
+      repositoryUrl: "github.com/client-org/client-portal.git",
+      defaultBranch: "develop"
+    });
+
+    expect(deck.projects[0]).toMatchObject({
+      name: "Client Portal",
+      source: "github",
+      repositoryUrl: "https://github.com/client-org/client-portal",
+      defaultBranch: "develop"
+    });
+
+    deck = reduceCommandDeck(deck, { type: "project/delete", id: deck.projects[0].id });
+    expect(deck.projects).toHaveLength(0);
   });
 
   it("adds market intel items and research notes", () => {

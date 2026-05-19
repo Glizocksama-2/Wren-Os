@@ -56,11 +56,11 @@ describe("Northwatch command deck", () => {
     expect(screen.getByText("Northwatch Tactical Ledger")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /your command deck, live/i })).toBeInTheDocument();
     expect(screen.queryByText("Mercer Ventures")).not.toBeInTheDocument();
-    expect(screen.getByText("8 GitHub repos imported from Glizocksama-2")).toBeInTheDocument();
+    expect(screen.getByText("0 private GitHub repo links")).toBeInTheDocument();
     expect(screen.getByText(/credential auth: active/i)).toBeInTheDocument();
     expect(window.localStorage.getItem("wren-os.workspace.v1")).not.toBeNull();
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Operator");
-    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("EStarzFc");
+    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).not.toContain("EStarzFc");
   });
 
   it("adds and completes to do items", () => {
@@ -145,6 +145,8 @@ describe("Northwatch command deck", () => {
     fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Launch black deck" } });
     fireEvent.change(screen.getByLabelText("Project objective"), { target: { value: "Rebuild Northwatch around life command." } });
     fireEvent.change(screen.getByLabelText("Project next action"), { target: { value: "Finish UI pass" } });
+    fireEvent.change(screen.getByLabelText("GitHub repository URL"), { target: { value: "https://github.com/client-org/launch-black-deck" } });
+    fireEvent.change(screen.getByLabelText("GitHub default branch"), { target: { value: "main" } });
     fireEvent.click(screen.getByRole("button", { name: /add project/i }));
 
     const projectRow = screen
@@ -152,10 +154,15 @@ describe("Northwatch command deck", () => {
       .find((item) => item.closest(".project-row"))
       ?.closest(".project-row") as HTMLElement;
     expect(projectRow).toBeInTheDocument();
+    expect(within(projectRow).getByText("GitHub")).toBeInTheDocument();
+    expect(within(projectRow).getByRole("link", { name: /open launch black deck on github/i })).toHaveAttribute(
+      "href",
+      "https://github.com/client-org/launch-black-deck"
+    );
     fireEvent.click(within(projectRow).getByRole("button", { name: "Complete" }));
     expect(within(screen.getByText("Done Projects").closest(".deck-panel") as HTMLElement).getByText("Launch black deck")).toBeInTheDocument();
-    expect(screen.getByText("EStarzFc")).toBeInTheDocument();
-    expect(screen.getAllByText("GitHub").length).toBeGreaterThan(0);
+    expect(screen.queryByText("EStarzFc")).not.toBeInTheDocument();
+    expect(screen.getByText("1 linked GitHub repo")).toBeInTheDocument();
   });
 
   it("adds calendar, workout, book, journal, and finance records", () => {
@@ -234,12 +241,20 @@ describe("Northwatch command deck", () => {
   it("runs an autonomous intel scan from deck state", async () => {
     render(<App />);
 
+    clickNav("Projects");
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Client Portal" } });
+    fireEvent.change(screen.getByLabelText("Project objective"), { target: { value: "Client-owned launch board." } });
+    fireEvent.change(screen.getByLabelText("Project next action"), { target: { value: "Review linked repo." } });
+    fireEvent.change(screen.getByLabelText("GitHub repository URL"), { target: { value: "https://github.com/client-org/client-portal" } });
+    fireEvent.click(screen.getByRole("button", { name: /add project/i }));
+
     clickNav("Intel");
     expect(screen.getByText("Sentinel autopilot")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /scan now/i }));
 
     expect(await screen.findByText(/Autonomous scan produced/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/^Repo:/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Repo: Client Portal").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/EStarzFc/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/Autonomous scan/i).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole("button", { name: /pause autopilot/i }));

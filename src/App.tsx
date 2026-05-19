@@ -1855,7 +1855,7 @@ function Dashboard({
       <section className="github-scan-strip dashboard-scan">
         <Github size={18} />
         <div>
-          <strong>{state.githubScan.projectCount} GitHub repos imported from {state.githubScan.owner}</strong>
+          <strong>{state.projects.filter((project) => project.source === "github" && project.repositoryUrl).length} private GitHub repo links</strong>
           <span>Average project progress: {metrics.projectProgress}%</span>
         </div>
       </section>
@@ -2208,13 +2208,22 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
   const [nextAction, setNextAction] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [progress, setProgress] = useState("0");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [defaultBranch, setDefaultBranch] = useState("");
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const pending = state.projects.filter((project) => project.status === "pending");
   const done = state.projects.filter((project) => project.status === "done");
+  const linkedRepoCount = state.projects.filter((project) => project.source === "github" && project.repositoryUrl).length;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) return;
+    const cleanedRepositoryUrl = repositoryUrl.trim();
+    if (cleanedRepositoryUrl && !isGitHubRepositoryUrl(cleanedRepositoryUrl)) {
+      setNotice("Paste a valid GitHub repository URL.");
+      return;
+    }
+
     if (editingProjectId) {
       dispatch({
         type: "project/update",
@@ -2223,7 +2232,9 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         objective: objective.trim(),
         nextAction: nextAction.trim(),
         dueDate: dueDate || null,
-        progress: Number(progress)
+        progress: Number(progress),
+        repositoryUrl: cleanedRepositoryUrl,
+        defaultBranch: defaultBranch.trim()
       });
       setEditingProjectId(null);
       setNotice("Project updated.");
@@ -2233,15 +2244,19 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         name: name.trim(),
         objective: objective.trim(),
         nextAction: nextAction.trim(),
-        dueDate: dueDate || null
+        dueDate: dueDate || null,
+        repositoryUrl: cleanedRepositoryUrl,
+        defaultBranch: defaultBranch.trim()
       });
-      setNotice("Project added to pending.");
+      setNotice(cleanedRepositoryUrl ? "Project added and GitHub repo linked." : "Project added to pending.");
     }
     setName("");
     setObjective("");
     setNextAction("");
     setDueDate("");
     setProgress("0");
+    setRepositoryUrl("");
+    setDefaultBranch("");
   };
 
   const startEdit = (project: CommandDeckState["projects"][number]) => {
@@ -2251,6 +2266,8 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
     setNextAction(project.nextAction);
     setDueDate(project.dueDate ?? "");
     setProgress(String(project.progress));
+    setRepositoryUrl(project.repositoryUrl ?? "");
+    setDefaultBranch(project.defaultBranch ?? "");
   };
 
   const cancelEdit = () => {
@@ -2260,15 +2277,17 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
     setNextAction("");
     setDueDate("");
     setProgress("0");
+    setRepositoryUrl("");
+    setDefaultBranch("");
   };
 
   return (
-    <ModuleShell title="Projects" description="GitHub scan plus manual projects, with progress and next action visible.">
+    <ModuleShell title="Projects" description="Your private projects, optional GitHub repo links, progress, and next action.">
       <section className="github-scan-strip">
         <Github size={18} />
         <div>
-          <strong>{state.githubScan.projectCount} GitHub repos imported from {state.githubScan.owner}</strong>
-          <span>Last scan: {formatDateTime(state.githubScan.scannedAt)}</span>
+          <strong>{linkedRepoCount === 0 ? "No GitHub repos linked yet" : `${linkedRepoCount} linked GitHub repo${linkedRepoCount === 1 ? "" : "s"}`}</strong>
+          <span>Paste your own GitHub repository URL when adding or modifying a project.</span>
         </div>
       </section>
       <form className="command-form project-form" onSubmit={submit}>
@@ -2277,6 +2296,8 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         <label><span>Next action</span><input aria-label="Project next action" value={nextAction} onChange={(event) => setNextAction(event.target.value)} /></label>
         <label><span>Due</span><input aria-label="Project due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
         <label><span>Progress</span><input aria-label="Project progress" type="number" min="0" max="100" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
+        <label><span>GitHub repo URL</span><input aria-label="GitHub repository URL" placeholder="https://github.com/owner/repo" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} /></label>
+        <label><span>Branch</span><input aria-label="GitHub default branch" placeholder="main" value={defaultBranch} onChange={(event) => setDefaultBranch(event.target.value)} /></label>
         <button type="submit"><Plus size={16} /> {editingProjectId ? "Save project" : "Add project"}</button>
         {editingProjectId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
@@ -4692,6 +4713,17 @@ function getPriorityProject(state: CommandDeckState): CommandDeckState["projects
     if (progressDelta !== 0) return progressDelta;
     return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
   })[0];
+}
+
+function isGitHubRepositoryUrl(value: string): boolean {
+  const prefixed = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const url = new URL(prefixed);
+    const [owner, repo] = url.pathname.split("/").filter(Boolean);
+    return url.hostname.toLowerCase() === "github.com" && Boolean(owner && repo);
+  } catch {
+    return false;
+  }
 }
 
 function getFocusTaskTitle(state: CommandDeckState): string {
