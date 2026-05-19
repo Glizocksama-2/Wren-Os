@@ -36,7 +36,9 @@ ollama pull qwen2.5:1.5b
 ollama serve
 ```
 
-On Windows, launching the Ollama desktop app also starts the local server. In Northwatch, open `Customize`, confirm the `Sentinel brain` endpoint and model, then use `Test Ollama`. The Sentinel panel will use Ollama when it is reachable and fall back to built-in deck logic if the server or model is unavailable.
+On Windows, launching the Ollama desktop app also starts the local server. The Sentinel panel uses the checked-in default endpoint and model when Ollama is reachable, and falls back to built-in deck logic if the server or model is unavailable.
+
+Open the logo button > Customize to change the Sentinel endpoint or model after the app is running.
 
 If the app is served from a different local origin and the browser blocks Ollama, add that origin to `OLLAMA_ORIGINS`, then restart Ollama. For Vite development, allow the current local app origin such as `http://127.0.0.1:5174`, `http://127.0.0.1:5173`, or the matching `localhost` URL.
 
@@ -46,7 +48,7 @@ To refresh GitHub/Vercel project sources from authenticated local CLIs:
 npm run sources:snapshot
 ```
 
-Paste the JSON output into Settings under `GitHub & Vercel Sources`. Browser GitHub sync uses the public repo API for the configured Codex repo; private repo and Vercel project reads should come from the local CLI snapshot so secrets stay out of the static app.
+Paste the JSON output through the logo button > Settings flow when source import controls are enabled. Browser GitHub sync uses the public repo API for the configured Codex repo; private repo and Vercel project reads should come from the local CLI snapshot so secrets stay out of the static app.
 
 By default the snapshot reads up to 50 repos from `Glizocksama-2` plus the Vercel projects visible to the logged-in Vercel CLI. Set `WREN_GITHUB_OWNER`, `WREN_GITHUB_LIMIT`, or `WREN_GITHUB_REPO` before running the command to narrow or expand the GitHub source.
 
@@ -77,13 +79,19 @@ Use the legacy `VITE_SUPABASE_ANON_KEY` only if your project has not moved to pu
 
 Northwatch still stores an offline copy in the current browser's `localStorage`. With Supabase configured, that local copy is loaded into or replaced by the authenticated cloud row after sign-in. Export JSON before clearing browser data, switching profiles, using another device for the first time, or resetting the seed workspace.
 
+## Legal Consent
+
+First use is gated by two explicit checkboxes: agreement to the Terms and Conditions and acknowledgement of the Privacy Policy. The accepted versions are saved in `northwatch.legal-consent.v1` so updated legal copy can request fresh acceptance later. The logo button keeps Account, Customize, Settings, Help, Privacy Policy, and Terms and Conditions in one compact menu instead of exposing Account or Customize on the main rail.
+
 ## Personal And Team Workspaces
 
 Signed-in users start in a private personal vault backed by `public.command_decks`, where RLS only allows the row whose `user_id` matches the active Supabase user. New signed-in users are seeded with a fresh private deck so a previous browser user's local data is not silently copied into their account.
 
-Team mode is opt-in from Account Settings. Creating a team makes a fresh shared deck in `public.team_command_decks` and adds the creator as `owner`. Members join with owner-generated invite links, then Northwatch can switch between the private vault and any joined team workspace. Team data is visible and writable only to authenticated users with a row in `public.team_memberships` for that team.
+Team workspace tables are supported at the data layer. Creating a team makes a fresh shared deck in `public.team_command_decks` and adds the creator as `owner`. Members join with owner-generated invite links, then Northwatch can switch between the private vault and any joined team workspace. Team data is visible and writable only to authenticated users with a row in `public.team_memberships` for that team.
 
-Owners can now create time-limited invite links from Account Settings. A signed-in user joins by opening or pasting that invite link, which records their membership in `public.team_memberships`. Owners can promote members to owner, demote owners back to member when another owner remains, and remove members from the team. These controls are backed by RLS policies and private Postgres helper functions in `private.*`; only the `role` column is update-granted to authenticated clients.
+Open the logo button > Account to manage identity, workspace mode, team creation, invite links, member roles, and sign out.
+
+Owners can create time-limited invite links through the team helper functions. A signed-in user joins by opening or pasting that invite link, which records their membership in `public.team_memberships`. Owners can promote members to owner, demote owners back to member when another owner remains, and remove members from the team. These controls are backed by RLS policies and private Postgres helper functions in `private.*`; only the `role` column is update-granted to authenticated clients.
 
 The Codex Bridge is local-first handoff generation only. `/api/codex/handoff` is documented as a future/local contract, not a live hosted server endpoint.
 
@@ -95,7 +103,9 @@ GitHub and Vercel linking is still metadata-only. Northwatch stores imported pro
 
 - Run `npm test -- --run`.
 - Run `npm run build`.
-- Open the app locally and export a workspace backup from Settings.
+- Open the app locally and confirm the Terms and Privacy gate appears for a fresh browser profile.
+- Confirm Account, Customize, Settings, Help, Privacy Policy, and Terms and Conditions open from the logo button.
+- Open the app locally and export a workspace backup from the logo button > Settings flow when source import/export controls are enabled.
 - Reload and confirm the workspace persists.
 - Import the exported JSON through the preview/confirm flow.
 - Confirm the reset guard requires `RESET NORTHWATCH`.

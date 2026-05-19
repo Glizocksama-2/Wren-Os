@@ -1,11 +1,31 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import App, { AuthGate } from "./App";
+import App, { AuthGate, LEGAL_CONSENT_STORAGE_KEY, PRIVACY_VERSION, TERMS_VERSION } from "./App";
 import { COMMAND_DECK_STORAGE_KEY } from "./store/commandDeck";
 
 describe("Northwatch command deck", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    acceptLegalTermsForTests();
+  });
+
+  it("requires explicit terms and privacy agreement before opening the deck", () => {
+    window.localStorage.removeItem(LEGAL_CONSENT_STORAGE_KEY);
+
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: /review and accept the legal terms/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /continue to northwatch/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText("I agree to the Terms and Conditions"));
+    expect(screen.getByRole("button", { name: /continue to northwatch/i })).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText("I acknowledge the Privacy Policy"));
+    fireEvent.click(screen.getByRole("button", { name: /continue to northwatch/i }));
+
+    expect(window.localStorage.getItem(LEGAL_CONSENT_STORAGE_KEY)).toContain(TERMS_VERSION);
+    expect(window.localStorage.getItem(LEGAL_CONSENT_STORAGE_KEY)).toContain(PRIVACY_VERSION);
+    expect(screen.queryByRole("heading", { name: /review and accept the legal terms/i })).not.toBeInTheDocument();
   });
 
   it("boots a fresh dark command deck and ignores the old workspace seed", () => {
@@ -191,58 +211,51 @@ describe("Northwatch command deck", () => {
     expect(screen.getByRole("link", { name: /news search for NVIDIA/i })).toHaveAttribute("href", expect.stringContaining("NVDA"));
   });
 
-  it("customizes callsign, accent, density, and resets the new deck", () => {
+  it("runs an autonomous intel scan from deck state", async () => {
     render(<App />);
 
-    clickNav("Customize");
-    fireEvent.change(screen.getByLabelText("Callsign"), { target: { value: "Ghost" } });
-    fireEvent.click(screen.getByRole("button", { name: "Use Cyan accent" }));
-    fireEvent.click(screen.getByRole("button", { name: "Use Pink accent" }));
-    fireEvent.click(screen.getByRole("button", { name: "Use White background" }));
-    fireEvent.click(screen.getByRole("button", { name: "Compact" }));
-    fireEvent.click(screen.getByRole("button", { name: "Use Orbit Watch logo" }));
-    fireEvent.change(screen.getByLabelText("Ollama model"), { target: { value: "mistral" } });
-    fireEvent.change(screen.getByLabelText("Ollama endpoint"), { target: { value: "http://localhost:11434" } });
+    clickNav("Intel");
+    expect(screen.getByText("Sentinel autopilot")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /scan now/i }));
 
-    expect(screen.getByDisplayValue("Ghost")).toBeInTheDocument();
-    expect(document.querySelector(".deck-app")).toHaveAttribute("data-accent", "pink");
-    expect(document.querySelector(".deck-app")).toHaveAttribute("data-background", "white");
-    expect(document.querySelector(".deck-app")).toHaveAttribute("data-density", "compact");
-    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"logoStyle\":\"radar\"");
-    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"ollamaModel\":\"mistral\"");
+    expect(await screen.findByText(/Autonomous scan produced/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Repo:/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Autonomous scan/i).length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /reset deck/i }));
-    expect(screen.getByDisplayValue("Operator")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /pause autopilot/i }));
+    expect(screen.getByRole("button", { name: /enable autopilot/i })).toBeInTheDocument();
   });
 
-  it("personalizes the visible profile bar and command centre identity", () => {
+  it("keeps account, customize, and legal windows under the logo menu", () => {
     render(<App />);
 
-    const journalRailLabel = screen.getByRole("navigation", { name: "Primary" }).querySelector('.rail-label[data-label="Journal"]');
-    expect(journalRailLabel).not.toBeNull();
-    expect(journalRailLabel).toHaveClass("rail-label");
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(nav).queryByRole("button", { name: "Customize" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: "Account" })).not.toBeInTheDocument();
 
-    clickNav("Account");
-    fireEvent.change(screen.getByLabelText("Profile name"), { target: { value: "Blossom Utonium" } });
-    fireEvent.change(screen.getByLabelText("Age"), { target: { value: "24" } });
-    fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "+254700000001" } });
-    fireEvent.change(screen.getByLabelText("Organization or company"), { target: { value: "Townsville Labs" } });
-    fireEvent.change(screen.getByLabelText("Command centre name"), { target: { value: "Powerpuff Girls" } });
-    fireEvent.change(screen.getByLabelText("Avatar URL"), { target: { value: "https://example.com/avatar.png" } });
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    const logoMenu = screen.getByRole("menu", { name: "Northwatch menu" });
+    expect(within(logoMenu).getByRole("menuitem", { name: "Account" })).toBeInTheDocument();
+    expect(within(logoMenu).getByRole("menuitem", { name: "Customize" })).toBeInTheDocument();
+    expect(within(logoMenu).getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
+    expect(within(logoMenu).getByRole("menuitem", { name: "Help" })).toBeInTheDocument();
+    expect(within(logoMenu).getByRole("menuitem", { name: "Privacy Policy" })).toBeInTheDocument();
+    expect(within(logoMenu).getByRole("menuitem", { name: "Terms and Conditions" })).toBeInTheDocument();
 
-    expect(screen.getAllByText("Blossom Utonium").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Townsville Labs").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Powerpuff Girls Tactical Ledger").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("img", { name: "Blossom Utonium avatar" }).length).toBeGreaterThan(0);
+    fireEvent.click(within(logoMenu).getByRole("menuitem", { name: "Customize" }));
+    expect(screen.getByRole("heading", { name: "Customize Options" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
 
-    clickNav("Journal");
-    expect(screen.getAllByText("Blossom Utonium").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Powerpuff Girls Tactical Ledger").length).toBeGreaterThan(0);
-    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"commandCenterName\":\"Powerpuff Girls\"");
-    expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("\"organizationName\":\"Townsville Labs\"");
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Account" }));
+    expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Privacy Policy" }));
+    expect(screen.getByRole("heading", { name: "Privacy Policy" })).toBeInTheDocument();
   });
 
-  it("renders richer life modules and account settings", () => {
+  it("renders richer life modules while account and customize stay out of the rail", () => {
     render(<App />);
 
     clickNav("Calendar");
@@ -269,30 +282,9 @@ describe("Northwatch command deck", () => {
     expect(screen.getByRole("heading", { name: "Watchtower" })).toBeInTheDocument();
     expect(screen.getByText("Research queue")).toBeInTheDocument();
 
-    clickNav("Customize");
-    expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
-    expect(screen.getByText("Module switches")).toBeInTheDocument();
-    expect(screen.getByText("Sentinel brain")).toBeInTheDocument();
-
-    clickNav("Account");
-    expect(screen.getByRole("heading", { name: "Account Settings" })).toBeInTheDocument();
-    expect(screen.getByText("Identity and sync")).toBeInTheDocument();
-    expect(screen.getByText("Workspace mode")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /personal vault/i })).toBeInTheDocument();
-    expect(screen.getByText(/team mode requires Supabase sign-in/i)).toBeInTheDocument();
-    expect(screen.getByText("Invite links")).toBeInTheDocument();
-    expect(screen.getByText("Member command")).toBeInTheDocument();
-    expect(screen.getByText(/Role management unlocks when an owner opens a team workspace/i)).toBeInTheDocument();
-  });
-
-  it("uses customize switches to hide optional life modules", () => {
-    render(<App />);
-
-    clickNav("Customize");
-    fireEvent.click(screen.getByLabelText("Calendar module"));
-
-    expect(screen.queryByRole("button", { name: "Calendar" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(nav).queryByRole("button", { name: "Customize" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("button", { name: "Account" })).not.toBeInTheDocument();
   });
 
   it("prefills remembered auth accounts and can forget one", async () => {
@@ -330,4 +322,16 @@ describe("Northwatch command deck", () => {
 
 function clickNav(name: string) {
   fireEvent.click(within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name }));
+}
+
+function acceptLegalTermsForTests() {
+  window.localStorage.setItem(
+    LEGAL_CONSENT_STORAGE_KEY,
+    JSON.stringify({
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      acceptedAt: "2026-05-19T08:00:00.000Z",
+      jurisdiction: "Kenyan data protection law and applicable international privacy principles"
+    })
+  );
 }

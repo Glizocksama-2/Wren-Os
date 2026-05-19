@@ -131,6 +131,16 @@ export interface IntelNote {
   createdAt: string;
 }
 
+export interface AutonomousIntelFinding {
+  title: string;
+  symbol: string;
+  kind: IntelKind;
+  signal: IntelSignal;
+  thesis: string;
+  sourceUrl: string;
+  note: string;
+}
+
 export interface IntelItem {
   id: string;
   title: string;
@@ -142,6 +152,13 @@ export interface IntelItem {
   notes: IntelNote[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IntelAutopilotState {
+  enabled: boolean;
+  lastRunAt: string | null;
+  lastSummary: string;
+  lastFindingCount: number;
 }
 
 export interface DeckSettings {
@@ -185,6 +202,7 @@ export interface CommandDeckState {
   journal: JournalEntry[];
   finances: FinanceEntry[];
   intel: IntelItem[];
+  intelAutopilot: IntelAutopilotState;
   settings: DeckSettings;
 }
 
@@ -224,6 +242,8 @@ export type CommandDeckAction =
   | { type: "intel/update"; id: string; title: string; symbol: string; kind: IntelKind; signal: IntelSignal; thesis: string; sourceUrl: string }
   | { type: "intel/note"; id: string; body: string }
   | { type: "intel/delete"; id: string }
+  | { type: "intel/autopilot/toggle"; enabled: boolean }
+  | { type: "intel/autoscan"; findings: AutonomousIntelFinding[]; summary: string; scannedAt: string }
   | { type: "settings/update"; payload: Partial<DeckSettings> }
   | { type: "deck/import"; deck: Partial<CommandDeckState> }
   | { type: "deck/reset" };
@@ -256,6 +276,12 @@ export const freshCommandDeck: CommandDeckState = {
   journal: [],
   finances: [],
   intel: [],
+  intelAutopilot: {
+    enabled: true,
+    lastRunAt: null,
+    lastSummary: "Autonomous scan is armed.",
+    lastFindingCount: 0
+  },
   settings: {
     callsign: "Operator",
     avatarUrl: "",
@@ -668,6 +694,21 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "intel/delete":
       return touch({ ...state, intel: state.intel.filter((item) => item.id !== action.id) }, timestamp);
 
+    case "intel/autopilot/toggle":
+      return touch({ ...state, intelAutopilot: { ...state.intelAutopilot, enabled: action.enabled } }, timestamp);
+
+    case "intel/autoscan":
+      return touch({
+        ...state,
+        intel: mergeAutonomousIntelFindings(state.intel, action.findings, action.scannedAt || timestamp),
+        intelAutopilot: {
+          ...state.intelAutopilot,
+          lastRunAt: action.scannedAt || timestamp,
+          lastSummary: action.summary,
+          lastFindingCount: action.findings.length
+        }
+      }, timestamp);
+
     case "settings/update":
       return touch({ ...state, settings: { ...state.settings, ...action.payload } }, timestamp);
 
@@ -766,6 +807,7 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     journal: Array.isArray(value.journal) ? value.journal : [],
     finances: Array.isArray(value.finances) ? value.finances : [],
     intel: Array.isArray(value.intel) ? value.intel.map(normalizeIntelItem) : [],
+    intelAutopilot: normalizeIntelAutopilot(value.intelAutopilot),
     settings: {
       ...fresh.settings,
       ...incomingSettings,
@@ -798,7 +840,8 @@ function createFreshDeck(): CommandDeckState {
     books: [],
     journal: [],
     finances: [],
-    intel: []
+    intel: [],
+    intelAutopilot: { ...freshCommandDeck.intelAutopilot }
   };
 }
 
@@ -1021,6 +1064,92 @@ function normalizeIntelItem(item: Partial<IntelItem>): IntelItem {
     createdAt: item.createdAt ?? timestamp,
     updatedAt: item.updatedAt ?? timestamp
   };
+}
+
+function normalizeIntelAutopilot(value: Partial<IntelAutopilotState> | undefined): IntelAutopilotState {
+  return {
+    enabled: value?.enabled !== false,
+    lastRunAt: getNullableString(value?.lastRunAt),
+    lastSummary: getString(value?.lastSummary) ?? freshCommandDeck.intelAutopilot.lastSummary,
+    lastFindingCount: Number.isFinite(value?.lastFindingCount) ? Math.max(0, Math.round(value?.lastFindingCount ?? 0)) : 0
+  };
+}
+
+function mergeAutonomousIntelFindings(current: IntelItem[], findings: AutonomousIntelFinding[], timestamp: string): IntelItem[] {
+  return findings.reduce((items, finding) => {
+    const normalized = normalizeAutonomousIntelFinding(finding);
+    if (!normalized) return items;
+
+    const existingIndex = items.findIndex((item) => getIntelIdentity(item.title, item.symbol) === getIntelIdentity(normalized.title, normalized.symbol));
+    if (existingIndex === -1) {
+      const nextItem: IntelItem = {
+        id: makeId("intel-auto"),
+        title: normalized.title,
+        symbol: normalized.symbol,
+        kind: normalized.kind,
+        signal: normalized.signal,
+        thesis: normalized.thesis,
+        sourceUrl: normalized.sourceUrl || null,
+        notes: normalized.note ? [{ id: makeId("intel-note"), body: normalized.note, createdAt: timestamp }] : [],
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+
+      return [nextItem, ...items];
+    }
+
+    const existing = items[existingIndex];
+    const noteAlreadyExists = normalized.note && existing.notes.some((note) => note.body === normalized.note);
+    const notes = normalized.note && !noteAlreadyExists
+      ? [{ id: makeId("intel-note"), body: normalized.note, createdAt: timestamp }, ...existing.notes]
+      : existing.notes;
+    const nextItems = items.slice();
+    nextItems[existingIndex] = {
+      ...existing,
+      kind: normalized.kind,
+      signal: getStrongerIntelSignal(existing.signal, normalized.signal),
+      thesis: normalized.thesis || existing.thesis,
+      sourceUrl: normalized.sourceUrl || existing.sourceUrl,
+      notes,
+      updatedAt: timestamp
+    };
+    return nextItems;
+  }, current.map(normalizeIntelItem));
+}
+
+function normalizeAutonomousIntelFinding(finding: AutonomousIntelFinding): AutonomousIntelFinding | null {
+  const title = finding.title.trim();
+  if (!title) return null;
+
+  return {
+    title,
+    symbol: finding.symbol.trim().toUpperCase(),
+    kind: intelKinds.includes(finding.kind) ? finding.kind : "trend",
+    signal: intelSignals.includes(finding.signal) ? finding.signal : "researching",
+    thesis: finding.thesis.trim(),
+    sourceUrl: finding.sourceUrl.trim(),
+    note: finding.note.trim()
+  };
+}
+
+function getIntelIdentity(title: string, symbol: string): string {
+  if (title.trim().toLowerCase().startsWith("repo:")) {
+    return title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  }
+
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  return normalizedSymbol || title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function getStrongerIntelSignal(current: IntelSignal, incoming: IntelSignal): IntelSignal {
+  const priority: Record<IntelSignal, number> = {
+    "on-hold": 0,
+    watching: 1,
+    researching: 2,
+    "high-priority": 3
+  };
+
+  return priority[incoming] > priority[current] ? incoming : current;
 }
 
 function normalizeRoutine(routine: Partial<RoutineEntry>): RoutineEntry {

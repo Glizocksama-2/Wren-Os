@@ -52,7 +52,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
 import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
 import {
   forgetRememberedAccount,
@@ -60,6 +60,7 @@ import {
   rememberAuthAccount,
   type RememberedAuthAccount
 } from "./lib/authMemory";
+import { buildAutonomousIntelScan } from "./lib/intelAutopilot";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
 import {
@@ -113,9 +114,7 @@ const navItems: Array<{ view: DeckView; label: string; icon: ReactNode; terms: s
   { view: "workout", label: "Workout", icon: <Dumbbell size={18} />, terms: ["workout", "training", "gym"] },
   { view: "books", label: "Books", icon: <BookOpen size={18} />, terms: ["book", "books", "reading"] },
   { view: "journal", label: "Journal", icon: <NotebookPen size={18} />, terms: ["journal", "notes", "log"] },
-  { view: "finances", label: "Finances", icon: <Banknote size={18} />, terms: ["finance", "finances", "money", "cash"] },
-  { view: "customize", label: "Customize", icon: <Settings2 size={18} />, terms: ["custom", "customize", "settings", "theme"] },
-  { view: "account", label: "Account", icon: <UserRound size={18} />, terms: ["account", "profile", "login", "sync"] }
+  { view: "finances", label: "Finances", icon: <Banknote size={18} />, terms: ["finance", "finances", "money", "cash"] }
 ];
 
 const priorityOptions: Priority[] = ["low", "medium", "high", "critical"];
@@ -167,10 +166,47 @@ type AgentConnectionState = {
 
 type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
 const PENDING_TEAM_INVITE_STORAGE_KEY = "northwatch.pendingTeamInvite.v1";
+export const LEGAL_CONSENT_STORAGE_KEY = "northwatch.legal-consent.v1";
+export const TERMS_VERSION = "2026-05-19";
+export const PRIVACY_VERSION = "2026-05-19";
+const LEGAL_JURISDICTION_LABEL = "Kenyan data protection law and applicable international privacy principles";
+
+type LegalPanel = "settings" | "help" | "privacy" | "terms";
+
+export interface LegalConsentRecord {
+  termsVersion: string;
+  privacyVersion: string;
+  acceptedAt: string;
+  jurisdiction: string;
+}
+
+function loadLegalConsent(): LegalConsentRecord | null {
+  try {
+    const stored = window.localStorage.getItem(LEGAL_CONSENT_STORAGE_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored) as LegalConsentRecord;
+  } catch {
+    return null;
+  }
+}
+
+function saveLegalConsent(record: LegalConsentRecord) {
+  window.localStorage.setItem(LEGAL_CONSENT_STORAGE_KEY, JSON.stringify(record));
+}
+
+export function hasValidLegalConsent(record: LegalConsentRecord | null): boolean {
+  return Boolean(
+    record &&
+      record.termsVersion === TERMS_VERSION &&
+      record.privacyVersion === PRIVACY_VERSION &&
+      record.jurisdiction === LEGAL_JURISDICTION_LABEL
+  );
+}
 
 const agentQuickPrompts = [
   "Brief my next move",
   "Find the bottleneck",
+  "Scan intel",
   "Balance today",
   "Create focus task"
 ];
@@ -189,9 +225,13 @@ export default function App() {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
   const [isTeamBusy, setIsTeamBusy] = useState(false);
+  const [isLogoMenuOpen, setIsLogoMenuOpen] = useState(false);
+  const [legalPanel, setLegalPanel] = useState<LegalPanel | null>(null);
+  const [legalConsent, setLegalConsent] = useState<LegalConsentRecord | null>(() => loadLegalConsent());
   const latestDeckRef = useRef(state);
   const saveTimerRef = useRef<number | null>(null);
   const pendingInviteAttemptRef = useRef<string | null>(null);
+  const logoMenuRef = useRef<HTMLDivElement | null>(null);
   const metrics = useMemo(() => getDeckMetrics(state), [state]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => isViewEnabled(item.view, state.settings)), [state.settings]);
   const activeTeam = useMemo(
@@ -402,16 +442,65 @@ export default function App() {
   }, [notice]);
 
   useEffect(() => {
+    if (!isLogoMenuOpen) return;
+
+    const closeFromOutside = (event: MouseEvent) => {
+      if (!logoMenuRef.current?.contains(event.target as Node)) {
+        setIsLogoMenuOpen(false);
+      }
+    };
+
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsLogoMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", closeFromOutside);
+    document.addEventListener("keydown", closeFromEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [isLogoMenuOpen]);
+
+  useEffect(() => {
     if (isViewEnabled(view, state.settings)) return;
-    setView("customize");
-    setNotice("Module hidden. Re-enable it from Customize.");
+    setView("dashboard");
+    setNotice("Module hidden. Returned to Command.");
   }, [state.settings, view]);
 
   const navigateFromSearch = (query: string) => {
     const normalized = query.toLowerCase().trim();
+    if (["account", "profile", "user", "identity"].some((term) => normalized.includes(term))) {
+      setView("account");
+      setNotice("Opened Account.");
+      return;
+    }
+    if (["customize", "customise", "theme", "logo", "appearance"].some((term) => normalized.includes(term))) {
+      setView("customize");
+      setNotice("Opened Customize.");
+      return;
+    }
+    if (["privacy", "policy"].some((term) => normalized.includes(term))) {
+      setLegalPanel("privacy");
+      setNotice("Opened Privacy Policy.");
+      return;
+    }
+    if (["terms", "conditions", "service"].some((term) => normalized.includes(term))) {
+      setLegalPanel("terms");
+      setNotice("Opened Terms and Conditions.");
+      return;
+    }
+    if (["settings", "help"].some((term) => normalized.includes(term))) {
+      setLegalPanel(normalized.includes("help") ? "help" : "settings");
+      setNotice(normalized.includes("help") ? "Opened Help." : "Opened Settings.");
+      return;
+    }
     const target = visibleNavItems.find((item) => item.terms.some((term) => normalized.includes(term)));
     if (!target) {
-      setNotice("No visible module matched. Check Customize if something is hidden.");
+      setNotice("No visible module matched.");
       return;
     }
     setView(target.view);
@@ -688,13 +777,53 @@ export default function App() {
   }
 
   const commandCenterName = getCommandCenterName(state.settings);
+  const hasAcceptedLegalTerms = hasValidLegalConsent(legalConsent);
+
+  const openLogoView = (targetView: DeckView) => {
+    setView(targetView);
+    setIsLogoMenuOpen(false);
+    setNotice(targetView === "account" ? "Opened Account." : targetView === "customize" ? "Opened Customize." : "Opened module.");
+  };
+
+  const openLegalPanel = (panel: LegalPanel) => {
+    setLegalPanel(panel);
+    setIsLogoMenuOpen(false);
+  };
+
+  const acceptLegalTerms = () => {
+    const record: LegalConsentRecord = {
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      acceptedAt: new Date().toISOString(),
+      jurisdiction: LEGAL_JURISDICTION_LABEL
+    };
+    saveLegalConsent(record);
+    setLegalConsent(record);
+    setNotice("Terms and Privacy Policy accepted.");
+  };
 
   return (
     <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
       <TechBackdrop metrics={metrics} />
       <aside className="tactical-rail" aria-label="Primary">
-        <div className="rail-brand" aria-label={commandCenterName}>
-          <LogoMark variant={state.settings.logoStyle} />
+        <div className="rail-brand-shell" ref={logoMenuRef}>
+          <button
+            className={`rail-brand ${isLogoMenuOpen ? "active" : ""}`}
+            type="button"
+            aria-label={`Open ${commandCenterName} menu`}
+            aria-haspopup="menu"
+            aria-expanded={isLogoMenuOpen}
+            onClick={() => setIsLogoMenuOpen((current) => !current)}
+          >
+            <LogoMark variant={state.settings.logoStyle} />
+          </button>
+          {isLogoMenuOpen && (
+            <LogoMenu
+              hasAcceptedLegalTerms={hasAcceptedLegalTerms}
+              onOpenView={openLogoView}
+              onOpenPanel={openLegalPanel}
+            />
+          )}
         </div>
         <nav className="rail-nav" aria-label="Primary">
           {visibleNavItems.map((item) => (
@@ -760,9 +889,337 @@ export default function App() {
         setView={setView}
         setNotice={setNotice}
       />
+      {legalPanel && (
+        <LegalInfoWindow
+          panel={legalPanel}
+          consentRecord={legalConsent}
+          onClose={() => setLegalPanel(null)}
+        />
+      )}
+      {!hasAcceptedLegalTerms && (
+        <LegalConsentGate
+          onAccept={acceptLegalTerms}
+          onOpenPanel={openLegalPanel}
+        />
+      )}
       {notice && <div className="deck-toast">{notice}</div>}
     </div>
   );
+}
+
+function LogoMenu({
+  hasAcceptedLegalTerms,
+  onOpenView,
+  onOpenPanel
+}: {
+  hasAcceptedLegalTerms: boolean;
+  onOpenView: (view: DeckView) => void;
+  onOpenPanel: (panel: LegalPanel) => void;
+}) {
+  return (
+    <div className="logo-menu" role="menu" aria-label="Northwatch menu">
+      <div className="logo-menu-head">
+        <span className="micro-label">Northwatch</span>
+        <strong>Operator menu</strong>
+        <small>{hasAcceptedLegalTerms ? "Legal consent active" : "Legal consent required"}</small>
+      </div>
+      <button type="button" role="menuitem" onClick={() => onOpenView("account")}>
+        <UserRound size={16} /> Account
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenView("customize")}>
+        <Palette size={16} /> Customize
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("settings")}>
+        <Settings2 size={16} /> Settings
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("help")}>
+        <Sparkles size={16} /> Help
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("privacy")}>
+        <Shield size={16} /> Privacy Policy
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("terms")}>
+        <LockKeyhole size={16} /> Terms and Conditions
+      </button>
+    </div>
+  );
+}
+
+function LegalConsentGate({
+  onAccept,
+  onOpenPanel
+}: {
+  onAccept: () => void;
+  onOpenPanel: (panel: LegalPanel) => void;
+}) {
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const canContinue = termsAccepted && privacyAccepted;
+
+  return (
+    <div className="legal-consent-gate">
+      <section className="legal-consent-card" role="dialog" aria-modal="true" aria-labelledby="legal-consent-title">
+        <div className="legal-consent-icon"><Shield size={20} /></div>
+        <span className="micro-label">Required agreement</span>
+        <h2 id="legal-consent-title">Review and accept the legal terms</h2>
+        <p>
+          Northwatch needs explicit agreement to the Terms and Conditions and acknowledgement of the Privacy Policy before the
+          command deck opens. The language is drafted around Kenyan data protection duties and international consent principles.
+        </p>
+        <div className="legal-link-row">
+          <button type="button" onClick={() => onOpenPanel("terms")}>
+            <LockKeyhole size={15} /> Read Terms
+          </button>
+          <button type="button" onClick={() => onOpenPanel("privacy")}>
+            <Shield size={15} /> Read Privacy Policy
+          </button>
+        </div>
+        <div className="consent-checks">
+          <label className="legal-check">
+            <input
+              type="checkbox"
+              aria-label="I agree to the Terms and Conditions"
+              checked={termsAccepted}
+              onChange={(event) => setTermsAccepted(event.target.checked)}
+            />
+            <span>
+              <strong>I agree to the Terms and Conditions.</strong>
+              <small>Use Northwatch lawfully, verify AI/intel outputs, and protect account and team access.</small>
+            </span>
+          </label>
+          <label className="legal-check">
+            <input
+              type="checkbox"
+              aria-label="I acknowledge the Privacy Policy"
+              checked={privacyAccepted}
+              onChange={(event) => setPrivacyAccepted(event.target.checked)}
+            />
+            <span>
+              <strong>I acknowledge the Privacy Policy.</strong>
+              <small>Personal data may be stored locally, synced through configured cloud services, and used only for stated purposes.</small>
+            </span>
+          </label>
+        </div>
+        <button className="legal-continue" type="button" disabled={!canContinue} onClick={onAccept}>
+          <CircleCheck size={16} /> Continue to Northwatch
+        </button>
+        <small className="legal-note">Product baseline only. Have qualified counsel review before relying on this in a regulated launch.</small>
+      </section>
+    </div>
+  );
+}
+
+function LegalInfoWindow({
+  panel,
+  consentRecord,
+  onClose
+}: {
+  panel: LegalPanel;
+  consentRecord: LegalConsentRecord | null;
+  onClose: () => void;
+}) {
+  const content = getLegalPanelContent(panel, consentRecord);
+
+  return (
+    <div className="legal-window-backdrop" onMouseDown={onClose}>
+      <section
+        className={`legal-window legal-window-${panel}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`legal-window-${panel}-title`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="legal-window-head">
+          <div>
+            <span className="micro-label">{content.eyebrow}</span>
+            <h2 id={`legal-window-${panel}-title`}>{content.title}</h2>
+            <p>{content.summary}</p>
+          </div>
+          <button type="button" aria-label="Close legal window" onClick={onClose}>
+            <X size={17} />
+          </button>
+        </div>
+        <div className="legal-copy">
+          {content.sections.map((section) => (
+            <article key={section.heading}>
+              <h3>{section.heading}</h3>
+              {section.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+            </article>
+          ))}
+        </div>
+        <div className="legal-window-foot">
+          <span>Terms v{TERMS_VERSION}</span>
+          <span>Privacy v{PRIVACY_VERSION}</span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function getLegalPanelContent(panel: LegalPanel, consentRecord: LegalConsentRecord | null): {
+  eyebrow: string;
+  title: string;
+  summary: string;
+  sections: Array<{ heading: string; body: string[] }>;
+} {
+  if (panel === "settings") {
+    return {
+      eyebrow: "System window",
+      title: "Settings",
+      summary: "Quick operational state for the command deck, consent record, and local-first storage posture.",
+      sections: [
+        {
+          heading: "Storage",
+          body: [
+            "Northwatch saves the deck in this browser by default. When Supabase is configured, signed-in users can sync a private workspace and explicitly joined team workspaces."
+          ]
+        },
+        {
+          heading: "Legal status",
+          body: [
+            consentRecord
+              ? `Terms and Privacy were accepted on ${formatDateTime(consentRecord.acceptedAt)} for ${consentRecord.jurisdiction}.`
+              : "Terms and Privacy acceptance is still required before the deck can be used."
+          ]
+        },
+        {
+          heading: "AI agent",
+          body: [
+            "Sentinel can use the configured local Ollama endpoint when enabled. Generated planning or intel output should be verified before you act on it."
+          ]
+        }
+      ]
+    };
+  }
+
+  if (panel === "help") {
+    return {
+      eyebrow: "Support",
+      title: "Help",
+      summary: "Use the rail for day-to-day modules and the logo menu for account, customization, settings, and legal documents.",
+      sections: [
+        {
+          heading: "Command flow",
+          body: [
+            "Use Command search to jump to modules, the rail for core workflows, and Sentinel for autonomous briefs or intel scans."
+          ]
+        },
+        {
+          heading: "Customization",
+          body: [
+            "Open Customize from the logo menu to change density, accent, background, visible modules, the Northwatch mark, and Ollama settings."
+          ]
+        },
+        {
+          heading: "Account and teams",
+          body: [
+            "Open Account from the logo menu to update profile details, manage Supabase sync, create team workspaces, and review privacy controls."
+          ]
+        }
+      ]
+    };
+  }
+
+  if (panel === "privacy") {
+    return {
+      eyebrow: "Legal",
+      title: "Privacy Policy",
+      summary: "This policy explains what Northwatch collects, why it is used, and the controls a user keeps under Kenyan and international privacy principles.",
+      sections: [
+        {
+          heading: "Information collected",
+          body: [
+            "Northwatch may store profile fields such as callsign, avatar URL, age, phone number, organization, command center name, email identity when cloud auth is configured, team membership, invite activity, consent version, and timestamps.",
+            "User content may include tasks, routines, projects, calendar items, workouts, books, journal entries, finance entries, watchlist intel, research notes, and autonomous scan summaries."
+          ]
+        },
+        {
+          heading: "Purpose and lawful basis",
+          body: [
+            "Data is used to operate the command deck, keep local state, sync signed-in workspaces, support team collaboration, run autonomous intel features, and protect account access.",
+            "Where consent is the basis, consent must be specific, informed, voluntary, and capable of withdrawal. Some processing may instead be necessary to provide the service, protect the workspace, or comply with legal obligations."
+          ]
+        },
+        {
+          heading: "Storage and processors",
+          body: [
+            "The browser keeps a local copy through localStorage. If Supabase is configured, workspace data syncs to the linked Supabase project. Vercel hosts the web app. Ollama requests are sent to the configured local endpoint when enabled.",
+            "Team data is shared only with members who join the selected team workspace. Invite links should be treated as confidential access credentials."
+          ]
+        },
+        {
+          heading: "Rights and controls",
+          body: [
+            "Users should be able to access, correct, delete, object to, restrict, or request portability of personal data where applicable. Kenyan users may also raise privacy complaints with the Office of the Data Protection Commissioner where the law applies.",
+            "Reset deck removes the local Northwatch deck. Cloud deletion or account deletion depends on the configured Supabase project and operational controls."
+          ]
+        },
+        {
+          heading: "Transfers, security, and retention",
+          body: [
+            "Personal data should not be transferred outside Kenya unless appropriate safeguards, valid consent, or another lawful transfer basis applies. International users may also have GDPR-style or similar regional rights.",
+            "Northwatch keeps data only as long as needed for the stated purposes or until the user deletes it, subject to backups, legal obligations, and team workspace administration."
+          ]
+        },
+        {
+          heading: "Children and sensitive data",
+          body: [
+            "Northwatch is not intended for children without appropriate guardian consent. Avoid entering sensitive personal data unless you have a clear lawful basis and suitable safeguards."
+          ]
+        }
+      ]
+    };
+  }
+
+  return {
+    eyebrow: "Legal",
+    title: "Terms and Conditions",
+    summary: "These terms govern use of Northwatch and sit alongside the Privacy Policy.",
+    sections: [
+      {
+        heading: "Use of Northwatch",
+        body: [
+          "Northwatch is a personal and team command deck for tasks, routines, projects, calendar planning, fitness, reading, journal, finances, market intel, and AI-assisted briefings.",
+          "You are responsible for the content you enter, the decisions you make from the deck, and ensuring you have a lawful basis to process any personal data you add."
+        ]
+      },
+      {
+        heading: "AI and autonomous intel",
+        body: [
+          "Sentinel, Ollama responses, and autonomous intel scans are assistive outputs. They are not legal, financial, medical, security, or investment advice.",
+          "Verify sources, prices, financial information, and legal obligations before acting. Do not rely on generated output as the sole basis for high-stakes decisions."
+        ]
+      },
+      {
+        heading: "Acceptable use",
+        body: [
+          "Do not use Northwatch to violate Kenyan law, international law, platform rules, data protection duties, intellectual property rights, or another person's privacy.",
+          "Do not use the app for unauthorized access, unlawful surveillance, harassment, credential sharing abuse, or processing data about others without a valid legal basis."
+        ]
+      },
+      {
+        heading: "Account, teams, and security",
+        body: [
+          "You are responsible for protecting your email account, browser session, local device, team invite links, and any connected Supabase or deployment credentials.",
+          "Team workspaces should be used only with people who are authorized to see the shared data. Owners should remove members when access is no longer appropriate."
+        ]
+      },
+      {
+        heading: "Privacy and compliance",
+        body: [
+          "Use of Northwatch includes agreement that data will be handled according to the Privacy Policy. Where consent is required, it can be withdrawn for optional processing, but withdrawal may limit features that require the data.",
+          "The app is drafted to support Kenya's Data Protection Act, the Data Protection Regulations, and international privacy principles such as lawful, fair, transparent, limited, secure, and rights-aware processing where they apply."
+        ]
+      },
+      {
+        heading: "Availability and changes",
+        body: [
+          "The app may change, break, or be unavailable. Local browser storage, cloud settings, third-party infrastructure, and network conditions can affect access.",
+          "When Terms or Privacy versions change, Northwatch may request fresh acceptance before continued use."
+        ]
+      }
+    ]
+  };
 }
 
 function isViewEnabled(view: DeckView, settings: DeckSettings): boolean {
@@ -1471,6 +1928,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   const [selectedId, setSelectedId] = useState("");
   const [note, setNote] = useState("");
   const [editingIntelId, setEditingIntelId] = useState<string | null>(null);
+  const autoScanRanRef = useRef(false);
   const selected = state.intel.find((item) => item.id === selectedId) ?? state.intel[0] ?? null;
   const signalCounts = intelSignals.map((item) => ({
     signal: item,
@@ -1479,11 +1937,29 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   const researchQueue = state.intel
     .filter((item) => item.signal === "researching" || item.signal === "high-priority")
     .slice(0, 4);
+  const lastAutopilotRun = state.intelAutopilot.lastRunAt ? formatDateTime(state.intelAutopilot.lastRunAt) : "Not run yet";
+
+  const runAutonomousScan = useCallback((trigger: "auto" | "manual" = "manual") => {
+    const scan = buildAutonomousIntelScan(state, getDeckMetrics(state));
+    dispatch({ type: "intel/autoscan", findings: scan.findings, summary: scan.summary, scannedAt: scan.scannedAt });
+    setNotice(trigger === "auto" ? "Sentinel autopilot refreshed intel." : "Autonomous intel scan complete.");
+  }, [state, dispatch, setNotice]);
 
   useEffect(() => {
     if (selectedId && state.intel.some((item) => item.id === selectedId)) return;
     setSelectedId(state.intel[0]?.id ?? "");
   }, [selectedId, state.intel]);
+
+  useEffect(() => {
+    if (!state.intelAutopilot.enabled || autoScanRanRef.current) return;
+    const lastRun = state.intelAutopilot.lastRunAt ? new Date(state.intelAutopilot.lastRunAt).getTime() : 0;
+    const isStale = !lastRun || Date.now() - lastRun > 30 * 60 * 1000;
+    if (!isStale) return;
+
+    autoScanRanRef.current = true;
+    const timer = window.setTimeout(() => runAutonomousScan("auto"), 500);
+    return () => window.clearTimeout(timer);
+  }, [state.intelAutopilot.enabled, state.intelAutopilot.lastRunAt, runAutonomousScan]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1559,13 +2035,13 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   };
 
   return (
-    <ModuleShell title="Market Intel" description="Track stocks, companies, trends, crypto, funds, and news topics without losing the thesis.">
+    <ModuleShell title="Market Intel" description="Sentinel seeds and refreshes the watchboard from your projects, tasks, cashflow, and tracked topics.">
       <section className="life-layout intel-layout">
         <article className="life-hero intel-hero">
           <div>
             <span className="micro-label">Research command</span>
             <h2>Watchtower</h2>
-            <p>{state.intel.length === 0 ? "Build a watchlist before capital or attention moves." : `${state.intel.length} item${state.intel.length === 1 ? "" : "s"} under observation.`}</p>
+            <p>{state.intel.length === 0 ? "Autopilot is ready to seed the board before capital or attention moves." : `${state.intel.length} item${state.intel.length === 1 ? "" : "s"} under observation.`}</p>
           </div>
           <div className="intel-radar">
             <Newspaper size={24} />
@@ -1583,6 +2059,24 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
               </div>
             ))}
           </div>
+        </section>
+        <section className="deck-panel life-panel autopilot-panel">
+          <PanelHead
+            title="Sentinel autopilot"
+            action={<button type="button" onClick={() => runAutonomousScan("manual")}><Radar size={15} /> Scan now</button>}
+          />
+          <div className="autopilot-status">
+            <span className="source-pill">{state.intelAutopilot.enabled ? "autonomous" : "paused"}</span>
+            <strong>{state.intelAutopilot.lastSummary}</strong>
+            <p>Last run: {lastAutopilotRun}</p>
+          </div>
+          <button
+            className="autopilot-toggle"
+            type="button"
+            onClick={() => dispatch({ type: "intel/autopilot/toggle", enabled: !state.intelAutopilot.enabled })}
+          >
+            <Bot size={15} /> {state.intelAutopilot.enabled ? "Pause autopilot" : "Enable autopilot"}
+          </button>
         </section>
         <section className="deck-panel life-panel">
           <PanelHead title="Research queue" />
@@ -1626,7 +2120,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
         <section className="deck-panel">
           <PanelHead title="Tracked watchlist" />
           <div className="intel-list">
-            {state.intel.length === 0 && <EmptyState>No intel tracked yet.</EmptyState>}
+            {state.intel.length === 0 && <EmptyState>No intel tracked yet. Sentinel autopilot can seed the first scan.</EmptyState>}
             {state.intel.map((item) => (
               <div className={`intel-row ${selected?.id === item.id ? "active" : ""}`} key={item.id}>
                 <div>
@@ -3027,6 +3521,25 @@ function AgentDock({
   const sendPrompt = async (rawPrompt: string) => {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
+
+    if (/(scan|refresh|autonomous|research|brief)/i.test(prompt) && /(intel|market|watch|signal)/i.test(prompt)) {
+      const scan = buildAutonomousIntelScan(state, metrics);
+      dispatch({ type: "intel/autoscan", findings: scan.findings, summary: scan.summary, scannedAt: scan.scannedAt });
+      setView("intel");
+      setNotice("Sentinel refreshed autonomous intel.");
+      setMessages((current) => [
+        ...current,
+        { id: `operator-${Date.now()}`, role: "operator", body: prompt },
+        {
+          id: `sentinel-${Date.now()}`,
+          role: "agent",
+          body: `${scan.summary}\nI moved you to Intel so you can review the generated findings and notes.`
+        }
+      ]);
+      setInput("");
+      setIsOpen(true);
+      return;
+    }
 
     if (/create|add|make/i.test(prompt) && /focus|task|order/i.test(prompt)) {
       const title = getFocusTaskTitle(state);
