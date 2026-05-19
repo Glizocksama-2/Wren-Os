@@ -24,6 +24,7 @@ export function createApp(options = {}) {
 
   app.get("/health", (_request, response) => response.json({ ok: true, service: "northwatch-auth", checkedAt: new Date().toISOString() }));
   app.use("/auth", createAuthRouter({ express, authService }));
+  app.use("/api/auth", createAuthRouter({ express, authService }));
 
   if (userDataDb) {
     const protectedApi = authenticate({ authService });
