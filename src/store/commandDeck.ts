@@ -753,19 +753,42 @@ export function getCommandDeckStorageKey(userId?: string | null): string {
 export function loadCommandDeck(storage: Storage = window.localStorage, userId?: string | null): CommandDeckState {
   const storageKey = getCommandDeckStorageKey(userId);
   if (userId) {
+    const browserDeck = loadBrowserDeckFallback(storage);
     const rawUserDeck = storage.getItem(storageKey);
-    if (!rawUserDeck) return createFreshDeck();
+    if (!rawUserDeck) {
+      if (browserDeck) {
+        saveCommandDeck(browserDeck, storage, userId);
+        return browserDeck;
+      }
+
+      return createFreshDeck();
+    }
 
     try {
-      return normalizeCommandDeck(JSON.parse(rawUserDeck) as Partial<CommandDeckState>);
+      const userDeck = normalizeCommandDeck(JSON.parse(rawUserDeck) as Partial<CommandDeckState>);
+      if (browserDeck && !hasMeaningfulDeckData(userDeck)) {
+        saveCommandDeck(browserDeck, storage, userId);
+        return browserDeck;
+      }
+
+      return userDeck;
     } catch {
+      if (browserDeck) {
+        saveCommandDeck(browserDeck, storage, userId);
+        return browserDeck;
+      }
+
       return createFreshDeck();
     }
   }
 
+  return loadBrowserDeckFallback(storage) ?? createFreshDeck();
+}
+
+function loadBrowserDeckFallback(storage: Storage): CommandDeckState | null {
   const migratedLegacyDeck = migrateLegacyWorkspace(storage.getItem(LEGACY_WORKSPACE_KEY));
-  const raw = storage.getItem(storageKey) ?? storage.getItem(LEGACY_COMMAND_DECK_KEY);
-  if (!raw) return migratedLegacyDeck ?? createFreshDeck();
+  const raw = storage.getItem(COMMAND_DECK_STORAGE_KEY) ?? storage.getItem(LEGACY_COMMAND_DECK_KEY);
+  if (!raw) return migratedLegacyDeck;
 
   try {
     const parsed = JSON.parse(raw) as Partial<CommandDeckState>;
@@ -774,9 +797,9 @@ export function loadCommandDeck(storage: Storage = window.localStorage, userId?:
       return migratedLegacyDeck;
     }
 
-    return normalized;
+    return hasMeaningfulDeckData(normalized) ? normalized : migratedLegacyDeck;
   } catch {
-    return migratedLegacyDeck ?? createFreshDeck();
+    return migratedLegacyDeck;
   }
 }
 
@@ -1092,6 +1115,17 @@ function hasUserDeckData(state: CommandDeckState): boolean {
     state.finances.length > 0 ||
     state.intel.length > 0
   );
+}
+
+function hasMeaningfulDeckData(state: CommandDeckState): boolean {
+  return hasUserDeckData(state) || hasCustomizedSettings(state);
+}
+
+function hasCustomizedSettings(state: CommandDeckState): boolean {
+  return Object.entries(freshCommandDeck.settings).some(([key, defaultValue]) => {
+    const settingKey = key as keyof DeckSettings;
+    return state.settings[settingKey] !== defaultValue;
+  });
 }
 
 function getLegacyProjectNextAction(projectId: string, legacyTasks: Record<string, unknown>[]): string {

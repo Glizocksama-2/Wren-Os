@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { COMMAND_DECK_STORAGE_KEY, freshCommandDeck, loadCommandDeck, normalizeCommandDeck, reduceCommandDeck, type CommandDeckState } from "./commandDeck";
+import { COMMAND_DECK_STORAGE_KEY, freshCommandDeck, getCommandDeckStorageKey, loadCommandDeck, normalizeCommandDeck, reduceCommandDeck, type CommandDeckState } from "./commandDeck";
 
 function makeTask(title: string): CommandDeckState["tasks"][number] {
   const timestamp = "2026-05-12T09:00:00.000Z";
@@ -135,6 +135,42 @@ describe("command deck cloud import", () => {
     expect(deck.tasks.some((task) => task.title === "Current deck task")).toBe(true);
     expect(deck.tasks.some((task) => task.title === "Legacy only")).toBe(false);
     expect(storage.getItem("wren-os.workspace.v1")).not.toBeNull();
+  });
+
+  it("adopts the existing browser deck when a new authenticated account has no saved deck yet", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      COMMAND_DECK_STORAGE_KEY,
+      JSON.stringify({
+        ...freshCommandDeck,
+        tasks: [makeTask("Old browser task")],
+        settings: { ...freshCommandDeck.settings, callsign: "Original Operator" }
+      })
+    );
+
+    const deck = loadCommandDeck(storage, "user-1");
+
+    expect(deck.settings.callsign).toBe("Original Operator");
+    expect(deck.tasks.some((task) => task.title === "Old browser task")).toBe(true);
+    expect(storage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Old browser task");
+    expect(storage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Old browser task");
+  });
+
+  it("replaces a fresh authenticated deck with the previous browser deck to recover first-login data", () => {
+    const storage = createMemoryStorage();
+    storage.setItem(
+      COMMAND_DECK_STORAGE_KEY,
+      JSON.stringify({
+        ...freshCommandDeck,
+        tasks: [makeTask("Recover this task")]
+      })
+    );
+    storage.setItem(getCommandDeckStorageKey("user-1"), JSON.stringify(freshCommandDeck));
+
+    const deck = loadCommandDeck(storage, "user-1");
+
+    expect(deck.tasks.some((task) => task.title === "Recover this task")).toBe(true);
+    expect(storage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Recover this task");
   });
 
   it("replaces the local deck with a normalized cloud deck", () => {

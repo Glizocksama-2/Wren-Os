@@ -124,7 +124,7 @@ describe("Northwatch React auth", () => {
     expect(await screen.findByText("Session expired. Please log in again.")).toBeInTheDocument();
   });
 
-  it("shows the authenticated display name and keeps fallback deck state isolated per user", () => {
+  it("shows the authenticated display name and adopts the previous browser deck for a new account", () => {
     window.localStorage.setItem(COMMAND_DECK_STORAGE_KEY, JSON.stringify({ settings: { callsign: "Old Browser User" } }));
 
     render(<App authUser={authUser} onAuthLogout={vi.fn()} />);
@@ -132,8 +132,8 @@ describe("Northwatch React auth", () => {
     const topbar = screen.getAllByRole("banner").find((element) => element.classList.contains("deck-topbar")) as HTMLElement;
     expect(within(topbar).getByText("Sam Operator")).toBeInTheDocument();
     expect(within(topbar).getByText("SO")).toBeInTheDocument();
-    expect(window.localStorage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Operator");
-    expect(screen.queryByText("Old Browser User")).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Old Browser User");
+    expect(screen.getByText("Old Browser User")).toBeInTheDocument();
   });
 });
 
