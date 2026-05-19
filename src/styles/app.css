@@ -545,6 +545,31 @@ p {
   font-size: 12px;
 }
 
+.activity-feed-banner {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-bottom: 1px solid rgb(var(--accent-rgb) / 0.22);
+  background: rgb(var(--accent-rgb) / 0.1);
+  color: var(--text);
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.activity-feed-banner button {
+  border: 1px solid rgb(var(--accent-rgb) / 0.34);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 900;
+  padding: 6px 9px;
+}
+
 .workspace-status-pill,
 .cloud-status-pill,
 .topbar-icon-button {
@@ -1022,6 +1047,18 @@ p {
   text-align: left;
 }
 
+.ops-row.kanban-priority-urgent {
+  border-left: 4px solid var(--danger);
+}
+
+.ops-row.kanban-priority-normal {
+  border-left: 4px solid var(--muted);
+}
+
+.ops-row.kanban-priority-later {
+  border-left: 4px solid var(--cyan);
+}
+
 .project-row {
   grid-template-columns: minmax(0, 1fr) minmax(180px, auto) auto;
 }
@@ -1065,6 +1102,42 @@ p {
   padding: 0 9px;
 }
 
+.priority-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.priority-tag-row .priority-tag {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.03);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  padding: 0 7px;
+}
+
+.priority-tag-row .priority-tag.active {
+  color: var(--text);
+}
+
+.priority-tag-urgent.active {
+  border-color: rgb(255 94 77 / 0.58);
+  background: rgb(255 94 77 / 0.16);
+}
+
+.priority-tag-normal.active {
+  border-color: rgb(138 167 179 / 0.5);
+  background: rgb(138 167 179 / 0.14);
+}
+
+.priority-tag-later.active {
+  border-color: rgb(79 231 255 / 0.44);
+  background: rgb(79 231 255 / 0.12);
+}
+
 .card-actions {
   display: flex;
   gap: 6px;
@@ -1079,12 +1152,44 @@ p {
 }
 
 .empty-state {
+  display: grid;
+  place-items: center;
+  gap: 8px;
   margin: 12px;
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
   color: var(--faint);
   padding: 18px 14px;
   text-align: center;
+}
+
+.empty-state svg {
+  color: var(--accent);
+}
+
+.empty-state strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.empty-state span {
+  max-width: 34ch;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.empty-state button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.35);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.1);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 0 10px;
 }
 
 .github-scan-strip {
@@ -2573,6 +2678,95 @@ p {
   padding: 12px clamp(18px, 3vw, 26px);
 }
 
+.session-token-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.035);
+  padding: 14px;
+}
+
+.session-token-card code {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #02070a;
+  color: var(--accent);
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.session-token-card button,
+.session-expired-screen button {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.35);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.12);
+  color: var(--accent);
+  font-weight: 900;
+  padding: 10px 12px;
+}
+
+.shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(0 4 8 / 0.66);
+  backdrop-filter: blur(16px);
+}
+
+.shortcut-card {
+  width: min(520px, calc(100vw - 28px));
+  overflow: hidden;
+  border: 1px solid rgb(var(--accent-rgb) / 0.36);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgb(9 20 27 / 0.98), rgb(4 9 14 / 0.98)),
+    var(--surface);
+  box-shadow: 0 28px 90px rgb(0 0 0 / 0.56);
+}
+
+.shortcut-map {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+
+.shortcut-map div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(255 255 255 / 0.035);
+  padding: 10px 12px;
+}
+
+.shortcut-map kbd {
+  min-width: 76px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.34);
+  border-radius: var(--radius);
+  background: rgb(var(--accent-rgb) / 0.1);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.shortcut-map span {
+  color: var(--text);
+  font-weight: 850;
+}
+
 .rail-brand {
   border-color: rgb(79 231 255 / 0.32);
   background:
@@ -2761,6 +2955,65 @@ p {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.agent-healthbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-health-pill {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "dot label"
+    "dot time";
+  align-items: center;
+  gap: 2px 8px;
+  border: 1px solid rgb(79 231 255 / 0.16);
+  border-radius: var(--radius);
+  background: rgb(3 9 13 / 0.52);
+  padding: 8px;
+}
+
+.agent-health-pill i {
+  grid-area: dot;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.agent-health-pill.alive i {
+  background: var(--green);
+  box-shadow: 0 0 14px rgb(85 210 131 / 0.6);
+}
+
+.agent-health-pill.dead i {
+  background: var(--danger);
+  box-shadow: 0 0 14px rgb(255 94 77 / 0.55);
+}
+
+.agent-health-pill.idle i {
+  background: var(--accent);
+  box-shadow: 0 0 14px rgb(var(--accent-rgb) / 0.55);
+}
+
+.agent-health-pill strong {
+  grid-area: label;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-health-pill em {
+  grid-area: time;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
 }
 
 .hero-signal-row span,
@@ -3259,6 +3512,7 @@ p {
 .deck-app[data-background="white"] .team-member-row,
 .deck-app[data-background="white"] .agent-context div,
 .deck-app[data-background="white"] .agent-message,
+.deck-app[data-background="white"] .agent-health-pill,
 .deck-app[data-background="white"] .agent-header button,
 .deck-app[data-background="white"] .agent-input button,
 .deck-app[data-background="white"] .agent-route-row button,
@@ -3423,59 +3677,97 @@ p {
 
   .deck-app {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     width: 100%;
   }
 
   .tactical-rail {
-    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 32;
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
     max-width: 100vw;
     min-width: 0;
-    overflow-x: auto;
+    overflow: visible;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     border-right: 0;
-    border-bottom: 1px solid var(--line);
-    padding: 10px;
+    border-top: 1px solid var(--line);
+    border-bottom: 0;
+    padding: 7px 10px;
   }
 
   .rail-nav {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     flex: 1 1 auto;
+    gap: 4px;
     min-width: 0;
     margin: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: hidden;
   }
 
   .rail-brand,
   .rail-brand-shell,
-  .rail-footer,
   .rail-button {
     flex: 0 0 auto;
   }
 
+  .rail-brand {
+    width: 38px;
+    height: 38px;
+  }
+
+  .rail-brand .northwatch-logo-orbit-watch {
+    width: 31px;
+    height: 31px;
+  }
+
+  .rail-button {
+    width: 100%;
+    height: 32px;
+  }
+
+  .rail-button svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .rail-button::after {
+    inset: auto 8px 4px;
+  }
+
+  .rail-label {
+    display: none;
+  }
+
   .logo-menu {
-    top: calc(100% + 10px);
+    top: auto;
+    bottom: calc(100% + 10px);
     left: 0;
     width: min(276px, calc(100vw - 24px));
   }
 
   .logo-menu::before {
-    top: auto;
+    top: 100%;
     right: auto;
-    bottom: 100%;
+    bottom: auto;
     left: 18px;
     width: 1px;
     height: 10px;
   }
 
   .rail-footer {
-    margin-left: auto;
+    display: none;
   }
 
   .deck-screen {
     grid-template-rows: auto minmax(0, 1fr);
+    grid-column: 1;
+    width: 100%;
   }
 
   .deck-topbar,
@@ -3489,7 +3781,7 @@ p {
   }
 
   .deck-content {
-    padding: 16px 12px 120px;
+    padding: 16px 12px 150px;
   }
 
   .hero-command {
@@ -3583,7 +3875,7 @@ p {
 
   .agent-dock {
     right: 10px;
-    bottom: 10px;
+    bottom: 82px;
     width: calc(100vw - 20px);
     max-height: 58vh;
   }
@@ -3593,6 +3885,10 @@ p {
   }
 
   .agent-context {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-healthbar {
     grid-template-columns: 1fr;
   }
 

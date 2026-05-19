@@ -1,12 +1,33 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import App, { AuthGate, LEGAL_CONSENT_STORAGE_KEY, PRIVACY_VERSION, TERMS_VERSION } from "./App";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import App, {
+  AuthGate,
+  LEGAL_CONSENT_STORAGE_KEY,
+  PRIVACY_VERSION,
+  SESSION_TOKEN_STORAGE_KEY,
+  TERMS_VERSION
+} from "./App";
 import { COMMAND_DECK_STORAGE_KEY } from "./store/commandDeck";
 
 describe("Northwatch command deck", () => {
   beforeEach(() => {
     window.localStorage.clear();
     acceptLegalTermsForTests();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        agents: [
+          { id: "sentinel", status: "alive", checkedAt: "2026-05-19T08:00:00.000Z", detail: "ok" },
+          { id: "ollama", status: "idle", checkedAt: "2026-05-19T08:00:00.000Z", detail: "idle" },
+          { id: "telegram", status: "alive", checkedAt: "2026-05-19T08:00:00.000Z", detail: "ok" }
+        ]
+      })
+    }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("requires explicit terms and privacy agreement before opening the deck", () => {
@@ -96,7 +117,7 @@ describe("Northwatch command deck", () => {
     fireEvent.click(screen.getByRole("button", { name: /save task/i }));
 
     taskRow = screen.getByText("Draft revised plan").closest(".ops-row") as HTMLElement;
-    expect(within(taskRow).getByText(/critical/i)).toBeInTheDocument();
+    expect(within(taskRow).getAllByText(/urgent/i).length).toBeGreaterThan(0);
     fireEvent.click(within(taskRow).getByRole("button", { name: /delete draft revised plan/i }));
     expect(screen.queryByText("Draft revised plan")).not.toBeInTheDocument();
 
@@ -224,6 +245,59 @@ describe("Northwatch command deck", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /pause autopilot/i }));
     expect(screen.getByRole("button", { name: /enable autopilot/i })).toBeInTheDocument();
+  });
+
+  it("shows agent health and can send a kanban card to Telegram", async () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open sentinel agent/i }));
+    expect(await screen.findByLabelText("Agent API status")).toBeInTheDocument();
+    expect(screen.getByText("Sentinel")).toBeInTheDocument();
+    expect(screen.getByText("Telegram")).toBeInTheDocument();
+
+    clickNav("To Do");
+    fireEvent.change(screen.getByLabelText("Task title"), { target: { value: "Ship ops panel" } });
+    fireEvent.click(screen.getByRole("button", { name: /add task/i }));
+
+    const taskRow = screen
+      .getAllByText("Ship ops panel")
+      .find((item) => item.closest(".ops-row"))
+      ?.closest(".ops-row") as HTMLElement;
+    fireEvent.click(within(taskRow).getByRole("button", { name: "URGENT" }));
+    expect(taskRow).toHaveClass("kanban-priority-urgent");
+
+    fireEvent.click(within(taskRow).getByRole("button", { name: /send to telegram/i }));
+    await waitFor(() =>
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "/api/telegram/glizocksamabot",
+        expect.objectContaining({ method: "POST" })
+      )
+    );
+  });
+
+  it("handles session expiry, keyboard shortcuts, and dynamic document titles", () => {
+    window.localStorage.setItem(
+      SESSION_TOKEN_STORAGE_KEY,
+      JSON.stringify({
+        token: "nw_expired_token",
+        createdAt: "2026-05-01T08:00:00.000Z",
+        rotatedAt: "2026-05-01T08:00:00.000Z"
+      })
+    );
+
+    render(<App />);
+
+    expect(screen.getByRole("heading", { name: "Session expired." })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /rotate token and continue/i }));
+    expect(screen.getByRole("heading", { name: /your command deck, live/i })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "g" });
+    fireEvent.keyDown(window, { key: "k" });
+    expect(screen.getByRole("heading", { name: "To Do List" })).toBeInTheDocument();
+    expect(document.title).toBe("Kanban · Northwatch");
+
+    fireEvent.keyDown(window, { key: "?" });
+    expect(screen.getByRole("heading", { name: "Shortcuts" })).toBeInTheDocument();
   });
 
   it("keeps account, customize, and legal windows under the logo menu", () => {

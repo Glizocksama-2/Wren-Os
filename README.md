@@ -42,6 +42,22 @@ Open the logo button > Customize to change the Sentinel endpoint or model after 
 
 If the app is served from a different local origin and the browser blocks Ollama, add that origin to `OLLAMA_ORIGINS`, then restart Ollama. For Vite development, allow the current local app origin such as `http://127.0.0.1:5174`, `http://127.0.0.1:5173`, or the matching `localhost` URL.
 
+## Telegram Bridge
+
+Kanban cards, journal docs, and agent alerts can be sent to `@glizocksamabot` through the Vercel serverless bridge at `/api/telegram/glizocksamabot`.
+
+Configure one of these server-side env options in Vercel:
+
+```bash
+TELEGRAM_WEBHOOK_URL=https://your-existing-webhook.example
+
+# Or use Telegram's sendMessage API directly:
+TELEGRAM_BOT_TOKEN=123456:bot-token
+TELEGRAM_CHAT_ID=123456789
+```
+
+The `/health` endpoint reports whether the Telegram bridge is configured.
+
 To refresh GitHub/Vercel project sources from authenticated local CLIs:
 
 ```bash

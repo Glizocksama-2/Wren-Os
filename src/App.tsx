@@ -93,6 +93,7 @@ import {
   type IntelItem,
   type IntelKind,
   type IntelSignal,
+  type KanbanPriority,
   type LogoStyle,
   type Priority,
   type RoutineCadence,
@@ -170,14 +171,47 @@ export const LEGAL_CONSENT_STORAGE_KEY = "northwatch.legal-consent.v1";
 export const TERMS_VERSION = "2026-05-19";
 export const PRIVACY_VERSION = "2026-05-19";
 const LEGAL_JURISDICTION_LABEL = "Kenyan data protection law and applicable international privacy principles";
+export const SESSION_TOKEN_STORAGE_KEY = "northwatch.session-token.v1";
+export const SESSION_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const AGENT_HEALTH_POLL_MS = 30000;
+const ACTIVITY_FEED_POLL_MS = 60000;
+const TELEGRAM_WEBHOOK_ENDPOINT = "/api/telegram/glizocksamabot";
 
 type LegalPanel = "settings" | "help" | "privacy" | "terms";
+type AgentHealthStatus = "alive" | "dead" | "idle";
 
 export interface LegalConsentRecord {
   termsVersion: string;
   privacyVersion: string;
   acceptedAt: string;
   jurisdiction: string;
+}
+
+export interface SessionTokenRecord {
+  token: string;
+  createdAt: string;
+  rotatedAt: string;
+}
+
+interface AgentHealthRecord {
+  id: string;
+  label: string;
+  status: AgentHealthStatus;
+  checkedAt: string | null;
+  detail: string;
+}
+
+interface ActivityFeedItem {
+  id: string;
+  label: string;
+  createdAt: string;
+}
+
+interface TelegramPayload {
+  kind: "kanban-card" | "doc" | "agent-alert";
+  title: string;
+  body: string;
+  meta?: string;
 }
 
 function loadLegalConsent(): LegalConsentRecord | null {
@@ -201,6 +235,41 @@ export function hasValidLegalConsent(record: LegalConsentRecord | null): boolean
       record.privacyVersion === PRIVACY_VERSION &&
       record.jurisdiction === LEGAL_JURISDICTION_LABEL
   );
+}
+
+function loadOrCreateSessionToken(): SessionTokenRecord {
+  try {
+    const stored = window.localStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored) as Partial<SessionTokenRecord>;
+      if (parsed.token && parsed.createdAt && parsed.rotatedAt) {
+        return parsed as SessionTokenRecord;
+      }
+    }
+  } catch {
+    // Fall through to a fresh token.
+  }
+
+  const token = createSessionToken();
+  saveSessionToken(token);
+  return token;
+}
+
+function saveSessionToken(record: SessionTokenRecord) {
+  window.localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, JSON.stringify(record));
+}
+
+function createSessionToken(): SessionTokenRecord {
+  const now = new Date().toISOString();
+  return {
+    token: `nw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`,
+    createdAt: now,
+    rotatedAt: now
+  };
+}
+
+function isSessionTokenExpired(record: SessionTokenRecord): boolean {
+  return Date.now() - new Date(record.createdAt).getTime() > SESSION_TOKEN_MAX_AGE_MS;
 }
 
 const agentQuickPrompts = [
@@ -228,10 +297,15 @@ export default function App() {
   const [isLogoMenuOpen, setIsLogoMenuOpen] = useState(false);
   const [legalPanel, setLegalPanel] = useState<LegalPanel | null>(null);
   const [legalConsent, setLegalConsent] = useState<LegalConsentRecord | null>(() => loadLegalConsent());
+  const [sessionToken, setSessionToken] = useState<SessionTokenRecord>(() => loadOrCreateSessionToken());
+  const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
+  const [newActivityCount, setNewActivityCount] = useState(0);
   const latestDeckRef = useRef(state);
   const saveTimerRef = useRef<number | null>(null);
   const pendingInviteAttemptRef = useRef<string | null>(null);
   const logoMenuRef = useRef<HTMLDivElement | null>(null);
+  const lastActivityPollRef = useRef(state.updatedAt);
+  const shortcutChordRef = useRef<{ key: string; armedAt: number } | null>(null);
   const metrics = useMemo(() => getDeckMetrics(state), [state]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => isViewEnabled(item.view, state.settings)), [state.settings]);
   const activeTeam = useMemo(
@@ -440,6 +514,91 @@ export default function App() {
     const timer = window.setTimeout(() => setNotice(""), 2500);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    const label = getDocumentTitleForView(view);
+    document.title = `${label} · Northwatch`;
+  }, [view]);
+
+  useEffect(() => {
+    const handleNewItem = () => {
+      const targetView = view === "dashboard" || view === "account" || view === "customize" ? "todo" : view;
+      if (targetView !== view) {
+        setView(targetView);
+      }
+      window.setTimeout(() => focusNewItemField(targetView), 0);
+      setNotice(`Ready to add ${getNewItemLabel(targetView)}.`);
+    };
+
+    window.addEventListener("northwatch:new-item", handleNewItem);
+    return () => window.removeEventListener("northwatch:new-item", handleNewItem);
+  }, [view]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
+      if (isTyping) return;
+
+      if (event.key === "?") {
+        event.preventDefault();
+        setIsShortcutOverlayOpen((current) => !current);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setIsShortcutOverlayOpen(false);
+        shortcutChordRef.current = null;
+        return;
+      }
+
+      const normalized = event.key.toLowerCase();
+      const chord = shortcutChordRef.current;
+      if (chord?.key === "g" && Date.now() - chord.armedAt < 1200) {
+        const targetView = getShortcutView(normalized);
+        shortcutChordRef.current = null;
+        if (targetView) {
+          event.preventDefault();
+          setView(targetView);
+          setNotice(`Opened ${getDocumentTitleForView(targetView)}.`);
+        }
+        return;
+      }
+
+      if (normalized === "g") {
+        shortcutChordRef.current = { key: "g", armedAt: Date.now() };
+        return;
+      }
+
+      if (normalized === "n") {
+        event.preventDefault();
+        window.dispatchEvent(new Event("northwatch:new-item"));
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const pollActivityFeed = async () => {
+      try {
+        await fetch(`/api/activity?since=${encodeURIComponent(lastActivityPollRef.current)}`, { cache: "no-store" });
+      } catch {
+        // Static/local builds may not have an activity API; the local state snapshot still drives the banner.
+      }
+
+      const nextFeed = buildLocalActivityFeed(latestDeckRef.current);
+      const freshEvents = nextFeed.filter((event) => new Date(event.createdAt).getTime() > new Date(lastActivityPollRef.current).getTime());
+      if (freshEvents.length > 0) {
+        setNewActivityCount((current) => current + freshEvents.length);
+        lastActivityPollRef.current = freshEvents[0].createdAt;
+      }
+    };
+
+    const timer = window.setInterval(pollActivityFeed, ACTIVITY_FEED_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!isLogoMenuOpen) return;
@@ -802,6 +961,17 @@ export default function App() {
     setNotice("Terms and Privacy Policy accepted.");
   };
 
+  const rotateSessionToken = () => {
+    const nextToken = createSessionToken();
+    saveSessionToken(nextToken);
+    setSessionToken(nextToken);
+    setNotice("Session token rotated.");
+  };
+
+  if (isSessionTokenExpired(sessionToken)) {
+    return <SessionExpiredScreen sessionToken={sessionToken} onRotate={rotateSessionToken} />;
+  }
+
   return (
     <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
       <TechBackdrop metrics={metrics} />
@@ -847,6 +1017,16 @@ export default function App() {
 
       <main className="deck-screen">
         <TopBar settings={state.settings} cloudStatus={cloudStatus} workspaceLabel={workspaceLabel} onCommand={navigateFromSearch} onSignOut={signOut} />
+        {newActivityCount > 0 && (
+          <ActivityFeedBanner
+            count={newActivityCount}
+            onJump={() => {
+              setView("dashboard");
+              setNewActivityCount(0);
+              setNotice("Activity feed acknowledged.");
+            }}
+          />
+        )}
         <section className="deck-content">
           {view === "dashboard" && <Dashboard state={state} metrics={metrics} dispatch={dispatch} setView={setView} setNotice={setNotice} />}
           {view === "todo" && <TodoModule state={state} dispatch={dispatch} setNotice={setNotice} />}
@@ -893,6 +1073,8 @@ export default function App() {
         <LegalInfoWindow
           panel={legalPanel}
           consentRecord={legalConsent}
+          sessionToken={sessionToken}
+          onRotateSessionToken={rotateSessionToken}
           onClose={() => setLegalPanel(null)}
         />
       )}
@@ -902,6 +1084,7 @@ export default function App() {
           onOpenPanel={openLegalPanel}
         />
       )}
+      {isShortcutOverlayOpen && <ShortcutOverlay onClose={() => setIsShortcutOverlayOpen(false)} />}
       {notice && <div className="deck-toast">{notice}</div>}
     </div>
   );
@@ -1012,13 +1195,18 @@ function LegalConsentGate({
 function LegalInfoWindow({
   panel,
   consentRecord,
+  sessionToken,
+  onRotateSessionToken,
   onClose
 }: {
   panel: LegalPanel;
   consentRecord: LegalConsentRecord | null;
+  sessionToken: SessionTokenRecord;
+  onRotateSessionToken: () => void;
   onClose: () => void;
 }) {
   const content = getLegalPanelContent(panel, consentRecord);
+  const tokenAgeDays = Math.max(0, Math.floor((Date.now() - new Date(sessionToken.createdAt).getTime()) / (24 * 60 * 60 * 1000)));
 
   return (
     <div className="legal-window-backdrop" onMouseDown={onClose}>
@@ -1046,6 +1234,16 @@ function LegalInfoWindow({
               {section.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
             </article>
           ))}
+          {panel === "settings" && (
+            <article className="session-token-card">
+              <h3>Session token</h3>
+              <p>Current token age: {tokenAgeDays} day{tokenAgeDays === 1 ? "" : "s"}. Tokens expire after 7 days.</p>
+              <code>{maskSessionToken(sessionToken.token)}</code>
+              <button type="button" onClick={onRotateSessionToken}>
+                <RotateCcw size={15} /> Rotate token
+              </button>
+            </article>
+          )}
         </div>
         <div className="legal-window-foot">
           <span>Terms v{TERMS_VERSION}</span>
@@ -1438,6 +1636,71 @@ export function AuthGate({
   );
 }
 
+function SessionExpiredScreen({ sessionToken, onRotate }: { sessionToken: SessionTokenRecord; onRotate: () => void }) {
+  return (
+    <main className="auth-screen session-expired-screen">
+      <section className="auth-panel">
+        <div className="auth-mark">
+          <KeyRound size={24} />
+        </div>
+        <span className="micro-label">Token security</span>
+        <h1>Session expired.</h1>
+        <p>Your local Northwatch session token was created on {formatDateTime(sessionToken.createdAt)} and is older than the 7 day limit.</p>
+        <button type="button" onClick={onRotate}>
+          <RotateCcw size={16} /> Rotate token and continue
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function ActivityFeedBanner({ count, onJump }: { count: number; onJump: () => void }) {
+  return (
+    <div className="activity-feed-banner" role="status">
+      <span>{count} new event{count === 1 ? "" : "s"}</span>
+      <button type="button" onClick={onJump}>
+        Jump to feed
+      </button>
+    </div>
+  );
+}
+
+function ShortcutOverlay({ onClose }: { onClose: () => void }) {
+  const shortcuts = [
+    ["G + K", "Kanban / To Do"],
+    ["G + P", "Projects"],
+    ["G + D", "Docs / Journal"],
+    ["G + C", "Content Queue / Intel"],
+    ["N", "New context item"],
+    ["?", "Shortcut map"]
+  ];
+
+  return (
+    <div className="shortcut-overlay" role="dialog" aria-modal="true" aria-labelledby="shortcut-title" onMouseDown={onClose}>
+      <section className="shortcut-card" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="legal-window-head">
+          <div>
+            <span className="micro-label">Keyboard command</span>
+            <h2 id="shortcut-title">Shortcuts</h2>
+            <p>Fast movement around the Northwatch command deck.</p>
+          </div>
+          <button type="button" aria-label="Close shortcuts" onClick={onClose}>
+            <X size={17} />
+          </button>
+        </div>
+        <div className="shortcut-map">
+          {shortcuts.map(([combo, action]) => (
+            <div key={combo}>
+              <kbd>{combo}</kbd>
+              <span>{action}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function Dashboard({
   state,
   metrics,
@@ -1636,7 +1899,15 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
       <TwoColumn titleLeft="Active" titleRight="Done">
         <ItemList empty="No active tasks.">
           {open.map((task) => (
-            <ActionRow key={task.id} title={task.title} meta={`${task.priority}${task.dueDate ? ` - ${formatDate(task.dueDate)}` : ""}`}>
+            <ActionRow key={task.id} title={task.title} meta={`${getKanbanPriorityLabel(task.kanbanPriority)}${task.dueDate ? ` - ${formatDate(task.dueDate)}` : ""}`} priority={task.kanbanPriority}>
+              <PriorityTagControls
+                value={task.kanbanPriority}
+                onChange={(nextPriority) => dispatch({ type: "task/kanban-priority", id: task.id, priority: nextPriority })}
+              />
+              <TelegramButton
+                payload={{ kind: "kanban-card", title: task.title, body: `Priority: ${getKanbanPriorityLabel(task.kanbanPriority)}`, meta: task.dueDate ? formatDate(task.dueDate) : "No due date" }}
+                onNotice={setNotice}
+              />
               <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Done</button>
               <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
@@ -1645,7 +1916,11 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
         </ItemList>
         <ItemList empty="No completed tasks.">
           {done.map((task) => (
-            <ActionRow key={task.id} title={task.title} meta="completed">
+            <ActionRow key={task.id} title={task.title} meta="completed" priority={task.kanbanPriority}>
+              <TelegramButton
+                payload={{ kind: "kanban-card", title: task.title, body: "Completed task", meta: getKanbanPriorityLabel(task.kanbanPriority) }}
+                onNotice={setNotice}
+              />
               <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Reopen</button>
               <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
@@ -1897,7 +2172,7 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
       <TwoColumn titleLeft="Pending Projects" titleRight="Done Projects">
         <ItemList empty="No pending projects.">
           {pending.map((project) => (
-            <ProjectRow key={project.id} project={project}>
+            <ProjectRow key={project.id} project={project} onNotice={setNotice}>
               <button onClick={() => startEdit(project)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "project/complete", id: project.id })} type="button">Complete</button>
               <button onClick={() => dispatch({ type: "project/delete", id: project.id })} type="button" aria-label={`Delete ${project.name}`}><Trash2 size={15} /> Delete</button>
@@ -1906,7 +2181,7 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         </ItemList>
         <ItemList empty="No done projects.">
           {done.map((project) => (
-            <ProjectRow key={project.id} project={project}>
+            <ProjectRow key={project.id} project={project} onNotice={setNotice}>
               <button onClick={() => startEdit(project)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "project/complete", id: project.id })} type="button">Reopen</button>
               <button onClick={() => dispatch({ type: "project/delete", id: project.id })} type="button" aria-label={`Delete ${project.name}`}><Trash2 size={15} /> Delete</button>
@@ -2129,6 +2404,10 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                   {item.thesis && <p>{item.thesis}</p>}
                 </div>
                 <div className="row-actions">
+                  <TelegramButton
+                    payload={{ kind: "agent-alert", title: item.title, body: item.thesis || item.signal, meta: [item.symbol, item.kind].filter(Boolean).join(" / ") }}
+                    onNotice={setNotice}
+                  />
                   <button type="button" onClick={() => setSelectedId(item.id)}><Eye size={15} /> Focus</button>
                   <button type="button" onClick={() => startEdit(item)}><Pencil size={15} /> Modify</button>
                   <button type="button" aria-label={`Delete ${item.title}`} onClick={() => deleteIntelItem(item.id, item.title)}><Trash2 size={15} /> Delete</button>
@@ -2149,6 +2428,10 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                 <p>{selected.thesis || "No thesis recorded yet."}</p>
               </div>
               <div className="row-actions">
+                <TelegramButton
+                  payload={{ kind: "agent-alert", title: selected.title, body: selected.thesis || "No thesis recorded.", meta: selected.signal }}
+                  onNotice={setNotice}
+                />
                 <button type="button" onClick={() => startEdit(selected)}><Pencil size={15} /> Modify</button>
                 <button type="button" aria-label={`Delete ${selected.title}`} onClick={() => deleteIntelItem(selected.id, selected.title)}><Trash2 size={15} /> Delete</button>
               </div>
@@ -2682,6 +2965,10 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
             <h3>{entry.mood}</h3>
             <p>{entry.body}</p>
             <div className="card-actions">
+              <TelegramButton
+                payload={{ kind: "doc", title: entry.mood, body: entry.body, meta: formatDate(entry.date) }}
+                onNotice={setNotice}
+              />
               <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
               <button type="button" aria-label={`Delete ${entry.mood}`} onClick={() => dispatch({ type: "journal/delete", id: entry.id })}><Trash2 size={15} /> Delete</button>
             </div>
@@ -3453,6 +3740,7 @@ function AgentDock({
           detail: "Ollama is disabled in Customize."
         }
   );
+  const [agentHealth, setAgentHealth] = useState<AgentHealthRecord[]>(() => createIdleAgentHealth(state.settings));
   const [messages, setMessages] = useState<AgentMessage[]>(() => [
     {
       id: "sentinel-boot",
@@ -3470,6 +3758,27 @@ function AgentDock({
     endpoint: state.settings.ollamaEndpoint,
     model: state.settings.ollamaModel
   };
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!isOpen) return;
+
+    const pingHealth = async () => {
+      const nextHealth = await fetchAgentHealth(state.settings);
+      if (!isCancelled) {
+        setAgentHealth(nextHealth);
+      }
+    };
+
+    void pingHealth();
+    const timer = window.setInterval(pingHealth, AGENT_HEALTH_POLL_MS);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isOpen, state.settings.ollamaEnabled, state.settings.ollamaEndpoint, state.settings.ollamaModel]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -3640,6 +3949,16 @@ function AgentDock({
 
       {isOpen && (
         <>
+          <div className="agent-healthbar" aria-label="Agent API status">
+            {agentHealth.map((agent) => (
+              <span className={`agent-health-pill ${agent.status}`} key={agent.id} title={agent.detail}>
+                <i aria-hidden="true" />
+                <strong>{agent.label}</strong>
+                <em>{agent.checkedAt ? formatClock(agent.checkedAt) : "not checked"}</em>
+              </span>
+            ))}
+          </div>
+
           <div className="agent-vitals" aria-label="Sentinel live vitals">
             <span><Cpu size={14} /> {metrics.readiness}% ready</span>
             <span><Target size={14} /> {metrics.pendingProjects} projects</span>
@@ -3664,6 +3983,12 @@ function AgentDock({
                 {message.body.split("\n").map((line, index) => (
                   <p key={`${message.id}-${index}`}>{line}</p>
                 ))}
+                {message.role === "agent" && (
+                  <TelegramButton
+                    payload={{ kind: "agent-alert", title: "Sentinel alert", body: message.body, meta: activeLabel }}
+                    onNotice={setNotice}
+                  />
+                )}
               </article>
             ))}
           </div>
@@ -3774,9 +4099,9 @@ function ItemList({ children, empty }: { children: ReactNode; empty: string }) {
   return <div className="ops-list">{Array.isArray(items) && items.length === 0 ? <EmptyState>{empty}</EmptyState> : children}</div>;
 }
 
-function ActionRow({ title, meta, children }: { title: string; meta: string; children?: ReactNode }) {
+function ActionRow({ title, meta, priority, children }: { title: string; meta: string; priority?: KanbanPriority; children?: ReactNode }) {
   return (
-    <div className="ops-row">
+    <div className={`ops-row ${priority ? `kanban-priority-${priority}` : ""}`}>
       <span>{title}</span>
       <em>{meta}</em>
       {children && <div className="row-actions">{children}</div>}
@@ -3784,9 +4109,17 @@ function ActionRow({ title, meta, children }: { title: string; meta: string; chi
   );
 }
 
-function ProjectRow({ project, children }: { project: CommandDeckState["projects"][number]; children?: ReactNode }) {
+function ProjectRow({
+  project,
+  onNotice,
+  children
+}: {
+  project: CommandDeckState["projects"][number];
+  onNotice: (message: string) => void;
+  children?: ReactNode;
+}) {
   return (
-    <div className="ops-row project-row">
+    <div className="ops-row project-row kanban-priority-normal">
       <div className="project-main">
         <span>{project.name}</span>
         <em>{project.nextAction || project.objective || "No next action"}</em>
@@ -3801,6 +4134,10 @@ function ProjectRow({ project, children }: { project: CommandDeckState["projects
         <strong>{project.progress}%</strong>
       </div>
       <div className="row-actions">
+        <TelegramButton
+          payload={{ kind: "kanban-card", title: project.name, body: project.objective || project.nextAction || "Project card", meta: `${project.status} / ${project.progress}%` }}
+          onNotice={onNotice}
+        />
         {project.repositoryUrl && (
           <a className="repo-link" href={project.repositoryUrl} target="_blank" rel="noreferrer" aria-label={`Open ${project.name} on GitHub`}>
             <ExternalLink size={15} />
@@ -3812,8 +4149,79 @@ function ProjectRow({ project, children }: { project: CommandDeckState["projects
   );
 }
 
-function EmptyState({ children }: { children: ReactNode }) {
-  return <div className="empty-state">{children}</div>;
+function PriorityTagControls({ value, onChange }: { value: KanbanPriority; onChange: (priority: KanbanPriority) => void }) {
+  const options: Array<{ value: KanbanPriority; label: string }> = [
+    { value: "urgent", label: "URGENT" },
+    { value: "normal", label: "NORMAL" },
+    { value: "later", label: "LATER" }
+  ];
+
+  return (
+    <div className="priority-tag-row" aria-label="Kanban priority">
+      {options.map((option) => (
+        <button
+          className={`priority-tag priority-tag-${option.value} ${value === option.value ? "active" : ""}`}
+          type="button"
+          key={option.value}
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TelegramButton({ payload, onNotice }: { payload: TelegramPayload; onNotice: (message: string) => void }) {
+  const [isSending, setIsSending] = useState(false);
+
+  const send = async () => {
+    setIsSending(true);
+    try {
+      await postToTelegram(payload);
+      onNotice("Sent to Telegram.");
+    } catch (error) {
+      onNotice(`Telegram send failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={send} disabled={isSending}>
+      <Send size={15} /> {isSending ? "Sending" : "Send to Telegram"}
+    </button>
+  );
+}
+
+function EmptyState({
+  children,
+  actionLabel = "New item",
+  onAction
+}: {
+  children: ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const handleAction = () => {
+    if (onAction) {
+      onAction();
+      return;
+    }
+    window.dispatchEvent(new Event("northwatch:new-item"));
+  };
+
+  return (
+    <div className="empty-state">
+      <Sparkles size={20} />
+      <strong>Nothing here yet.</strong>
+      <span>{children}</span>
+      <button type="button" onClick={handleAction}>
+        <Plus size={15} /> {actionLabel}
+      </button>
+    </div>
+  );
 }
 
 function ToggleCard({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
@@ -3841,6 +4249,79 @@ interface CloudStatus {
   userEmail: string | null;
 }
 
+async function postToTelegram(payload: TelegramPayload): Promise<void> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_WEBHOOK_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      source: "northwatch",
+      sentAt: new Date().toISOString()
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`webhook returned ${response.status}`);
+  }
+}
+
+function createIdleAgentHealth(settings: DeckSettings): AgentHealthRecord[] {
+  const checkedAt = new Date().toISOString();
+  return [
+    { id: "sentinel", label: "Sentinel", status: "idle", checkedAt, detail: "Waiting for /health." },
+    {
+      id: "ollama",
+      label: "Ollama",
+      status: settings.ollamaEnabled ? "idle" : "idle",
+      checkedAt,
+      detail: settings.ollamaEnabled ? "Local model route is configured." : "Ollama is disabled."
+    },
+    { id: "telegram", label: "Telegram", status: "idle", checkedAt, detail: "@glizocksamabot bridge waiting for webhook." }
+  ];
+}
+
+async function fetchAgentHealth(settings: DeckSettings): Promise<AgentHealthRecord[]> {
+  const checkedAt = new Date().toISOString();
+  const fallback = createIdleAgentHealth(settings).map((agent) => ({ ...agent, checkedAt }));
+
+  if (typeof fetch !== "function") return fallback;
+
+  try {
+    const response = await fetch("/health", { cache: "no-store" });
+    if (!response.ok) throw new Error(`health returned ${response.status}`);
+    const parsed = await response.json() as { agents?: Array<Partial<AgentHealthRecord>> };
+    const agents = parsed.agents ?? [];
+    return fallback.map((agent) => {
+      const reported = agents.find((item) => item.id === agent.id);
+      return {
+        ...agent,
+        status: normalizeAgentHealthStatus(reported?.status) ?? agent.status,
+        checkedAt: getOptionalString(reported?.checkedAt) ?? checkedAt,
+        detail: getOptionalString(reported?.detail) ?? agent.detail
+      };
+    });
+  } catch (error) {
+    return fallback.map((agent) => ({
+      ...agent,
+      status: agent.id === "sentinel" ? "dead" : agent.status,
+      checkedAt,
+      detail: agent.id === "sentinel" ? getErrorMessage(error) : agent.detail
+    }));
+  }
+}
+
+function normalizeAgentHealthStatus(value: unknown): AgentHealthStatus | null {
+  return value === "alive" || value === "dead" || value === "idle" ? value : null;
+}
+
+function getOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
 function getInitialCloudStatus(): CloudStatus {
   if (!supabaseConfig.isConfigured) {
     return {
@@ -3863,7 +4344,95 @@ function getInitialCloudStatus(): CloudStatus {
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return "Unexpected cloud sync error.";
+  return "Unexpected Northwatch error.";
+}
+
+function getShortcutView(key: string): DeckView | null {
+  if (key === "k") return "todo";
+  if (key === "p") return "projects";
+  if (key === "d") return "journal";
+  if (key === "c") return "intel";
+  return null;
+}
+
+function getDocumentTitleForView(view: DeckView): string {
+  const labels: Record<DeckView, string> = {
+    dashboard: "Command",
+    todo: "Kanban",
+    daily: "Daily",
+    projects: "Projects",
+    intel: "Content Queue",
+    calendar: "Calendar",
+    workout: "Workout",
+    books: "Books",
+    journal: "Docs",
+    finances: "Finances",
+    customize: "Customize",
+    account: "Account"
+  };
+  return labels[view];
+}
+
+function getNewItemLabel(view: DeckView): string {
+  const labels: Record<DeckView, string> = {
+    dashboard: "a task",
+    todo: "a task",
+    daily: "a routine",
+    projects: "a project",
+    intel: "an intel item",
+    calendar: "a calendar event",
+    workout: "a workout",
+    books: "a book",
+    journal: "a doc",
+    finances: "a finance entry",
+    customize: "a setting",
+    account: "an account detail"
+  };
+  return labels[view];
+}
+
+function focusNewItemField(view: DeckView) {
+  const labels: Partial<Record<DeckView, string>> = {
+    todo: "Task title",
+    daily: "Routine title",
+    projects: "Project name",
+    intel: "Intel title",
+    calendar: "Calendar event title",
+    workout: "Workout name",
+    books: "Book title",
+    journal: "Journal entry",
+    finances: "Finance label",
+    customize: "Callsign",
+    account: "Profile name"
+  };
+  const label = labels[view] ?? "Task title";
+  const field = document.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  field?.focus();
+}
+
+function buildLocalActivityFeed(state: CommandDeckState): ActivityFeedItem[] {
+  const items: ActivityFeedItem[] = [
+    ...state.tasks.map((task) => ({ id: `task-${task.id}-${task.updatedAt}`, label: task.title, createdAt: task.updatedAt })),
+    ...state.projects.map((project) => ({ id: `project-${project.id}-${project.updatedAt}`, label: project.name, createdAt: project.updatedAt })),
+    ...state.intel.map((item) => ({ id: `intel-${item.id}-${item.updatedAt}`, label: item.title, createdAt: item.updatedAt })),
+    ...state.journal.map((entry) => ({ id: `journal-${entry.id}-${entry.date}`, label: entry.mood, createdAt: `${entry.date}T12:00:00.000Z` }))
+  ];
+
+  return items.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()).slice(0, 12);
+}
+
+function getKanbanPriorityLabel(priority: KanbanPriority): string {
+  if (priority === "urgent") return "URGENT";
+  if (priority === "later") return "LATER";
+  return "NORMAL";
+}
+
+function maskSessionToken(token: string): string {
+  return `${token.slice(0, 7)}...${token.slice(-4)}`;
+}
+
+function formatClock(value: string): string {
+  return new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function composeAgentReply(

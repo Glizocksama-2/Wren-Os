@@ -7,6 +7,7 @@ function makeTask(title: string): CommandDeckState["tasks"][number] {
     id: `task-${title.toLowerCase().replace(/\s+/g, "-")}`,
     title,
     priority: "high",
+    kanbanPriority: "urgent",
     dueDate: null,
     status: "todo",
     createdAt: timestamp,

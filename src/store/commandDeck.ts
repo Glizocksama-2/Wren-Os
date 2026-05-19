@@ -25,11 +25,13 @@ export type IntelKind = "stock" | "crypto" | "fund" | "company" | "trend" | "new
 export type IntelSignal = "watching" | "researching" | "high-priority" | "on-hold";
 export type RoutineCadence = "daily" | "weekly";
 export type RoutineDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+export type KanbanPriority = "urgent" | "normal" | "later";
 
 export interface CommandTask {
   id: string;
   title: string;
   priority: Priority;
+  kanbanPriority: KanbanPriority;
   dueDate: string | null;
   status: "todo" | "done";
   createdAt: string;
@@ -209,6 +211,7 @@ export interface CommandDeckState {
 export type CommandDeckAction =
   | { type: "task/add"; title: string; priority: Priority; dueDate: string | null }
   | { type: "task/update"; id: string; title: string; priority: Priority; dueDate: string | null }
+  | { type: "task/kanban-priority"; id: string; priority: KanbanPriority }
   | { type: "task/toggle"; id: string }
   | { type: "task/delete"; id: string }
   | { type: "routine/add"; title: string; cadence: RoutineCadence; days: RoutineDay[] }
@@ -248,9 +251,10 @@ export type CommandDeckAction =
   | { type: "deck/import"; deck: Partial<CommandDeckState> }
   | { type: "deck/reset" };
 
-export const COMMAND_DECK_STORAGE_KEY = "wren-os.command-deck.v1";
+export const COMMAND_DECK_STORAGE_KEY = "northwatch_v1";
+const LEGACY_COMMAND_DECK_KEY = "wren-os.command-deck.v1";
 const LEGACY_WORKSPACE_KEY = "wren-os.workspace.v1";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const nowIso = () => new Date().toISOString();
 const todayInput = () => new Date().toISOString().slice(0, 10);
@@ -318,6 +322,7 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
             id: makeId("task"),
             title: action.title,
             priority: action.priority,
+            kanbanPriority: priorityToKanbanPriority(action.priority),
             dueDate: action.dueDate,
             status: "todo",
             createdAt: timestamp,
@@ -340,7 +345,24 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         ...state,
         tasks: state.tasks.map((task) =>
           task.id === action.id
-            ? { ...task, title: action.title, priority: action.priority, dueDate: action.dueDate, updatedAt: timestamp }
+            ? {
+                ...task,
+                title: action.title,
+                priority: action.priority,
+                kanbanPriority: task.kanbanPriority ?? priorityToKanbanPriority(action.priority),
+                dueDate: action.dueDate,
+                updatedAt: timestamp
+              }
+            : task
+        )
+      }, timestamp);
+
+    case "task/kanban-priority":
+      return touch({
+        ...state,
+        tasks: state.tasks.map((task) =>
+          task.id === action.id
+            ? { ...task, kanbanPriority: action.priority, priority: kanbanPriorityToPriority(action.priority), updatedAt: timestamp }
             : task
         )
       }, timestamp);
@@ -725,7 +747,7 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
 
 export function loadCommandDeck(storage: Storage = window.localStorage): CommandDeckState {
   const migratedLegacyDeck = migrateLegacyWorkspace(storage.getItem(LEGACY_WORKSPACE_KEY));
-  const raw = storage.getItem(COMMAND_DECK_STORAGE_KEY);
+  const raw = storage.getItem(COMMAND_DECK_STORAGE_KEY) ?? storage.getItem(LEGACY_COMMAND_DECK_KEY);
   if (!raw) return migratedLegacyDeck ?? createFreshDeck();
 
   try {
@@ -794,7 +816,7 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     ...fresh,
     ...value,
     version: SCHEMA_VERSION,
-    tasks: Array.isArray(value.tasks) ? value.tasks : [],
+    tasks: Array.isArray(value.tasks) ? value.tasks.map(normalizeTask) : [],
     routines: Array.isArray(value.routines) ? value.routines.map(normalizeRoutine) : [],
     githubScan: value.githubScan ?? githubScanSummary,
     projects: mergeGitHubProjects(
@@ -896,10 +918,12 @@ function migrateLegacyWorkspace(raw: string | null): CommandDeckState | null {
 
 function migrateLegacyTask(task: Record<string, unknown>, fallbackTimestamp: string): CommandTask {
   const updatedAt = getString(task.updatedAt) ?? fallbackTimestamp;
+  const priority = normalizePriority(task.priority);
   return {
     id: getString(task.id) ?? makeId("legacy-task"),
     title: getString(task.title) ?? "Untitled legacy task",
-    priority: normalizePriority(task.priority),
+    priority,
+    kanbanPriority: priorityToKanbanPriority(priority),
     dueDate: getNullableString(task.dueDate),
     status: task.status === "done" ? "done" : "todo",
     createdAt: getString(task.createdAt) ?? updatedAt,
@@ -914,6 +938,7 @@ function migrateLegacyAgentAction(action: Record<string, unknown>, fallbackTimes
     id: `legacy-agent-${getString(action.id) ?? makeId("action")}`,
     title: `Review agent action: ${title}`,
     priority: action.status === "pending" ? "high" : "medium",
+    kanbanPriority: action.status === "pending" ? "urgent" : "normal",
     dueDate: null,
     status: action.status === "approved" ? "done" : "todo",
     createdAt: getString(action.createdAt) ?? updatedAt,
@@ -927,6 +952,7 @@ function migrateLegacyContentTask(item: Record<string, unknown>, fallbackTimesta
     id: `legacy-content-${getString(item.id) ?? makeId("content")}`,
     title: `Advance content: ${getString(item.title) ?? "Untitled content"}`,
     priority: "medium",
+    kanbanPriority: "normal",
     dueDate: getNullableString(item.scheduledFor),
     status: "todo",
     createdAt: updatedAt,
@@ -985,8 +1011,40 @@ function migrateLegacyContentJournal(item: Record<string, unknown>, fallbackTime
   };
 }
 
+function normalizeTask(task: Partial<CommandTask>): CommandTask {
+  const updatedAt = getString(task.updatedAt) ?? nowIso();
+  const priority = normalizePriority(task.priority);
+  return {
+    id: getString(task.id) ?? makeId("task"),
+    title: getString(task.title) ?? "Untitled task",
+    priority,
+    kanbanPriority: normalizeKanbanPriority(task.kanbanPriority, priority),
+    dueDate: getNullableString(task.dueDate),
+    status: task.status === "done" ? "done" : "todo",
+    createdAt: getString(task.createdAt) ?? updatedAt,
+    updatedAt
+  };
+}
+
 function normalizePriority(value: unknown): Priority {
   return value === "low" || value === "medium" || value === "high" || value === "critical" ? value : "medium";
+}
+
+function normalizeKanbanPriority(value: unknown, fallbackPriority: Priority): KanbanPriority {
+  if (value === "urgent" || value === "normal" || value === "later") return value;
+  return priorityToKanbanPriority(fallbackPriority);
+}
+
+function priorityToKanbanPriority(priority: Priority): KanbanPriority {
+  if (priority === "critical" || priority === "high") return "urgent";
+  if (priority === "low") return "later";
+  return "normal";
+}
+
+function kanbanPriorityToPriority(priority: KanbanPriority): Priority {
+  if (priority === "urgent") return "critical";
+  if (priority === "later") return "low";
+  return "medium";
 }
 
 function normalizeAccent(value: unknown): Accent {
