@@ -505,6 +505,76 @@ p {
   align-items: end;
 }
 
+.remembered-accounts {
+  display: grid;
+  gap: 8px;
+}
+
+.remembered-accounts > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.remembered-account {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 8px;
+}
+
+.remembered-account-main,
+.remembered-account-forget {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(7 10 9 / 0.92);
+  color: var(--text);
+}
+
+.remembered-account-main {
+  min-width: 0;
+  gap: 10px;
+  justify-content: flex-start;
+  padding: 0 12px;
+  text-align: left;
+}
+
+.remembered-account-main svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.remembered-account-main span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.remembered-account-main strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remembered-account-main:hover,
+.remembered-account-forget:hover {
+  border-color: rgb(var(--accent-rgb) / 0.42);
+  color: var(--accent);
+}
+
+.remembered-account-forget {
+  justify-content: center;
+  padding: 0;
+}
+
 .auth-form label {
   display: grid;
   gap: 7px;

@@ -54,6 +54,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
 import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
+import {
+  forgetRememberedAccount,
+  loadRememberedAccounts,
+  rememberAuthAccount,
+  type RememberedAuthAccount
+} from "./lib/authMemory";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
 import {
@@ -173,6 +179,7 @@ export default function App() {
   const [view, setView] = useState<DeckView>("dashboard");
   const [notice, setNotice] = useState("Fresh command deck initialized.");
   const [session, setSession] = useState<WrenSession | null>(null);
+  const [rememberedAccounts, setRememberedAccounts] = useState<RememberedAuthAccount[]>(() => loadRememberedAccounts());
   const [authReady, setAuthReady] = useState(!supabaseConfig.isConfigured);
   const [cloudReady, setCloudReady] = useState(!supabaseConfig.isConfigured);
   const [cloudStatus, setCloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
@@ -219,6 +226,9 @@ export default function App() {
       }
 
       setSession(data.session);
+      if (data.session?.user.email) {
+        setRememberedAccounts(rememberAuthAccount(data.session.user.email, data.session.user.id));
+      }
       setAuthReady(true);
       if (!data.session) {
         setCloudReady(false);
@@ -236,6 +246,9 @@ export default function App() {
       data: { subscription }
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
+      if (nextSession?.user.email) {
+        setRememberedAccounts(rememberAuthAccount(nextSession.user.email, nextSession.user.id));
+      }
       setAuthReady(true);
       if (!nextSession) {
         setCloudReady(false);
@@ -418,6 +431,11 @@ export default function App() {
     });
 
     if (error) throw error;
+    setRememberedAccounts(rememberAuthAccount(email, null));
+  };
+
+  const forgetAuthAccount = (email: string) => {
+    setRememberedAccounts(forgetRememberedAccount(email));
   };
 
   const signOut = async () => {
@@ -654,7 +672,14 @@ export default function App() {
   }
 
   if (supabaseConfig.isConfigured && authReady && !session) {
-    return <AuthGate status={cloudStatus} onRequestMagicLink={requestMagicLink} />;
+    return (
+      <AuthGate
+        status={cloudStatus}
+        rememberedAccounts={rememberedAccounts}
+        onRequestMagicLink={requestMagicLink}
+        onForgetRememberedAccount={forgetAuthAccount}
+      />
+    );
   }
 
   if (supabaseConfig.isConfigured && authReady && session && !cloudReady) {
@@ -829,30 +854,51 @@ function CloudBootScreen({ status }: { status: CloudStatus }) {
   );
 }
 
-function AuthGate({
+export function AuthGate({
   status,
-  onRequestMagicLink
+  rememberedAccounts,
+  onRequestMagicLink,
+  onForgetRememberedAccount
 }: {
   status: CloudStatus;
+  rememberedAccounts: RememberedAuthAccount[];
   onRequestMagicLink: (email: string) => Promise<void>;
+  onForgetRememberedAccount: (email: string) => void;
 }) {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(rememberedAccounts[0]?.email ?? "");
   const [message, setMessage] = useState(status.detail);
   const [isSending, setIsSending] = useState(false);
+  const firstRememberedEmail = rememberedAccounts[0]?.email ?? "";
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!email.trim()) return;
+  useEffect(() => {
+    if (!email && firstRememberedEmail) {
+      setEmail(firstRememberedEmail);
+    }
+  }, [email, firstRememberedEmail]);
 
+  useEffect(() => {
+    setMessage(status.detail);
+  }, [status.detail]);
+
+  const sendMagicLink = async (targetEmail: string) => {
+    const normalizedEmail = targetEmail.trim();
+    if (!normalizedEmail) return;
+
+    setEmail(normalizedEmail);
     setIsSending(true);
     try {
-      await onRequestMagicLink(email.trim());
+      await onRequestMagicLink(normalizedEmail);
       setMessage("Magic link sent. Open it on this device to unlock Northwatch.");
     } catch (error) {
       setMessage(getErrorMessage(error));
     } finally {
       setIsSending(false);
     }
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    await sendMagicLink(email);
   };
 
   return (
@@ -864,6 +910,28 @@ function AuthGate({
         <span className="micro-label">Private command deck</span>
         <h1>Northwatch is locked.</h1>
         <p>Sign in with Supabase Auth to sync your projects, tasks, journal, books, workouts, and finances across devices.</p>
+        {rememberedAccounts.length > 0 && (
+          <div className="remembered-accounts" aria-label="Remembered accounts">
+            <span>Known accounts on this device</span>
+            {rememberedAccounts.map((account) => (
+              <div className="remembered-account" key={account.email}>
+                <button className="remembered-account-main" type="button" disabled={isSending} onClick={() => sendMagicLink(account.email)}>
+                  <UserRound size={15} />
+                  <span>Continue as</span>
+                  <strong>{account.email}</strong>
+                </button>
+                <button
+                  className="remembered-account-forget"
+                  type="button"
+                  aria-label={`Forget ${account.email}`}
+                  onClick={() => onForgetRememberedAccount(account.email)}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <form className="auth-form" onSubmit={submit}>
           <label>
             <span>Email</span>
@@ -881,6 +949,7 @@ function AuthGate({
           </button>
         </form>
         <small>{message}</small>
+        <small>Northwatch remembers only the account email on this browser. Supabase still keeps the session secure.</small>
       </section>
     </main>
   );

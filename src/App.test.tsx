@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
-import App from "./App";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import App, { AuthGate } from "./App";
 import { COMMAND_DECK_STORAGE_KEY } from "./store/commandDeck";
 
 describe("Northwatch command deck", () => {
@@ -263,6 +263,38 @@ describe("Northwatch command deck", () => {
 
     expect(screen.queryByRole("button", { name: "Calendar" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Interface Presets" })).toBeInTheDocument();
+  });
+
+  it("prefills remembered auth accounts and can forget one", async () => {
+    const requestMagicLink = vi.fn().mockResolvedValue(undefined);
+    const forgetRememberedAccount = vi.fn();
+
+    render(
+      <AuthGate
+        status={{
+          mode: "signed-out",
+          label: "Cloud auth: sign in required",
+          detail: "Use your Supabase magic link to unlock cross-device sync.",
+          lastSyncedAt: null,
+          userEmail: null
+        }}
+        rememberedAccounts={[
+          { email: "operator@northwatch.dev", userId: "user-1", lastUsedAt: "2026-05-19T08:00:00.000Z" },
+          { email: "backup@northwatch.dev", userId: null, lastUsedAt: "2026-05-18T08:00:00.000Z" }
+        ]}
+        onRequestMagicLink={requestMagicLink}
+        onForgetRememberedAccount={forgetRememberedAccount}
+      />
+    );
+
+    expect(screen.getByDisplayValue("operator@northwatch.dev")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /continue as backup@northwatch.dev/i }));
+    await waitFor(() => expect(requestMagicLink).toHaveBeenCalledWith("backup@northwatch.dev"));
+    expect(screen.getByText(/magic link sent/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /forget operator@northwatch.dev/i }));
+    expect(forgetRememberedAccount).toHaveBeenCalledWith("operator@northwatch.dev");
   });
 });
 
