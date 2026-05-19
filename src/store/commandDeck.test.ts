@@ -15,6 +15,29 @@ function makeTask(title: string): CommandDeckState["tasks"][number] {
   };
 }
 
+function makeProject(name: string): CommandDeckState["projects"][number] {
+  const timestamp = "2026-05-12T09:00:00.000Z";
+  return {
+    id: `project-${name.toLowerCase().replace(/\s+/g, "-")}`,
+    name,
+    objective: "Recovered objective",
+    nextAction: "Review recovered project",
+    status: "pending",
+    dueDate: null,
+    progress: 25,
+    source: "manual",
+    repositoryUrl: null,
+    language: null,
+    visibility: null,
+    defaultBranch: null,
+    lastPushedAt: null,
+    openIssues: 0,
+    openPullRequests: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+}
+
 describe("command deck cloud import", () => {
   it("uses the selected Orbit Watch logo as the default mark", () => {
     expect(freshCommandDeck.settings.logoStyle).toBe("radar");
@@ -198,10 +221,67 @@ describe("command deck cloud import", () => {
     expect(next.projects).toHaveLength(0);
   });
 
+  it("merges a recovered cloud deck without losing current account data", () => {
+    const current = reduceCommandDeck(freshCommandDeck, {
+      type: "task/add",
+      title: "Current account task",
+      priority: "medium",
+      dueDate: null
+    });
+    const recovered: Partial<CommandDeckState> = {
+      ...freshCommandDeck,
+      tasks: [makeTask("Recovered email task")],
+      projects: [
+        {
+          ...makeProject("Recovered project"),
+          repositoryUrl: "https://github.com/glizocksama/recovered-project",
+          source: "github"
+        }
+      ],
+      settings: {
+        ...freshCommandDeck.settings,
+        callsign: "Email Vault"
+      }
+    };
+
+    const next = reduceCommandDeck(current, { type: "deck/merge-import", deck: recovered });
+
+    expect(next.tasks.some((task) => task.title === "Current account task")).toBe(true);
+    expect(next.tasks.some((task) => task.title === "Recovered email task")).toBe(true);
+    expect(next.projects.some((project) => project.name === "Recovered project")).toBe(true);
+    expect(next.settings.callsign).toBe("Email Vault");
+  });
+
   it("does not seed private GitHub repos into a fresh or normalized deck", () => {
     expect(freshCommandDeck.projects).toHaveLength(0);
     expect(normalizeCommandDeck({}).projects).toHaveLength(0);
     expect(normalizeCommandDeck({}).githubScan).toMatchObject({ owner: "", projectCount: 0 });
+  });
+
+  it("preserves legacy GitHub projects only for authenticated email recovery", () => {
+    const legacyDeck: Partial<CommandDeckState> = {
+      ...freshCommandDeck,
+      githubScan: { owner: "Glizocksama-2", scannedAt: "2026-05-19T13:59:20.008Z", projectCount: 1 },
+      projects: [
+        {
+          ...makeProject("Recovered repo"),
+          source: "github",
+          repositoryUrl: "https://github.com/glizocksama/recovered-repo"
+        }
+      ]
+    };
+
+    expect(normalizeCommandDeck(legacyDeck).projects).toHaveLength(0);
+
+    const recovered = reduceCommandDeck(freshCommandDeck, {
+      type: "deck/import",
+      deck: legacyDeck,
+      preserveLegacyGitHubProjects: true
+    });
+
+    expect(recovered.projects).toHaveLength(1);
+    expect(recovered.projects[0].name).toBe("Recovered repo");
+    expect(recovered.githubScan.owner).toBe("Glizocksama-2");
   });
 
   it("prunes the legacy baked-in GitHub scan from existing browser decks", () => {

@@ -174,6 +174,68 @@ describe("Northwatch React auth", () => {
     expect(await screen.findByText("Recovered cloud task")).toBeInTheDocument();
     await waitFor(() => expect(window.localStorage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Recovered cloud task"));
   });
+
+  it("retries old email recovery after a stale v1 no-data marker and merges with current account data", async () => {
+    const currentTask = {
+      id: "current-account-task",
+      title: "Current account task",
+      priority: "medium",
+      kanbanPriority: "normal",
+      dueDate: null,
+      status: "todo",
+      createdAt: "2026-05-19T14:00:20.008Z",
+      updatedAt: "2026-05-19T14:00:20.008Z"
+    };
+    const legacyTask = {
+      id: "legacy-cloud-task",
+      title: "Recovered email task",
+      priority: "critical",
+      kanbanPriority: "urgent",
+      dueDate: null,
+      status: "todo",
+      createdAt: "2026-05-19T13:59:20.008Z",
+      updatedAt: "2026-05-19T13:59:20.008Z"
+    };
+    window.localStorage.setItem(
+      getCommandDeckStorageKey("user-1"),
+      JSON.stringify({
+        ...freshCommandDeck,
+        tasks: [currentTask]
+      })
+    );
+    window.localStorage.setItem("northwatch.legacy-cloud-import.v1:user-1", "none");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "/api/legacy-command-deck") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              deck: {
+                ...freshCommandDeck,
+                tasks: [legacyTask],
+                settings: { ...freshCommandDeck.settings, callsign: "Email Vault" }
+              },
+              updatedAt: "2026-05-19T13:59:20.008Z"
+            })
+          };
+        }
+
+        return { ok: true, status: 200, json: async () => ({}) };
+      })
+    );
+
+    render(<App authUser={authUser} onAuthLogout={vi.fn()} />);
+
+    expect(await screen.findByText("Recovered email task")).toBeInTheDocument();
+    expect(screen.getByText("Current account task")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.localStorage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Recovered email task");
+      expect(window.localStorage.getItem(getCommandDeckStorageKey("user-1"))).toContain("Current account task");
+    });
+    expect(window.localStorage.getItem("northwatch.legacy-cloud-import.v2:user-1")).toBe("2026-05-19T13:59:20.008Z");
+  });
 });
 
 function mockFetch(responses: Array<{ ok: boolean; status: number; json: () => Promise<unknown> }>) {

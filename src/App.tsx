@@ -180,7 +180,7 @@ const TELEGRAM_SEND_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/send`;
 const TELEGRAM_CONFIG_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/config`;
 const LEGACY_COMMAND_DECK_ENDPOINT = `${AUTH_API_BASE_URL}/api/legacy-command-deck`;
 const LEGACY_SUPABASE_CLOUD_SYNC_ENABLED = false;
-const LEGACY_CLOUD_IMPORT_STORAGE_PREFIX = "northwatch.legacy-cloud-import.v1";
+const LEGACY_CLOUD_IMPORT_STORAGE_PREFIX = "northwatch.legacy-cloud-import.v2";
 
 type LegalPanel = "settings" | "help" | "privacy" | "terms";
 type AgentHealthStatus = "alive" | "dead" | "idle";
@@ -223,6 +223,11 @@ interface TelegramConfigStatus {
   configured: boolean;
   botUsername: string | null;
   chatId: string | null;
+  updatedAt: string | null;
+}
+
+interface LegacyCommandDeckPayload {
+  deck: Partial<CommandDeckState>;
   updatedAt: string | null;
 }
 
@@ -312,6 +317,7 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
   const [legalConsent, setLegalConsent] = useState<LegalConsentRecord | null>(() => loadLegalConsent());
   const [sessionToken, setSessionToken] = useState<SessionTokenRecord>(() => loadOrCreateSessionToken());
   const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
+  const [isRecoveringLegacyDeck, setIsRecoveringLegacyDeck] = useState(false);
   const [newActivityCount, setNewActivityCount] = useState(0);
   const latestDeckRef = useRef(state);
   const saveTimerRef = useRef<number | null>(null);
@@ -341,28 +347,18 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
     let isCancelled = false;
 
     async function importLegacyCloudDeck() {
-      if (hasMeaningfulDeckData(latestDeckRef.current)) return;
-
       try {
-        const response = await fetch(LEGACY_COMMAND_DECK_ENDPOINT, {
-          credentials: "include",
-          headers: { Accept: "application/json" },
-          cache: "no-store"
+        const payload = await fetchLegacyCommandDeck();
+        if (isCancelled || !payload) return;
+
+        const hasCurrentDeckData = hasMeaningfulDeckData(latestDeckRef.current);
+        dispatch({
+          type: hasCurrentDeckData ? "deck/merge-import" : "deck/import",
+          deck: payload.deck,
+          preserveLegacyGitHubProjects: true
         });
-
-        if (response.status === 204 || response.status === 404) {
-          window.localStorage.setItem(importKey, "none");
-          return;
-        }
-
-        if (!response.ok) return;
-
-        const payload = await response.json() as { deck?: Partial<CommandDeckState> | null; updatedAt?: string | null };
-        if (isCancelled || !payload.deck || hasMeaningfulDeckData(latestDeckRef.current)) return;
-
-        dispatch({ type: "deck/import", deck: payload.deck });
         window.localStorage.setItem(importKey, payload.updatedAt ?? new Date().toISOString());
-        setNotice("Recovered the command deck saved under your email.");
+        setNotice(hasCurrentDeckData ? "Recovered and merged the command deck saved under your email." : "Recovered the command deck saved under your email.");
       } catch {
         // Legacy cloud import is best-effort; local account storage still works without it.
       }
@@ -373,6 +369,35 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
     return () => {
       isCancelled = true;
     };
+  }, [authUserId]);
+
+  const recoverLegacyEmailDeck = useCallback(async () => {
+    if (!authUserId) {
+      setNotice("Sign in first, then recover data saved under your email.");
+      return;
+    }
+
+    setIsRecoveringLegacyDeck(true);
+    try {
+      const payload = await fetchLegacyCommandDeck();
+      if (!payload) {
+        setNotice("No previous email data was found for this account yet.");
+        return;
+      }
+
+      const hasCurrentDeckData = hasMeaningfulDeckData(latestDeckRef.current);
+      dispatch({
+        type: hasCurrentDeckData ? "deck/merge-import" : "deck/import",
+        deck: payload.deck,
+        preserveLegacyGitHubProjects: true
+      });
+      window.localStorage.setItem(`${LEGACY_CLOUD_IMPORT_STORAGE_PREFIX}:${authUserId}`, payload.updatedAt ?? new Date().toISOString());
+      setNotice(hasCurrentDeckData ? "Recovered and merged the command deck saved under your email." : "Recovered the command deck saved under your email.");
+    } catch (error) {
+      setNotice(`Email data recovery failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsRecoveringLegacyDeck(false);
+    }
   }, [authUserId]);
 
   useEffect(() => {
@@ -1073,6 +1098,7 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
             <AccountModule
               state={state}
               cloudStatus={cloudStatus}
+              authUser={authUser}
               workspaceMode={workspaceMode}
               teams={teams}
               activeTeam={activeTeam}
@@ -1086,6 +1112,8 @@ export default function App({ authUser = null, onAuthLogout }: AppProps = {}) {
               onCreateInviteLink={createInviteLink}
               onUpdateMemberRole={updateMemberRole}
               onRemoveMember={removeMember}
+              onRecoverEmailDeck={recoverLegacyEmailDeck}
+              isRecoveringEmailDeck={isRecoveringLegacyDeck}
               onSignOut={signOut}
             />
           )}
@@ -3419,6 +3447,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
 function AccountModule({
   state,
   cloudStatus,
+  authUser,
   workspaceMode,
   teams,
   activeTeam,
@@ -3432,10 +3461,13 @@ function AccountModule({
   onCreateInviteLink,
   onUpdateMemberRole,
   onRemoveMember,
+  onRecoverEmailDeck,
+  isRecoveringEmailDeck,
   onSignOut
 }: {
   state: CommandDeckState;
   cloudStatus: CloudStatus;
+  authUser?: AuthUser | null;
   workspaceMode: WorkspaceMode;
   teams: TeamWorkspace[];
   activeTeam: TeamWorkspace | null;
@@ -3449,13 +3481,15 @@ function AccountModule({
   onCreateInviteLink: () => Promise<void>;
   onUpdateMemberRole: (memberUserId: string, role: TeamRole) => Promise<void>;
   onRemoveMember: (memberUserId: string) => Promise<void>;
+  onRecoverEmailDeck: () => Promise<void>;
+  isRecoveringEmailDeck: boolean;
   onSignOut: () => void;
 }) {
   const [teamName, setTeamName] = useState("");
   const [teamCode, setTeamCode] = useState("");
   const lastSync = cloudStatus.lastSyncedAt ? formatDateTime(cloudStatus.lastSyncedAt) : "Not synced yet";
-  const userEmail = cloudStatus.userEmail ?? "Local operator";
-  const isCloudUser = Boolean(cloudStatus.userEmail);
+  const userEmail = cloudStatus.userEmail ?? authUser?.email ?? "Local operator";
+  const isCloudUser = Boolean(cloudStatus.userEmail || authUser?.email);
   const canManageTeam = activeTeam?.role === "owner";
   const activeTeamName = activeTeam?.name ?? "No team selected";
   const displayName = getDisplayName(state.settings);
@@ -3715,7 +3749,10 @@ function AccountModule({
         <section className="deck-panel account-panel">
           <PanelHead title="Session controls" />
           <div className="account-actions">
-            <button type="button" onClick={onSignOut} disabled={!cloudStatus.userEmail}>
+            <button type="button" onClick={() => void onRecoverEmailDeck()} disabled={!authUser || isRecoveringEmailDeck}>
+              <Cloud size={16} /> {isRecoveringEmailDeck ? "Recovering" : "Recover email data"}
+            </button>
+            <button type="button" onClick={onSignOut} disabled={!authUser && !cloudStatus.userEmail}>
               <LogOut size={16} /> Sign out
             </button>
           </div>
@@ -4375,6 +4412,34 @@ interface CloudStatus {
   detail: string;
   lastSyncedAt: string | null;
   userEmail: string | null;
+}
+
+async function fetchLegacyCommandDeck(): Promise<LegacyCommandDeckPayload | null> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(LEGACY_COMMAND_DECK_ENDPOINT, {
+    credentials: "include",
+    headers: { Accept: "application/json" },
+    cache: "no-store"
+  });
+
+  if (response.status === 204 || response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, `Legacy deck API returned ${response.status}.`));
+  }
+
+  const payload = await response.json() as { deck?: Partial<CommandDeckState> | null; updatedAt?: string | null };
+  if (!payload.deck) return null;
+
+  return {
+    deck: payload.deck,
+    updatedAt: payload.updatedAt ?? null
+  };
 }
 
 async function postToTelegram(payload: TelegramPayload): Promise<void> {

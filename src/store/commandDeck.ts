@@ -248,7 +248,8 @@ export type CommandDeckAction =
   | { type: "intel/autopilot/toggle"; enabled: boolean }
   | { type: "intel/autoscan"; findings: AutonomousIntelFinding[]; summary: string; scannedAt: string }
   | { type: "settings/update"; payload: Partial<DeckSettings> }
-  | { type: "deck/import"; deck: Partial<CommandDeckState> }
+  | { type: "deck/import"; deck: Partial<CommandDeckState>; preserveLegacyGitHubProjects?: boolean }
+  | { type: "deck/merge-import"; deck: Partial<CommandDeckState>; preserveLegacyGitHubProjects?: boolean }
   | { type: "deck/reset" };
 
 export const COMMAND_DECK_STORAGE_KEY = "northwatch_v1";
@@ -265,6 +266,10 @@ const logoStyles: LogoStyle[] = ["sentinel", "monolith", "radar", "spire"];
 const accents: Accent[] = ["amber", "cyan", "green", "red", "pink"];
 const backgroundModes: BackgroundMode[] = ["black", "white"];
 const routineDays: RoutineDay[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+interface NormalizeCommandDeckOptions {
+  preserveLegacyGitHubProjects?: boolean;
+}
 
 export const freshCommandDeck: CommandDeckState = {
   version: SCHEMA_VERSION,
@@ -740,7 +745,12 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
       return touch({ ...state, settings: { ...state.settings, ...action.payload } }, timestamp);
 
     case "deck/import":
-      return normalizeCommandDeck(action.deck);
+      return normalizeCommandDeck(action.deck, { preserveLegacyGitHubProjects: Boolean(action.preserveLegacyGitHubProjects) });
+
+    case "deck/merge-import":
+      return mergeImportedCommandDeck(state, action.deck, timestamp, {
+        preserveLegacyGitHubProjects: Boolean(action.preserveLegacyGitHubProjects)
+      });
 
     case "deck/reset":
       return createFreshDeck();
@@ -853,18 +863,18 @@ export function getDeckMetrics(state: CommandDeckState) {
   };
 }
 
-export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandDeckState {
+export function normalizeCommandDeck(value: Partial<CommandDeckState>, options: NormalizeCommandDeckOptions = {}): CommandDeckState {
   const fresh = createFreshDeck();
   const incomingSettings: Partial<DeckSettings> = value.settings ?? {};
   const incomingVersion = typeof value.version === "number" ? value.version : 0;
-  const projects = getSafeNormalizedProjects(value);
+  const projects = getSafeNormalizedProjects(value, options);
   return {
     ...fresh,
     ...value,
     version: SCHEMA_VERSION,
     tasks: Array.isArray(value.tasks) ? value.tasks.map(normalizeTask) : [],
     routines: Array.isArray(value.routines) ? value.routines.map(normalizeRoutine) : [],
-    githubScan: normalizeGithubScan(value.githubScan, projects),
+    githubScan: normalizeGithubScan(value.githubScan, projects, options),
     projects,
     calendar: Array.isArray(value.calendar) ? value.calendar : [],
     workouts: Array.isArray(value.workouts) ? value.workouts : [],
@@ -888,6 +898,53 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
     },
     updatedAt: value.updatedAt ?? fresh.updatedAt
   };
+}
+
+export function mergeImportedCommandDeck(
+  currentDeck: CommandDeckState,
+  importedValue: Partial<CommandDeckState>,
+  updatedAt: string = nowIso(),
+  options: NormalizeCommandDeckOptions = {}
+): CommandDeckState {
+  const importedDeck = normalizeCommandDeck(importedValue, options);
+  const mergedProjects = mergeDeckItems(importedDeck.projects, currentDeck.projects);
+
+  return {
+    ...currentDeck,
+    createdAt: getOlderTimestamp(currentDeck.createdAt, importedDeck.createdAt),
+    updatedAt,
+    githubScan: normalizeGithubScan(
+      currentDeck.githubScan.projectCount > 0 ? currentDeck.githubScan : importedDeck.githubScan,
+      mergedProjects,
+      options
+    ),
+    tasks: mergeDeckItems(importedDeck.tasks, currentDeck.tasks),
+    routines: mergeDeckItems(importedDeck.routines, currentDeck.routines),
+    projects: mergedProjects,
+    calendar: mergeDeckItems(importedDeck.calendar, currentDeck.calendar),
+    workouts: mergeDeckItems(importedDeck.workouts, currentDeck.workouts),
+    books: mergeDeckItems(importedDeck.books, currentDeck.books),
+    journal: mergeDeckItems(importedDeck.journal, currentDeck.journal),
+    finances: mergeDeckItems(importedDeck.finances, currentDeck.finances),
+    intel: mergeDeckItems(importedDeck.intel, currentDeck.intel),
+    intelAutopilot: currentDeck.intel.length > 0 ? currentDeck.intelAutopilot : importedDeck.intelAutopilot,
+    settings: hasCustomizedSettings(currentDeck) ? currentDeck.settings : importedDeck.settings
+  };
+}
+
+function mergeDeckItems<T extends { id: string }>(importedItems: T[], currentItems: T[]): T[] {
+  const byId = new Map<string, T>();
+  importedItems.forEach((item) => byId.set(item.id, item));
+  currentItems.forEach((item) => byId.set(item.id, item));
+  return [...byId.values()];
+}
+
+function getOlderTimestamp(left: string, right: string): string {
+  const leftTime = new Date(left).getTime();
+  const rightTime = new Date(right).getTime();
+  if (Number.isNaN(leftTime)) return right;
+  if (Number.isNaN(rightTime)) return left;
+  return leftTime <= rightTime ? left : right;
 }
 
 function createFreshDeck(): CommandDeckState {
@@ -1414,17 +1471,21 @@ function mergeGitHubProjects(currentProjects: CommandProject[], seeds: GitHubPro
   });
 }
 
-function getSafeNormalizedProjects(value: Partial<CommandDeckState>): CommandProject[] {
+function getSafeNormalizedProjects(value: Partial<CommandDeckState>, options: NormalizeCommandDeckOptions): CommandProject[] {
   const projects = Array.isArray(value.projects) ? value.projects.map(normalizeProject) : [];
-  if (isLegacySeededGitHubScan(value.githubScan)) {
+  if (!options.preserveLegacyGitHubProjects && isLegacySeededGitHubScan(value.githubScan)) {
     return projects.filter((project) => project.source !== "github");
   }
 
   return projects;
 }
 
-function normalizeGithubScan(scan: CommandDeckState["githubScan"] | undefined, projects: CommandProject[]): CommandDeckState["githubScan"] {
-  if (!scan || isLegacySeededGitHubScan(scan)) {
+function normalizeGithubScan(
+  scan: CommandDeckState["githubScan"] | undefined,
+  projects: CommandProject[],
+  options: NormalizeCommandDeckOptions = {}
+): CommandDeckState["githubScan"] {
+  if (!scan || (!options.preserveLegacyGitHubProjects && isLegacySeededGitHubScan(scan))) {
     return {
       ...githubScanSummary,
       projectCount: projects.filter((project) => project.source === "github").length
