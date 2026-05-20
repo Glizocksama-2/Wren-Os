@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App, {
   LEGAL_CONSENT_STORAGE_KEY,
   PRIVACY_VERSION,
-  SESSION_TOKEN_STORAGE_KEY,
   TERMS_VERSION
 } from "./App";
 import { COMMAND_DECK_STORAGE_KEY } from "./store/commandDeck";
@@ -224,6 +223,7 @@ describe("Northwatch command deck", () => {
     expect(screen.getByRole("heading", { name: "Market Intel" })).toBeInTheDocument();
     expect(await screen.findByText("Bitcoin")).toBeInTheDocument();
     expect(screen.getByText(/KSh 13,000,000.00/)).toBeInTheDocument();
+    expect(screen.getByText("(USD)")).toBeInTheDocument();
     expect(screen.getByText("Safaricom")).toBeInTheDocument();
     expect(screen.getByText("Kenya fintech funding rises")).toBeInTheDocument();
     expect(screen.getByText(/1 USD = KSh 130.00/)).toBeInTheDocument();
@@ -239,7 +239,9 @@ describe("Northwatch command deck", () => {
     const cryptoPanel = screen.getByRole("heading", { name: "Crypto Prices" }).closest(".deck-panel") as HTMLElement;
     fireEvent.click(within(cryptoPanel).getByRole("button", { name: /refresh/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/intel/refresh/crypto", expect.objectContaining({ method: "POST" })));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/intel/refresh/crypto"), expect.objectContaining({ method: "POST" })])
+    );
   });
 
   it("shows agent health and can send a kanban card to Telegram", async () => {
@@ -263,27 +265,17 @@ describe("Northwatch command deck", () => {
 
     fireEvent.click(within(taskRow).getByRole("button", { name: /send to telegram/i }));
     await waitFor(() =>
-      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-        "/api/telegram/send",
+      expect(vi.mocked(fetch).mock.calls).toContainEqual([
+        expectUrlPath("/api/telegram/send"),
         expect.objectContaining({ method: "POST", credentials: "include" })
-      )
+      ])
     );
   });
 
-  it("handles session expiry, keyboard shortcuts, and dynamic document titles", () => {
-    window.localStorage.setItem(
-      SESSION_TOKEN_STORAGE_KEY,
-      JSON.stringify({
-        token: "nw_expired_token",
-        createdAt: "2026-05-01T08:00:00.000Z",
-        rotatedAt: "2026-05-01T08:00:00.000Z"
-      })
-    );
-
+  it("keeps JWTs out of localStorage while keyboard shortcuts and dynamic document titles work", () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Session expired." })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /rotate token and continue/i }));
+    expect(window.localStorage.getItem("northwatch.session-token.v1")).toBeNull();
     expect(screen.getByRole("heading", { name: /your command deck, live/i })).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "g" });
@@ -331,6 +323,7 @@ describe("Northwatch command deck", () => {
     fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Settings" }));
 
     expect(screen.getByRole("heading", { name: "Connect your Telegram bot" })).toBeInTheDocument();
+    expect(screen.queryByText("Session token")).not.toBeInTheDocument();
     expect(screen.getByText(/Step 1/i)).toBeInTheDocument();
     expect(screen.getByText(/@BotFather/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Telegram bot token")).toBeInTheDocument();
@@ -390,6 +383,7 @@ function mockLiveIntelFetch() {
           priceKes: 13000000,
           priceUsd: 100000,
           change24h: 2.5,
+          change24hCurrency: "USD",
           marketCapKes: 250000000000000
         }
       ]
@@ -483,4 +477,12 @@ function acceptLegalTermsForTests() {
       jurisdiction: "Kenyan data protection law and applicable international privacy principles"
     })
   );
+}
+
+function expectUrlPath(path: string) {
+  return expect.stringMatching(new RegExp(`${escapeRegExp(path)}$`));
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

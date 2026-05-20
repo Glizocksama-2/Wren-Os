@@ -44,14 +44,14 @@ describe("Northwatch React auth", () => {
     fireEvent.click(screen.getByRole("button", { name: /log in/i }));
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/auth/login",
+      expect(fetchMock.mock.calls).toContainEqual([
+        expectUrlPath("/auth/login"),
         expect.objectContaining({
           method: "POST",
           credentials: "include",
           body: JSON.stringify({ email: "operator@northwatch.dev", password: "Watchtower1", rememberMe: true })
         })
-      )
+      ])
     );
     expect(window.localStorage.getItem("northwatch_session")).toBeNull();
   });
@@ -72,7 +72,7 @@ describe("Northwatch React auth", () => {
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 
     expect(screen.getByText("Password confirmation does not match.")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalledWith("/auth/register", expect.anything());
+    expect(fetchMock.mock.calls.some(([url]) => hasUrlPath(url, "/auth/register"))).toBe(false);
   });
 
   it("lets signed-out users choose sign in or sign up without a magic link", async () => {
@@ -150,7 +150,7 @@ describe("Northwatch React auth", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url === "/api/legacy-command-deck") {
+        if (hasUrlPath(url, "/api/legacy-command-deck")) {
           return {
             ok: true,
             status: 200,
@@ -207,7 +207,7 @@ describe("Northwatch React auth", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url === "/api/legacy-command-deck") {
+        if (hasUrlPath(url, "/api/legacy-command-deck")) {
           return {
             ok: true,
             status: 200,
@@ -239,10 +239,22 @@ describe("Northwatch React auth", () => {
 });
 
 function mockFetch(responses: Array<{ ok: boolean; status: number; json: () => Promise<unknown> }>) {
-  const fetchMock = vi.fn(async () => {
+  const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
     const response = responses.shift();
     return response ?? { ok: true, status: 200, json: async () => ({}) };
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function expectUrlPath(path: string) {
+  return expect.stringMatching(new RegExp(`${escapeRegExp(path)}$`));
+}
+
+function hasUrlPath(url: unknown, path: string) {
+  return typeof url === "string" && url.endsWith(path);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

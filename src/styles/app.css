@@ -3678,14 +3678,14 @@ p {
   padding: 12px clamp(18px, 3vw, 26px);
 }
 
-.session-token-card {
+.settings-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgb(255 255 255 / 0.035);
   padding: 14px;
 }
 
-.session-token-card code {
+.settings-card code {
   display: inline-flex;
   width: fit-content;
   border: 1px solid var(--line);
@@ -3696,8 +3696,7 @@ p {
   font-size: 12px;
 }
 
-.session-token-card button,
-.session-expired-screen button {
+.settings-card button {
   display: inline-flex;
   width: fit-content;
   align-items: center;
@@ -5040,6 +5039,18 @@ body {
   line-height: 1.5;
 }
 
+.deck-topbar,
+.deck-content {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+
+.module-shell {
+  max-width: min(1480px, 100%);
+  width: 100%;
+}
+
 .deck-app,
 .deck-app[data-density="compact"] {
   font-size: 14px;
@@ -5053,5 +5064,83 @@ body {
 
   .deck-screen {
     min-width: 600px;
+  }
+}
+
+/* To Do rows need to stay dense after the legacy mobile ops-row rule. */
+.todo-panel .todo-task-list {
+  gap: 8px;
+}
+
+.task-card-row {
+  grid-template-columns: 30px minmax(0, 1fr) auto auto;
+  gap: 8px 10px;
+  min-height: auto;
+  padding: 11px 12px;
+}
+
+.task-card-main {
+  gap: 5px;
+}
+
+.task-meta-line {
+  gap: 5px 6px;
+}
+
+.task-complete-check span {
+  width: 22px;
+  height: 22px;
+}
+
+.task-menu summary {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+@media (max-width: 760px) {
+  .todo-panel .todo-toolbar {
+    gap: 10px;
+  }
+
+  .todo-panel .segmented-tabs {
+    gap: 6px;
+  }
+
+  .todo-panel .segmented-tabs button {
+    min-height: 32px;
+    padding: 6px 9px;
+  }
+
+  .task-card-row {
+    grid-template-areas:
+      "check main menu"
+      ". telegram telegram";
+    grid-template-columns: 26px minmax(0, 1fr) 34px;
+    align-items: start;
+    gap: 6px 8px;
+    padding: 10px 11px;
+  }
+
+  .task-complete-check {
+    grid-area: check;
+    padding-top: 2px;
+  }
+
+  .task-card-main {
+    grid-area: main;
+    min-width: 0;
+  }
+
+  .task-card-row > .telegram-send-button {
+    grid-area: telegram;
+    justify-self: start;
+    width: auto;
+    min-height: 32px;
+    padding: 0 10px;
+  }
+
+  .task-menu {
+    grid-area: menu;
+    justify-self: end;
   }
 }

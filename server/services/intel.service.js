@@ -1,3 +1,5 @@
+import { XMLParser } from "fast-xml-parser";
+
 const DEFAULT_NEWS_SOURCES = [
   { name: "TechCabal", url: "https://techcabal.com/feed/", region: "kenya", priority: 1 },
   { name: "Business Daily Africa", url: "https://www.businessdailyafrica.com/rss", region: "kenya", priority: 2 },
@@ -8,7 +10,7 @@ const DEFAULT_NEWS_SOURCES = [
   { name: "AfricaTech", url: "https://africatechreviews.com/feed/", region: "africa", priority: 7 },
   { name: "Hacker News", url: "https://news.ycombinator.com/rss", region: "global", priority: 8 },
   { name: "Reuters Business", url: "https://feeds.reuters.com/reuters/businessNews", region: "global", priority: 9 },
-  { name: "BBC Africa", url: "http://feeds.bbci.co.uk/news/world/africa/rss.xml", region: "africa", priority: 10 }
+  { name: "BBC Africa", url: "https://feeds.bbci.co.uk/news/world/africa/rss.xml", region: "africa", priority: 10 }
 ];
 
 const COINS = [
@@ -64,6 +66,7 @@ const TTL = {
   forex: 15 * 60 * 1000,
   indicators: 60 * 60 * 1000
 };
+const xmlParser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
 
 export function createIntelService(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
@@ -138,7 +141,8 @@ export function createIntelService(options = {}) {
           image,
           priceKes: Number(coin.kes ?? 0),
           priceUsd: Number(coin.usd ?? 0),
-          change24h: Number(coin.kes_24h_change ?? coin.usd_24h_change ?? 0),
+          change24h: Number(coin.usd_24h_change ?? 0),
+          change24hCurrency: "USD",
           marketCapKes: Number(coin.kes_market_cap ?? 0),
           marketCapUsd: Number(coin.usd_market_cap ?? 0)
         };
@@ -220,7 +224,7 @@ export function createIntelService(options = {}) {
 
   async function fetchNewsSource(source) {
     const xml = await fetchText(source.url);
-    const entries = await parseFeed(xml);
+    const entries = parseFeed(xml);
     return entries.map((entry) => {
       const title = cleanText(entry.title);
       const summary = cleanText(entry.summary);
@@ -284,16 +288,31 @@ export function createIntelService(options = {}) {
     }));
   }
 
-  async function fetchJson(url) {
-    const response = await fetchImpl(url, { headers: { Accept: "application/json", "User-Agent": "Northwatch Intel/1.0" } });
+  async function fetchJson(url, timeoutMs = 8000) {
+    const response = await fetchWithTimeout(url, { headers: { Accept: "application/json", "User-Agent": "Northwatch Intel/1.0" } }, timeoutMs);
     if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
     return response.json();
   }
 
-  async function fetchText(url) {
-    const response = await fetchImpl(url, { headers: { Accept: "application/rss+xml, application/xml, text/xml, text/html", "User-Agent": "Northwatch Intel/1.0" } });
+  async function fetchText(url, timeoutMs = 8000) {
+    const response = await fetchWithTimeout(url, { headers: { Accept: "application/rss+xml, application/xml, text/xml, text/html", "User-Agent": "Northwatch Intel/1.0" } }, timeoutMs);
     if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
     return response.text();
+  }
+
+  async function fetchWithTimeout(url, options, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetchImpl(url, { ...options, signal: controller.signal });
+    } catch (error) {
+      if (controller.signal.aborted || error?.name === "AbortError") {
+        throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   return { fetchNews, fetchCrypto, fetchNSEStocks, fetchGlobalStocks, fetchForex, fetchIndicators, fetchAll };
@@ -306,10 +325,9 @@ function getEmptyPayload(type) {
   return { items: [] };
 }
 
-async function parseFeed(xml) {
-  const parser = await getFastXmlParser();
-  if (parser) {
-    const parsed = parser.parse(xml);
+function parseFeed(xml) {
+  try {
+    const parsed = xmlParser.parse(xml);
     const channelItems = parsed?.rss?.channel?.item ?? parsed?.feed?.entry ?? [];
     return toArray(channelItems).map((item) => ({
       title: readText(item.title),
@@ -317,17 +335,8 @@ async function parseFeed(xml) {
       url: readText(item.link?.href ?? item.link ?? item.guid),
       publishedAt: readText(item.pubDate ?? item.published ?? item.updated)
     }));
-  }
-  return parseFeedFallback(xml);
-}
-
-async function getFastXmlParser() {
-  try {
-    const optionalImport = new Function("specifier", "return import(specifier)");
-    const module = await optionalImport("fast-xml-parser");
-    return new module.XMLParser({ ignoreAttributes: false, attributeNamePrefix: "" });
   } catch {
-    return null;
+    return parseFeedFallback(xml);
   }
 }
 

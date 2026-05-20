@@ -33,6 +33,7 @@ describe("intel service", () => {
         usd: 100000,
         kes: 13000000,
         usd_24h_change: 2.5,
+        kes_24h_change: 99,
         kes_market_cap: 250000000000000
       }
     };
@@ -51,9 +52,32 @@ describe("intel service", () => {
       priceKes: 13000000,
       priceUsd: 100000,
       change24h: 2.5,
+      change24hCurrency: "USD",
       marketCapKes: 250000000000000
     });
     expect(second.status).toBe("stale");
     expect(second.items[0].id).toBe("bitcoin");
+  });
+
+  it("aborts external intel fetches that exceed the request timeout", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn((_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      })
+    );
+    const service = createIntelService({ fetchImpl, now: () => new Date("2026-05-19T08:10:00.000Z") });
+
+    const pending = service.fetchCrypto({ force: true });
+    await vi.advanceTimersByTimeAsync(8000);
+    const result = await pending;
+
+    expect(result.status).toBe("empty");
+    expect(result.errors[0]).toMatch(/Request to https:\/\/api\.coingecko\.com\/api\/v3\/simple\/price.*timed out after 8000ms/);
+    vi.useRealTimers();
   });
 });

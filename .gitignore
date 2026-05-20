@@ -8,6 +8,8 @@ playwright-report/
 .env.local
 .env.*.local
 wren-os-dev*.log
+northwatch-local-api*.log
+northwatch-review-*.zip
 *.tsbuildinfo
 vite.config.d.ts
 vite.config.js

@@ -25,7 +25,9 @@ describe("Northwatch team UI", () => {
     expect(screen.getByLabelText("Team slug")).toHaveValue("birunda-farms");
     fireEvent.click(screen.getByRole("button", { name: /create team/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/teams", expect.objectContaining({ method: "POST", credentials: "include" })));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/teams"), expect.objectContaining({ method: "POST", credentials: "include" })])
+    );
     expect(window.location.pathname).toBe("/team/birunda-farms");
   });
 
@@ -112,7 +114,9 @@ describe("Northwatch team UI", () => {
     expect(screen.getByText(/You were added/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /mark all as read/i }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/notifications/read-all", expect.objectContaining({ method: "POST" })));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/notifications/read-all"), expect.objectContaining({ method: "POST" })])
+    );
   });
 });
 
@@ -122,4 +126,12 @@ function jsonResponse(body, status = 200) {
     status,
     json: async () => body
   };
+}
+
+function expectUrlPath(path) {
+  return expect.stringMatching(new RegExp(`${escapeRegExp(path)}$`));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -35,6 +35,7 @@ interface CryptoItem {
   priceKes: number;
   priceUsd: number;
   change24h: number;
+  change24hCurrency?: string;
   marketCapKes: number;
 }
 
@@ -307,7 +308,9 @@ function CryptoCard({ coin }: { coin: CryptoItem }) {
       <div className="crypto-card-head"><img src={coin.image} alt="" /><div><strong>{coin.name}</strong><span>{coin.symbol}</span></div></div>
       <strong className="market-price">{toKSH(coin.priceKes, coin.priceKes > 10 ? 2 : 4)}</strong>
       <small>{formatUsd(coin.priceUsd)}</small>
-      <span className={`change-badge ${coin.change24h >= 0 ? "up" : "down"}`}>{coin.change24h >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />} {formatPercent(coin.change24h)}</span>
+      <span className={`change-badge ${coin.change24h >= 0 ? "up" : "down"}`} title={`24h change is ${coin.change24hCurrency ?? "USD"}-denominated`}>
+        {coin.change24h >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />} {formatPercent(coin.change24h)} <small>({coin.change24hCurrency ?? "USD"})</small>
+      </span>
       <em>Cap {toKSH(coin.marketCapKes, 0)}</em>
     </article>
   );

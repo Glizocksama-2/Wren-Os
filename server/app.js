@@ -23,6 +23,7 @@ export function createApp(options = {}) {
   const teamDb = options.teamDb ?? (pool ? createPostgresTeamDb(pool) : null);
   const authService = options.authService ?? createAuthService({ db: authDb, jwtSecret: options.jwtSecret });
   const mailer = options.mailer ?? createInviteMailer();
+  const appBaseUrl = options.appBaseUrl ?? process.env.NORTHWATCH_APP_URL ?? "http://127.0.0.1:5173";
 
   app.set("trust proxy", 1);
   app.use(helmet());
@@ -30,10 +31,13 @@ export function createApp(options = {}) {
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
 
+  app.get("/", (_request, response) => {
+    response.type("html").send(renderRootPage(appBaseUrl));
+  });
   app.get("/health", (_request, response) => response.json({ ok: true, service: "northwatch-auth", checkedAt: new Date().toISOString() }));
   app.use("/auth", createAuthRouter({ express, authService }));
   app.use("/api/auth", createAuthRouter({ express, authService }));
-  app.use("/api/intel", createIntelRouter({ express }));
+  app.use("/api/intel", createIntelRouter({ express, authService }));
   if (teamDb) {
     app.use("/api/invites", createInviteAcceptRouter({ express, db: teamDb, authenticate: authenticate({ authService }) }));
   }
@@ -50,4 +54,32 @@ export function createApp(options = {}) {
   }
 
   return app;
+}
+
+function renderRootPage(appBaseUrl) {
+  const frontendUrl = escapeHtml(appBaseUrl);
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Northwatch API</title>
+  </head>
+  <body>
+    <main>
+      <h1>Northwatch API is running</h1>
+      <p>This is the Express backend. Open the React app to use Northwatch.</p>
+      <p><a href="${frontendUrl}">Open Northwatch frontend</a></p>
+      <p>Health check: <a href="/health">/health</a></p>
+    </main>
+  </body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }

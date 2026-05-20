@@ -1,7 +1,9 @@
+import { authenticate } from "../middleware/authenticate.js";
 import { createIntelService } from "../services/intel.service.js";
 
-export function createIntelRouter({ express, service = createIntelService() }) {
+export function createIntelRouter({ express, service = createIntelService(), authService }) {
   const router = express.Router();
+  const requireAuth = authenticate({ authService });
 
   router.get("/news", async (request, response) => {
     const payload = await service.fetchNews();
@@ -26,7 +28,7 @@ export function createIntelRouter({ express, service = createIntelService() }) {
   router.get("/indicators", async (_request, response) => response.json(await service.fetchIndicators()));
   router.get("/all", async (_request, response) => response.json(await service.fetchAll()));
 
-  router.post("/refresh/:type", async (request, response) => {
+  router.post("/refresh/:type", requireAuth, async (request, response) => {
     const method = getRefreshMethod(service, request.params.type);
     if (!method) {
       response.status(404).json({ error: "Unknown intel refresh type." });

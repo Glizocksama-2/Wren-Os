@@ -58,26 +58,8 @@ import { IntelPage } from "./components/IntelPage";
 import { CurrencyProvider } from "./context/CurrencyContext";
 import { buildAutonomousIntelScan } from "./lib/intelAutopilot";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
-import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
 import { toKSH } from "./utils/currency";
-import {
-  buildTeamInviteUrl,
-  createTeamInvite,
-  createTeamWorkspace,
-  joinTeamWorkspace,
-  listTeamMembers,
-  listTeamWorkspaces,
-  loadCloudDeck,
-  loadTeamCloudDeck,
-  removeTeamMember,
-  saveCloudDeck,
-  saveTeamCloudDeck,
-  updateTeamMemberRole,
-  type CloudDeckClient,
-  type TeamMember,
-  type TeamRole,
-  type TeamWorkspace
-} from "./store/cloudDeck";
+import type { TeamMember, TeamRole, TeamWorkspace } from "./store/cloudDeck";
 import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
 import {
   type Accent,
@@ -96,7 +78,6 @@ import {
   type Priority,
   type RoutineCadence,
   type RoutineDay,
-  freshCommandDeck,
   getDeckMetrics,
   hasMeaningfulDeckData,
   loadCommandDeck,
@@ -171,21 +152,17 @@ type AgentConnectionState = {
 
 type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
 type TeamWorkspaceSelection = { type: "personal" } | { type: "team"; teamId: string; slug: string; name: string; role: string };
-const PENDING_TEAM_INVITE_STORAGE_KEY = "northwatch.pendingTeamInvite.v1";
 const ACTIVE_TEAM_WORKSPACE_STORAGE_KEY = "northwatch.active-team-workspace.v1";
 export const LEGAL_CONSENT_STORAGE_KEY = "northwatch.legal-consent.v1";
 export const TERMS_VERSION = "2026-05-19";
 export const PRIVACY_VERSION = "2026-05-19";
 const LEGAL_JURISDICTION_LABEL = "Kenyan data protection law and applicable international privacy principles";
-export const SESSION_TOKEN_STORAGE_KEY = "northwatch.session-token.v1";
-export const SESSION_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const AGENT_HEALTH_POLL_MS = 30000;
 const ACTIVITY_FEED_POLL_MS = 60000;
 const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL?.trim() ?? "").replace(/\/$/, "");
 const TELEGRAM_SEND_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/send`;
 const TELEGRAM_CONFIG_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/config`;
 const LEGACY_COMMAND_DECK_ENDPOINT = `${AUTH_API_BASE_URL}/api/legacy-command-deck`;
-const LEGACY_SUPABASE_CLOUD_SYNC_ENABLED = false;
 const LEGACY_CLOUD_IMPORT_STORAGE_PREFIX = "northwatch.legacy-cloud-import.v2";
 
 type LegalPanel = "settings" | "help" | "privacy" | "terms";
@@ -196,12 +173,6 @@ export interface LegalConsentRecord {
   privacyVersion: string;
   acceptedAt: string;
   jurisdiction: string;
-}
-
-export interface SessionTokenRecord {
-  token: string;
-  createdAt: string;
-  rotatedAt: string;
 }
 
 interface AgentHealthRecord {
@@ -260,41 +231,6 @@ export function hasValidLegalConsent(record: LegalConsentRecord | null): boolean
   );
 }
 
-function loadOrCreateSessionToken(): SessionTokenRecord {
-  try {
-    const stored = window.localStorage.getItem(SESSION_TOKEN_STORAGE_KEY);
-    if (stored) {
-      const parsed = JSON.parse(stored) as Partial<SessionTokenRecord>;
-      if (parsed.token && parsed.createdAt && parsed.rotatedAt) {
-        return parsed as SessionTokenRecord;
-      }
-    }
-  } catch {
-    // Fall through to a fresh token.
-  }
-
-  const token = createSessionToken();
-  saveSessionToken(token);
-  return token;
-}
-
-function saveSessionToken(record: SessionTokenRecord) {
-  window.localStorage.setItem(SESSION_TOKEN_STORAGE_KEY, JSON.stringify(record));
-}
-
-function createSessionToken(): SessionTokenRecord {
-  const now = new Date().toISOString();
-  return {
-    token: `nw_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`,
-    createdAt: now,
-    rotatedAt: now
-  };
-}
-
-function isSessionTokenExpired(record: SessionTokenRecord): boolean {
-  return Date.now() - new Date(record.createdAt).getTime() > SESSION_TOKEN_MAX_AGE_MS;
-}
-
 const agentQuickPrompts = [
   "Brief my next move",
   "Find the bottleneck",
@@ -313,30 +249,23 @@ export default function App(props: AppProps = {}) {
 
 function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   const authUserId = authUser?.id ?? null;
-  const isSupabaseCloudConfigured = LEGACY_SUPABASE_CLOUD_SYNC_ENABLED && supabaseConfig.isConfigured;
   const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeck(window.localStorage, authUserId));
   const [view, setView] = useState<DeckView>("dashboard");
   const [notice, setNotice] = useState("Fresh command deck initialized.");
-  const [session, setSession] = useState<WrenSession | null>(null);
-  const [authReady, setAuthReady] = useState(!isSupabaseCloudConfigured);
-  const [cloudReady, setCloudReady] = useState(!isSupabaseCloudConfigured);
-  const [cloudStatus, setCloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
+  const [cloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>({ kind: "personal" });
   const [activeTeamWorkspace, setActiveTeamWorkspace] = useState<TeamWorkspaceSelection>(() => loadActiveTeamWorkspace());
-  const [teams, setTeams] = useState<TeamWorkspace[]>([]);
+  const [teams] = useState<TeamWorkspace[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
-  const [isTeamBusy, setIsTeamBusy] = useState(false);
+  const [isTeamBusy] = useState(false);
   const [isLogoMenuOpen, setIsLogoMenuOpen] = useState(false);
   const [legalPanel, setLegalPanel] = useState<LegalPanel | null>(null);
   const [legalConsent, setLegalConsent] = useState<LegalConsentRecord | null>(() => loadLegalConsent());
-  const [sessionToken, setSessionToken] = useState<SessionTokenRecord>(() => loadOrCreateSessionToken());
   const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
   const [isRecoveringLegacyDeck, setIsRecoveringLegacyDeck] = useState(false);
   const [newActivityCount, setNewActivityCount] = useState(0);
   const latestDeckRef = useRef(state);
-  const saveTimerRef = useRef<number | null>(null);
-  const pendingInviteAttemptRef = useRef<string | null>(null);
   const logoMenuRef = useRef<HTMLDivElement | null>(null);
   const lastActivityPollRef = useRef(state.updatedAt);
   const shortcutChordRef = useRef<{ key: string; armedAt: number } | null>(null);
@@ -414,190 +343,6 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
       setIsRecoveringLegacyDeck(false);
     }
   }, [authUserId]);
-
-  useEffect(() => {
-    if (!isSupabaseCloudConfigured || !supabase) return;
-
-    let isMounted = true;
-
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!isMounted) return;
-
-      if (error) {
-        setAuthReady(true);
-        setCloudReady(true);
-        setCloudStatus({
-          mode: "error",
-          label: "Cloud auth: session error",
-          detail: error.message,
-          lastSyncedAt: null,
-          userEmail: null
-        });
-        return;
-      }
-
-      setSession(data.session);
-      setAuthReady(true);
-      if (!data.session) {
-        setCloudReady(false);
-        setCloudStatus({
-          mode: "signed-out",
-          label: "Cloud auth: sign in required",
-          detail: "Use your Northwatch email and password account to open the deck.",
-          lastSyncedAt: null,
-          userEmail: null
-        });
-      }
-    });
-
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setAuthReady(true);
-      if (!nextSession) {
-        setCloudReady(false);
-        setWorkspaceMode({ kind: "personal" });
-        setTeams([]);
-        setTeamMembers([]);
-        setTeamInviteLink("");
-        setCloudStatus({
-          mode: "signed-out",
-          label: "Cloud auth: sign in required",
-          detail: "Use your Northwatch email and password account to open the deck.",
-          lastSyncedAt: null,
-          userEmail: null
-        });
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isSupabaseCloudConfigured || !supabase || !authReady || !session) return;
-
-    const userId = session.user.id;
-    const userEmail = session.user.email ?? null;
-    let isCancelled = false;
-    setCloudReady(false);
-    setWorkspaceMode({ kind: "personal" });
-    setCloudStatus({
-      mode: "syncing",
-      label: "Cloud auth: syncing",
-      detail: "Loading your private Supabase command deck.",
-      lastSyncedAt: null,
-      userEmail
-    });
-
-    async function hydrateCloudDeck() {
-      try {
-        const client = supabase as unknown as CloudDeckClient;
-        const cloudDeck = await loadCloudDeck(client, userId);
-        const teamWorkspaces = await listTeamWorkspaces(client, userId);
-
-        if (isCancelled) return;
-
-        if (cloudDeck) {
-          dispatch({ type: "deck/import", deck: cloudDeck });
-          setTeams(teamWorkspaces);
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: synced",
-            detail: "Loaded your private Supabase workspace.",
-            lastSyncedAt: cloudDeck.updatedAt,
-            userEmail
-          });
-        } else {
-          dispatch({ type: "deck/import", deck: freshCommandDeck });
-          setTeams(teamWorkspaces);
-          const savedAt = await saveCloudDeck(client, userId, freshCommandDeck);
-          if (isCancelled) return;
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: seeded",
-            detail: "Created a private Supabase workspace for this signed-in user.",
-            lastSyncedAt: savedAt,
-            userEmail
-          });
-        }
-
-        setCloudReady(true);
-      } catch (error) {
-        if (isCancelled) return;
-        setCloudReady(true);
-        setCloudStatus({
-          mode: "error",
-          label: "Cloud auth: sync error",
-          detail: getErrorMessage(error),
-          lastSyncedAt: null,
-          userEmail
-        });
-      }
-    }
-
-    void hydrateCloudDeck();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [authReady, session?.user.email, session?.user.id]);
-
-  useEffect(() => {
-    if (!isSupabaseCloudConfigured || !supabase || !session || !cloudReady) return;
-
-    const userId = session.user.id;
-    const userEmail = session.user.email ?? null;
-    const currentWorkspace = workspaceMode;
-
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
-    }
-
-    setCloudStatus((current) => ({
-      ...current,
-      mode: current.mode === "error" ? current.mode : "syncing",
-      label: current.mode === "error" ? current.label : "Cloud auth: saving"
-    }));
-
-    saveTimerRef.current = window.setTimeout(() => {
-      const client = supabase as unknown as CloudDeckClient;
-      const saveOperation =
-        currentWorkspace.kind === "team"
-          ? saveTeamCloudDeck(client, currentWorkspace.teamId, userId, latestDeckRef.current)
-          : saveCloudDeck(client, userId, latestDeckRef.current);
-
-      saveOperation
-        .then((savedAt) => {
-          const teamName = currentWorkspace.kind === "team" ? teams.find((team) => team.id === currentWorkspace.teamId)?.name : null;
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: synced",
-            detail: teamName ? `Shared team workspace "${teamName}" is current.` : "Private Supabase workspace is current.",
-            lastSyncedAt: savedAt,
-            userEmail
-          });
-        })
-        .catch((error) => {
-          setCloudStatus({
-            mode: "error",
-            label: "Cloud auth: save error",
-            detail: getErrorMessage(error),
-            lastSyncedAt: null,
-            userEmail
-          });
-        });
-    }, 700);
-
-    return () => {
-      if (saveTimerRef.current) {
-        window.clearTimeout(saveTimerRef.current);
-      }
-    };
-  }, [state, session?.user.email, session?.user.id, cloudReady, workspaceMode, teams]);
 
   useEffect(() => {
     if (!notice) return;
@@ -757,245 +502,56 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   };
 
   const signOut = async () => {
-    if (onAuthLogout) {
-      await onAuthLogout();
-      return;
-    }
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      setNotice(error.message);
-      return;
-    }
-    setNotice("Signed out of cloud auth.");
-  };
-
-  const refreshTeamMembers = async (teamId: string) => {
-    if (!isSupabaseCloudConfigured || !supabase || !session) {
-      setTeamMembers([]);
-      return;
-    }
-
     try {
-      const client = supabase as unknown as CloudDeckClient;
-      const members = await listTeamMembers(client, teamId);
-      setTeamMembers(members);
+      if (onAuthLogout) {
+        await onAuthLogout();
+      } else {
+        const response = await fetch(`${AUTH_API_BASE_URL}/auth/logout`, {
+          method: "POST",
+          credentials: "include"
+        });
+        if (!response.ok && response.status !== 401) {
+          throw new Error(await readApiError(response, `Logout failed with HTTP ${response.status}.`));
+        }
+      }
+      setNotice("Signed out.");
     } catch (error) {
-      setTeamMembers([]);
-      setNotice(getErrorMessage(error));
+      setNotice(`Sign out failed: ${getErrorMessage(error)}`);
     }
   };
 
   const switchWorkspace = async (nextWorkspace: WorkspaceMode) => {
-    if (!isSupabaseCloudConfigured || !supabase || !session) return;
-
     const isSameWorkspace =
       workspaceMode.kind === nextWorkspace.kind &&
       (workspaceMode.kind === "personal" || (nextWorkspace.kind === "team" && workspaceMode.teamId === nextWorkspace.teamId));
     if (isSameWorkspace) return;
-
-    const client = supabase as unknown as CloudDeckClient;
-    const userId = session.user.id;
-    const userEmail = session.user.email ?? null;
-    const teamName = nextWorkspace.kind === "team" ? teams.find((team) => team.id === nextWorkspace.teamId)?.name ?? "team" : null;
-
-    setIsTeamBusy(true);
-    setCloudReady(false);
-    setCloudStatus({
-      mode: "syncing",
-      label: "Cloud auth: switching",
-      detail: teamName ? `Loading shared workspace for ${teamName}.` : "Loading your private workspace.",
-      lastSyncedAt: null,
-      userEmail
-    });
-
-    try {
-      if (nextWorkspace.kind === "team") {
-        const teamDeck = await loadTeamCloudDeck(client, nextWorkspace.teamId);
-        if (teamDeck) {
-          dispatch({ type: "deck/import", deck: teamDeck });
-          setWorkspaceMode(nextWorkspace);
-          setTeamInviteLink("");
-          await refreshTeamMembers(nextWorkspace.teamId);
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: synced",
-            detail: `Loaded shared team workspace "${teamName ?? nextWorkspace.teamId}".`,
-            lastSyncedAt: teamDeck.updatedAt,
-            userEmail
-          });
-        } else {
-          dispatch({ type: "deck/import", deck: freshCommandDeck });
-          const savedAt = await saveTeamCloudDeck(client, nextWorkspace.teamId, userId, freshCommandDeck);
-          setWorkspaceMode(nextWorkspace);
-          setTeamInviteLink("");
-          await refreshTeamMembers(nextWorkspace.teamId);
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: seeded",
-            detail: `Created a fresh shared workspace for ${teamName ?? "this team"}.`,
-            lastSyncedAt: savedAt,
-            userEmail
-          });
-        }
-      } else {
-        const personalDeck = await loadCloudDeck(client, userId);
-        const safeDeck = personalDeck ?? freshCommandDeck;
-        dispatch({ type: "deck/import", deck: safeDeck });
-        const savedAt = personalDeck ? personalDeck.updatedAt : await saveCloudDeck(client, userId, safeDeck);
-        setWorkspaceMode(nextWorkspace);
-        setTeamMembers([]);
-        setTeamInviteLink("");
-        setCloudStatus({
-          mode: "synced",
-          label: personalDeck ? "Cloud auth: synced" : "Cloud auth: seeded",
-          detail: personalDeck ? "Loaded your private Supabase workspace." : "Created a private Supabase workspace for this signed-in user.",
-          lastSyncedAt: savedAt,
-          userEmail
-        });
-      }
-      setCloudReady(true);
-    } catch (error) {
-      setCloudReady(true);
-      setCloudStatus({
-        mode: "error",
-        label: "Cloud auth: workspace error",
-        detail: getErrorMessage(error),
-        lastSyncedAt: null,
-        userEmail
-      });
-    } finally {
-      setIsTeamBusy(false);
-    }
+    setWorkspaceMode(nextWorkspace);
+    setTeamInviteLink("");
+    if (nextWorkspace.kind === "personal") setTeamMembers([]);
+    setNotice(nextWorkspace.kind === "team" ? "Switched to team workspace." : "Switched to personal workspace.");
   };
 
   const createTeam = async (name: string) => {
-    if (!isSupabaseCloudConfigured || !supabase || !session) {
-      setNotice("Team mode is paused while Northwatch uses credential auth.");
-      return;
-    }
-
-    const client = supabase as unknown as CloudDeckClient;
-    setIsTeamBusy(true);
-    try {
-      const team = await createTeamWorkspace(client, session.user.id, name, undefined, session.user.email);
-      setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
-      setNotice(`Team created: ${team.name}.`);
-      await switchWorkspace({ kind: "team", teamId: team.id });
-    } catch (error) {
-      setNotice(getErrorMessage(error));
-      setIsTeamBusy(false);
-    }
+    setNotice(name.trim() ? "Create teams from the Teams workspace so they are stored in PostgreSQL." : "Enter a team name first.");
   };
 
   const joinTeam = async (teamCode: string) => {
-    if (!isSupabaseCloudConfigured || !supabase || !session) {
-      setNotice("Team mode is paused while Northwatch uses credential auth.");
-      return;
-    }
-
-    const client = supabase as unknown as CloudDeckClient;
-    setIsTeamBusy(true);
-    try {
-      const team = await joinTeamWorkspace(client, session.user.id, teamCode, session.user.email);
-      clearPendingTeamInvite();
-      setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
-      setNotice(`Joined team: ${team.name}.`);
-      await switchWorkspace({ kind: "team", teamId: team.id });
-    } catch (error) {
-      setNotice(getErrorMessage(error));
-      setIsTeamBusy(false);
-    }
+    setNotice(teamCode.trim() ? "Open the invite link to join through the PostgreSQL team flow." : "Enter an invite code first.");
   };
 
   const createInviteLink = async () => {
-    if (!isSupabaseCloudConfigured || !supabase || !session || !activeTeam) {
-      setNotice("Open a signed-in team workspace before creating an invite.");
-      return;
-    }
-
-    const client = supabase as unknown as CloudDeckClient;
-    setIsTeamBusy(true);
-    try {
-      const invite = await createTeamInvite(client, activeTeam.id, session.user.id, window.location.origin);
-      setTeamInviteLink(invite.url);
-      try {
-        await navigator.clipboard?.writeText(invite.url);
-        setNotice("Invite link created and copied.");
-      } catch {
-        setNotice("Invite link created. Copy it from the field.");
-      }
-    } catch (error) {
-      setNotice(getErrorMessage(error));
-    } finally {
-      setIsTeamBusy(false);
-    }
+    setTeamInviteLink("");
+    setNotice("Team invites are managed from the PostgreSQL team settings page.");
   };
 
   const updateMemberRole = async (memberUserId: string, role: TeamRole) => {
-    if (!isSupabaseCloudConfigured || !supabase || !session || !activeTeam) {
-      setNotice("Open an owner team workspace before changing roles.");
-      return;
-    }
-
-    const client = supabase as unknown as CloudDeckClient;
-    setIsTeamBusy(true);
-    try {
-      await updateTeamMemberRole(client, activeTeam.id, memberUserId, role);
-      const nextTeams = await listTeamWorkspaces(client, session.user.id);
-      setTeams(nextTeams);
-      await refreshTeamMembers(activeTeam.id);
-      setNotice(role === "owner" ? "Member promoted to owner." : "Member role set to member.");
-    } catch (error) {
-      setNotice(getErrorMessage(error));
-    } finally {
-      setIsTeamBusy(false);
-    }
+    setNotice(`${memberUserId} role changes are handled in team settings.`);
   };
 
   const removeMember = async (memberUserId: string) => {
-    if (!isSupabaseCloudConfigured || !supabase || !session || !activeTeam) {
-      setNotice("Open an owner team workspace before removing members.");
-      return;
-    }
-
-    const client = supabase as unknown as CloudDeckClient;
-    setIsTeamBusy(true);
-    try {
-      await removeTeamMember(client, activeTeam.id, memberUserId);
-      const nextTeams = await listTeamWorkspaces(client, session.user.id);
-      setTeams(nextTeams);
-      setTeamMembers((current) => current.filter((member) => member.userId !== memberUserId));
-      setNotice("Member removed from team.");
-      if (memberUserId === session.user.id) {
-        await switchWorkspace({ kind: "personal" });
-      } else {
-        await refreshTeamMembers(activeTeam.id);
-      }
-    } catch (error) {
-      setNotice(getErrorMessage(error));
-    } finally {
-      setIsTeamBusy(false);
-    }
+    setTeamMembers((current) => current.filter((member) => member.userId !== memberUserId));
+    setNotice("Member removed from this local account view.");
   };
-
-  useEffect(() => {
-    if (!isSupabaseCloudConfigured || !session || !cloudReady) return;
-
-    const pendingInvite = readPendingTeamInvite();
-    if (!pendingInvite || pendingInviteAttemptRef.current === pendingInvite) return;
-
-    pendingInviteAttemptRef.current = pendingInvite;
-    void joinTeam(pendingInvite);
-  }, [cloudReady, session?.user.id]);
-
-  if (isSupabaseCloudConfigured && !authReady) {
-    return <CloudBootScreen status={cloudStatus} />;
-  }
-
-  if (isSupabaseCloudConfigured && authReady && session && !cloudReady) {
-    return <CloudBootScreen status={cloudStatus} />;
-  }
 
   const commandCenterName = getCommandCenterName(state.settings);
   const hasAcceptedLegalTerms = hasValidLegalConsent(legalConsent);
@@ -1023,22 +579,11 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     setNotice("Terms and Privacy Policy accepted.");
   };
 
-  const rotateSessionToken = () => {
-    const nextToken = createSessionToken();
-    saveSessionToken(nextToken);
-    setSessionToken(nextToken);
-    setNotice("Session token rotated.");
-  };
-
   const switchExpressWorkspace = (workspace: TeamWorkspaceSelection) => {
     saveActiveTeamWorkspace(workspace);
     setActiveTeamWorkspace(workspace);
     setNotice(workspace.type === "team" ? `Switched to ${workspace.name} workspace.` : "Switched to personal workspace.");
   };
-
-  if (isSessionTokenExpired(sessionToken)) {
-    return <SessionExpiredScreen sessionToken={sessionToken} onRotate={rotateSessionToken} />;
-  }
 
   return (
     <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
@@ -1154,8 +699,6 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
         <LegalInfoWindow
           panel={legalPanel}
           consentRecord={legalConsent}
-          sessionToken={sessionToken}
-          onRotateSessionToken={rotateSessionToken}
           onNotice={setNotice}
           onClose={() => setLegalPanel(null)}
         />
@@ -1277,20 +820,15 @@ function LegalConsentGate({
 function LegalInfoWindow({
   panel,
   consentRecord,
-  sessionToken,
-  onRotateSessionToken,
   onNotice,
   onClose
 }: {
   panel: LegalPanel;
   consentRecord: LegalConsentRecord | null;
-  sessionToken: SessionTokenRecord;
-  onRotateSessionToken: () => void;
   onNotice: (message: string) => void;
   onClose: () => void;
 }) {
   const content = getLegalPanelContent(panel, consentRecord);
-  const tokenAgeDays = Math.max(0, Math.floor((Date.now() - new Date(sessionToken.createdAt).getTime()) / (24 * 60 * 60 * 1000)));
 
   return (
     <div className="legal-window-backdrop" onMouseDown={onClose}>
@@ -1318,16 +856,6 @@ function LegalInfoWindow({
               {section.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
             </article>
           ))}
-          {panel === "settings" && (
-            <article className="session-token-card">
-              <h3>Session token</h3>
-              <p>Current token age: {tokenAgeDays} day{tokenAgeDays === 1 ? "" : "s"}. Tokens expire after 7 days.</p>
-              <code>{maskSessionToken(sessionToken.token)}</code>
-              <button type="button" onClick={onRotateSessionToken}>
-                <RotateCcw size={15} /> Rotate token
-              </button>
-            </article>
-          )}
           {panel === "settings" && <TelegramSettingsCard onNotice={onNotice} />}
         </div>
         <div className="legal-window-foot">
@@ -1448,7 +976,7 @@ function TelegramSettingsCard({ onNotice }: { onNotice: (message: string) => voi
       : "No personal Telegram bot connected yet.";
 
   return (
-    <article className="session-token-card telegram-settings-card">
+    <article className="settings-card telegram-settings-card">
       <div className="telegram-card-head">
         <div>
           <h3>Connect your Telegram bot</h3>
@@ -1804,39 +1332,6 @@ function ProfileAvatar({ settings, compact = false, ariaHidden = false }: { sett
     <div className={`profile-avatar ${compact ? "compact" : ""}`} aria-hidden={ariaHidden || undefined}>
       {avatarUrl ? <img src={avatarUrl} alt={ariaHidden ? "" : `${displayName} avatar`} /> : <span>{getProfileInitials(displayName)}</span>}
     </div>
-  );
-}
-
-function CloudBootScreen({ status }: { status: CloudStatus }) {
-  return (
-    <main className="auth-screen">
-      <section className="auth-panel">
-        <div className="auth-mark">
-          <LockKeyhole size={24} />
-        </div>
-        <span className="micro-label">Northwatch secure boot</span>
-        <h1>Checking private access.</h1>
-        <p>{status.detail}</p>
-      </section>
-    </main>
-  );
-}
-
-function SessionExpiredScreen({ sessionToken, onRotate }: { sessionToken: SessionTokenRecord; onRotate: () => void }) {
-  return (
-    <main className="auth-screen session-expired-screen">
-      <section className="auth-panel">
-        <div className="auth-mark">
-          <KeyRound size={24} />
-        </div>
-        <span className="micro-label">Token security</span>
-        <h1>Session expired.</h1>
-        <p>Your local Northwatch session token was created on {formatDateTime(sessionToken.createdAt)} and is older than the 7 day limit.</p>
-        <button type="button" onClick={onRotate}>
-          <RotateCcw size={16} /> Rotate token and continue
-        </button>
-      </section>
-    </main>
   );
 }
 
@@ -3957,29 +3452,6 @@ function AccountModule({
   );
 }
 
-function readPendingTeamInvite(): string | null {
-  const inviteFromLocation = readTeamInviteFromLocation();
-  if (inviteFromLocation) return inviteFromLocation;
-  return window.localStorage.getItem(PENDING_TEAM_INVITE_STORAGE_KEY);
-}
-
-function readTeamInviteFromLocation(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const teamId = params.get("team")?.trim();
-  const inviteId = params.get("invite")?.trim();
-  if (!teamId || !inviteId) return null;
-  return buildTeamInviteUrl(window.location.origin, teamId, inviteId);
-}
-
-function clearPendingTeamInvite() {
-  window.localStorage.removeItem(PENDING_TEAM_INVITE_STORAGE_KEY);
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has("team") && !url.searchParams.has("invite")) return;
-  url.searchParams.delete("team");
-  url.searchParams.delete("invite");
-  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-}
-
 function LogoMark({ variant }: { variant: LogoStyle }) {
   if (variant === "monolith") {
     return (
@@ -4548,7 +4020,7 @@ function TelegramButton({ payload, onNotice }: { payload: TelegramPayload; onNot
   };
 
   return (
-    <button type="button" onClick={send} disabled={isSending}>
+    <button className="telegram-send-button" type="button" onClick={send} disabled={isSending}>
       <Send size={15} /> {isSending ? "Sending" : "Send to Telegram"}
     </button>
   );
@@ -4869,10 +4341,6 @@ function getKanbanPriorityLabel(priority: KanbanPriority): string {
   if (priority === "urgent") return "URGENT";
   if (priority === "later") return "LATER";
   return "NORMAL";
-}
-
-function maskSessionToken(token: string): string {
-  return `${token.slice(0, 7)}...${token.slice(-4)}`;
 }
 
 function formatClock(value: string): string {

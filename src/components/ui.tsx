@@ -106,7 +106,24 @@ export function ProgressBar({ value, accent }: { value: number; accent?: string 
   );
 }
 
-export function Sparkline({ color = "#0f766e" }: { color?: string }) {
+const DEFAULT_SPARKLINE_DATA = [5, 5, 5, 5, 5, 5, 5, 5, 5];
+const SPARKLINE_WIDTH = 120;
+const SPARKLINE_HEIGHT = 36;
+const SPARKLINE_PADDING = 2;
+
+export function Sparkline({ color = "#0f766e", data = DEFAULT_SPARKLINE_DATA }: { color?: string; data?: number[] }) {
+  const values = data.length >= 2 ? data : DEFAULT_SPARKLINE_DATA;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min;
+  const usableWidth = SPARKLINE_WIDTH - SPARKLINE_PADDING * 2;
+  const usableHeight = SPARKLINE_HEIGHT - SPARKLINE_PADDING * 2;
+  const points = values.map((value, index) => {
+    const x = SPARKLINE_PADDING + (values.length === 1 ? 0 : (index / (values.length - 1)) * usableWidth);
+    const y = range === 0 ? SPARKLINE_HEIGHT / 2 : SPARKLINE_PADDING + ((max - value) / range) * usableHeight;
+    return { x, y };
+  });
+
   return (
     <svg className="sparkline" viewBox="0 0 120 36" role="img" aria-label="Trend">
       <polyline
@@ -115,11 +132,15 @@ export function Sparkline({ color = "#0f766e" }: { color?: string }) {
         strokeWidth="3"
         strokeLinecap="round"
         strokeLinejoin="round"
-        points="2,27 16,17 31,22 45,16 59,20 74,8 88,13 103,10 118,5"
+        points={points.map((point) => `${formatSvgNumber(point.x)},${formatSvgNumber(point.y)}`).join(" ")}
       />
-      {[2, 16, 31, 45, 59, 74, 88, 103, 118].map((x, index) => (
-        <circle key={x} cx={x} cy={[27, 17, 22, 16, 20, 8, 13, 10, 5][index]} r="2.4" fill={color} />
+      {points.map((point, index) => (
+        <circle key={`${point.x}-${index}`} cx={formatSvgNumber(point.x)} cy={formatSvgNumber(point.y)} r="2.4" fill={color} />
       ))}
     </svg>
   );
+}
+
+function formatSvgNumber(value: number): string {
+  return Number(value.toFixed(2)).toString();
 }
