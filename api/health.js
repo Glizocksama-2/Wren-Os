@@ -12,6 +12,15 @@ export default function handler(_request, response) {
         detail: "Northwatch API health check is responding."
       },
       {
+        id: "copilot",
+        label: "Copilot",
+        status: process.env.RAPIDAPI_COPILOT_KEY || process.env.COPILOT_RAPIDAPI_KEY || process.env.RAPIDAPI_KEY ? "idle" : "dead",
+        checkedAt,
+        detail: process.env.RAPIDAPI_COPILOT_KEY || process.env.COPILOT_RAPIDAPI_KEY || process.env.RAPIDAPI_KEY
+          ? "Copilot system AI is configured."
+          : "RAPIDAPI_COPILOT_KEY is not set."
+      },
+      {
         id: "ollama",
         label: "Ollama",
         status: "idle",
