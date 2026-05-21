@@ -219,11 +219,30 @@ export function createPostgresUserDataDb(pool) {
 }
 
 export function createPostgresTeamDb(pool) {
-  async function withUserContext(userId, work) {
+  async function withUserContext(userId, work, settings = {}) {
     const client = await pool.connect();
     try {
       await client.query("begin");
       await client.query("select set_config('app.current_user_id', $1, true)", [userId]);
+      if (settings.inviteToken) {
+        await client.query("select set_config('app.current_invite_token', $1, true)", [settings.inviteToken]);
+      }
+      const result = await work(client);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async function withInviteContext(token, work) {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query("select set_config('app.current_invite_token', $1, true)", [token]);
       const result = await work(client);
       await client.query("commit");
       return result;
@@ -449,19 +468,21 @@ export function createPostgresTeamDb(pool) {
     },
 
     async getTeamInviteByToken(token) {
-      const result = await pool.query(
-        `select ti.id, ti.team_id, ti.email, ti.token, ti.role, ti.invited_by, ti.expires_at, ti.accepted_at, ti.status,
-                t.name as team_name, t.slug as team_slug, t.member_limit,
-                u.display_name as invited_by_name
-         from team_invites ti
-         join teams t on t.id = ti.team_id
-         join users u on u.id = ti.invited_by
-         where ti.token = $1
-         limit 1`,
-        [token]
-      );
-      const row = result.rows[0];
-      return row ? mapInvitePreview(row) : null;
+      return withInviteContext(token, async (client) => {
+        const result = await client.query(
+          `select ti.id, ti.team_id, ti.email, ti.token, ti.role, ti.invited_by, ti.expires_at, ti.accepted_at, ti.status,
+                  t.name as team_name, t.slug as team_slug, t.member_limit,
+                  u.display_name as invited_by_name
+           from team_invites ti
+           join teams t on t.id = ti.team_id
+           join users u on u.id = ti.invited_by
+           where ti.token = $1
+           limit 1`,
+          [token]
+        );
+        const row = result.rows[0];
+        return row ? mapInvitePreview(row) : null;
+      });
     },
 
     async acceptTeamInvite({ token, userId, userEmail }) {
@@ -507,7 +528,7 @@ export function createPostgresTeamDb(pool) {
           team: { id: invite.team_id, name: invite.team_name, slug: invite.team_slug },
           membership: mapMember(membershipResult.rows[0])
         };
-      });
+      }, { inviteToken: token });
     },
 
     async listNotifications(userId) {

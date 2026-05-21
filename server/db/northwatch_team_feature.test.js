@@ -18,6 +18,13 @@ describe("northwatch team feature migration", () => {
     expect(sql).toContain("token uuid not null unique");
     expect(sql).toContain("create table if not exists notifications");
     expect(sql).toContain("northwatch_team_role_allowed");
+    expect(sql).toContain("northwatch_team_owner_is_current");
+    expect(sql).toContain("app.current_invite_token");
+    expect(sql).toContain("team_invites_select_pending_by_token");
+    expect(sql).toContain("team_members_insert_owner_or_invited_user");
+    expect(sql).toContain("exists (");
+    expect(sql).toContain("ti.token::text = current_setting('app.current_invite_token', true)");
+    expect(sql).toContain("team_invites_update_admin_or_accepting_user");
 
     for (const table of teamScopedTables) {
       expect(sql).toContain(`alter table ${table} add column if not exists workspace_type text not null default 'personal'`);

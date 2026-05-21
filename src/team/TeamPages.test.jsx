@@ -31,6 +31,26 @@ describe("Northwatch team UI", () => {
     expect(window.location.pathname).toBe("/team/birunda-farms");
   });
 
+  it("lets a signed-in user paste an invite link on the create or join page", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        team: { id: "team-2", name: "North Unit", slug: "north-unit" },
+        membership: { userId: "user-1", role: "member" }
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TeamCreatePage />);
+
+    fireEvent.change(screen.getByLabelText("Invite link"), { target: { value: "https://northwatch.app/invite/invite-token" } });
+    fireEvent.click(screen.getByRole("button", { name: /join team/i }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/invites/invite-token/accept"), expect.objectContaining({ method: "POST", credentials: "include" })])
+    );
+    expect(window.location.pathname).toBe("/team/north-unit");
+  });
+
   it("shows a workspace switcher with personal, team, and create/join options", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ teams: [{ id: "team-1", name: "Birunda Farms", slug: "birunda-farms", role: "admin" }] })));
     const onWorkspaceChange = vi.fn();

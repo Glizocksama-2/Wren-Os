@@ -62,6 +62,14 @@ as $$
   select nullif(current_setting('app.current_user_id', true), '')::uuid;
 $$;
 
+create or replace function northwatch_current_invite_token()
+returns uuid
+language sql
+stable
+as $$
+  select nullif(current_setting('app.current_invite_token', true), '')::uuid;
+$$;
+
 create or replace function northwatch_team_role(check_team_id uuid)
 returns text
 language sql
@@ -84,6 +92,21 @@ security definer
 set search_path = public
 as $$
   select coalesce(northwatch_team_role(check_team_id) = any(allowed_roles), false);
+$$;
+
+create or replace function northwatch_team_owner_is_current(check_team_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from teams t
+    where t.id = check_team_id
+      and t.owner_id = northwatch_current_user_id()
+  );
 $$;
 
 create or replace function northwatch_team_owner_count(check_team_id uuid)
@@ -191,7 +214,21 @@ drop policy if exists team_members_insert_owner_or_invited_user on team_members;
 create policy team_members_insert_owner_or_invited_user on team_members
 for insert
 with check (
-  (user_id = northwatch_current_user_id() and role = 'owner')
+  (user_id = northwatch_current_user_id() and role = 'owner' and northwatch_team_owner_is_current(team_id))
+  or (
+    user_id = northwatch_current_user_id()
+    and role <> 'owner'
+    and exists (
+      select 1
+      from team_invites ti
+      join users u on u.id = northwatch_current_user_id()
+      where ti.team_id = team_members.team_id
+        and ti.token::text = current_setting('app.current_invite_token', true)
+        and ti.status = 'pending'
+        and ti.expires_at > now()
+        and lower(ti.email) = lower(u.email)
+    )
+  )
   or northwatch_team_role_allowed(team_id, array['owner', 'admin'])
 );
 
@@ -217,16 +254,50 @@ create policy team_invites_select_admin on team_invites
 for select
 using (northwatch_team_role_allowed(team_id, array['owner', 'admin']));
 
+drop policy if exists team_invites_select_pending_by_token on team_invites;
+create policy team_invites_select_pending_by_token on team_invites
+for select
+using (
+  status in ('pending', 'accepted')
+  and token::text = current_setting('app.current_invite_token', true)
+);
+
 drop policy if exists team_invites_insert_admin on team_invites;
 create policy team_invites_insert_admin on team_invites
 for insert
 with check (invited_by = northwatch_current_user_id() and northwatch_team_role_allowed(team_id, array['owner', 'admin']));
 
 drop policy if exists team_invites_update_admin on team_invites;
-create policy team_invites_update_admin on team_invites
+drop policy if exists team_invites_update_admin_or_accepting_user on team_invites;
+create policy team_invites_update_admin_or_accepting_user on team_invites
 for update
-using (northwatch_team_role_allowed(team_id, array['owner', 'admin']))
-with check (northwatch_team_role_allowed(team_id, array['owner', 'admin']));
+using (
+  northwatch_team_role_allowed(team_id, array['owner', 'admin'])
+  or (
+    status = 'pending'
+    and expires_at > now()
+    and token::text = current_setting('app.current_invite_token', true)
+    and exists (
+      select 1
+      from users u
+      where u.id = northwatch_current_user_id()
+        and lower(u.email) = lower(team_invites.email)
+    )
+  )
+)
+with check (
+  northwatch_team_role_allowed(team_id, array['owner', 'admin'])
+  or (
+    status = 'accepted'
+    and token::text = current_setting('app.current_invite_token', true)
+    and exists (
+      select 1
+      from users u
+      where u.id = northwatch_current_user_id()
+        and lower(u.email) = lower(team_invites.email)
+    )
+  )
+);
 
 drop policy if exists notifications_select_own on notifications;
 create policy notifications_select_own on notifications

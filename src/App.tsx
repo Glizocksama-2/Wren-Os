@@ -62,6 +62,13 @@ import { toKSH } from "./utils/currency";
 import type { TeamMember, TeamRole, TeamWorkspace } from "./store/cloudDeck";
 import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
 import {
+  acceptInvite as acceptTeamInvite,
+  createTeam as createRemoteTeam,
+  extractInviteToken,
+  getTeam,
+  listMyTeams
+} from "./team/teamApi.js";
+import {
   type Accent,
   type BackgroundMode,
   type CalendarEntry,
@@ -255,10 +262,10 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   const [cloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>({ kind: "personal" });
   const [activeTeamWorkspace, setActiveTeamWorkspace] = useState<TeamWorkspaceSelection>(() => loadActiveTeamWorkspace());
-  const [teams] = useState<TeamWorkspace[]>([]);
+  const [teams, setTeams] = useState<TeamWorkspace[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
-  const [isTeamBusy] = useState(false);
+  const [isTeamBusy, setIsTeamBusy] = useState(false);
   const [isLogoMenuOpen, setIsLogoMenuOpen] = useState(false);
   const [legalPanel, setLegalPanel] = useState<LegalPanel | null>(null);
   const [legalConsent, setLegalConsent] = useState<LegalConsentRecord | null>(() => loadLegalConsent());
@@ -520,6 +527,64 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     }
   };
 
+  const loadTeams = useCallback(async () => {
+    if (!authUserId) {
+      setTeams([]);
+      setTeamMembers([]);
+      return [];
+    }
+
+    const nextTeams = await listMyTeams() as TeamWorkspace[];
+    setTeams(nextTeams);
+    return nextTeams;
+  }, [authUserId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!authUserId) {
+      setTeams([]);
+      setTeamMembers([]);
+      return;
+    }
+
+    listMyTeams()
+      .then((nextTeams: TeamWorkspace[]) => {
+        if (isMounted) setTeams(nextTeams);
+      })
+      .catch(() => {
+        if (isMounted) setTeams([]);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authUserId]);
+
+  const openTeamWorkspace = async (team: TeamWorkspace) => {
+    setWorkspaceMode({ kind: "team", teamId: team.id });
+    saveActiveTeamWorkspace({
+      type: "team",
+      teamId: team.id,
+      slug: team.slug ?? team.id,
+      name: team.name,
+      role: team.role
+    });
+    setActiveTeamWorkspace({
+      type: "team",
+      teamId: team.id,
+      slug: team.slug ?? team.id,
+      name: team.name,
+      role: team.role
+    });
+
+    if (team.slug) {
+      const details = await getTeam(team.slug);
+      setTeamMembers(details.members ?? []);
+    } else {
+      setTeamMembers([]);
+    }
+  };
+
   const switchWorkspace = async (nextWorkspace: WorkspaceMode) => {
     const isSameWorkspace =
       workspaceMode.kind === nextWorkspace.kind &&
@@ -527,16 +592,77 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     if (isSameWorkspace) return;
     setWorkspaceMode(nextWorkspace);
     setTeamInviteLink("");
-    if (nextWorkspace.kind === "personal") setTeamMembers([]);
-    setNotice(nextWorkspace.kind === "team" ? "Switched to team workspace." : "Switched to personal workspace.");
+    if (nextWorkspace.kind === "personal") {
+      setTeamMembers([]);
+      saveActiveTeamWorkspace({ type: "personal" });
+      setActiveTeamWorkspace({ type: "personal" });
+      setNotice("Switched to personal workspace.");
+      return;
+    }
+
+    const selectedTeam = teams.find((team) => team.id === nextWorkspace.teamId);
+    if (!selectedTeam) {
+      setNotice("Team workspace not found yet. Refreshing memberships.");
+      await loadTeams();
+      return;
+    }
+
+    setIsTeamBusy(true);
+    try {
+      await openTeamWorkspace(selectedTeam);
+      setNotice(`Switched to ${selectedTeam.name} workspace.`);
+    } catch (error) {
+      setNotice(`Team switch failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsTeamBusy(false);
+    }
   };
 
   const createTeam = async (name: string) => {
-    setNotice(name.trim() ? "Create teams from the Teams workspace so they are stored in PostgreSQL." : "Enter a team name first.");
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setNotice("Enter a team name first.");
+      return;
+    }
+
+    setIsTeamBusy(true);
+    try {
+      const team = await createRemoteTeam({ name: trimmedName }) as TeamWorkspace;
+      await loadTeams();
+      await openTeamWorkspace(team);
+      setNotice(`Created ${team.name}.`);
+    } catch (error) {
+      setNotice(`Create team failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsTeamBusy(false);
+    }
   };
 
   const joinTeam = async (teamCode: string) => {
-    setNotice(teamCode.trim() ? "Open the invite link to join through the PostgreSQL team flow." : "Enter an invite code first.");
+    const token = extractInviteToken(teamCode);
+    if (!token) {
+      setNotice("Paste a team invite link first.");
+      return;
+    }
+
+    setIsTeamBusy(true);
+    try {
+      const accepted = await acceptTeamInvite(token);
+      await loadTeams();
+      const team = {
+        id: accepted.team.id,
+        name: accepted.team.name,
+        slug: accepted.team.slug,
+        role: accepted.membership?.role ?? "member",
+        createdAt: new Date().toISOString()
+      } as TeamWorkspace;
+      await openTeamWorkspace(team);
+      setNotice(`Joined ${accepted.team.name}.`);
+    } catch (error) {
+      setNotice(`Join team failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsTeamBusy(false);
+    }
   };
 
   const createInviteLink = async () => {

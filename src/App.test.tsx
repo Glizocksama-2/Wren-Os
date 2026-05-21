@@ -316,6 +316,55 @@ describe("Northwatch command deck", () => {
     expect(screen.getByRole("heading", { name: "Privacy Policy" })).toBeInTheDocument();
   });
 
+  it("creates and joins teams from the account workspace controls", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = getPathname(url);
+      if (pathname === "/api/teams/mine") {
+        return jsonResponse({ teams: [] });
+      }
+      if (pathname === "/api/teams" && init?.method === "POST") {
+        return jsonResponse({ team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" } }, 201);
+      }
+      if (pathname === "/api/teams/north-unit") {
+        return jsonResponse({
+          team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" },
+          members: [{ userId: "user-1", email: "sam@example.com", role: "owner" }]
+        });
+      }
+      if (pathname === "/api/invites/invite-token/accept") {
+        return jsonResponse({
+          team: { id: "team-2", name: "Invited Ops", slug: "invited-ops" },
+          membership: { userId: "user-1", role: "member" }
+        });
+      }
+      if (pathname === "/api/teams/invited-ops") {
+        return jsonResponse({
+          team: { id: "team-2", name: "Invited Ops", slug: "invited-ops", role: "member" },
+          members: [{ userId: "user-1", email: "sam@example.com", role: "member" }]
+        });
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Account" }));
+
+    fireEvent.change(screen.getByLabelText("Team name"), { target: { value: "North Unit" } });
+    fireEvent.click(screen.getByRole("button", { name: /create team/i }));
+
+    await waitFor(() => expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/teams"), expect.objectContaining({ method: "POST" })]));
+    expect(await screen.findByText("North Unit")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Invite link"), { target: { value: "https://northwatch.app/invite/invite-token" } });
+    fireEvent.click(screen.getByRole("button", { name: /join team/i }));
+
+    await waitFor(() => expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/invites/invite-token/accept"), expect.objectContaining({ method: "POST" })]));
+    expect(await screen.findByText("Invited Ops")).toBeInTheDocument();
+  });
+
   it("shows per-user Telegram setup instructions in Settings", async () => {
     render(<App />);
 
@@ -481,6 +530,18 @@ function acceptLegalTermsForTests() {
 
 function expectUrlPath(path: string) {
   return expect.stringMatching(new RegExp(`${escapeRegExp(path)}$`));
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body
+  };
+}
+
+function getPathname(url: RequestInfo | URL) {
+  return new URL(String(url), "http://127.0.0.1:5173").pathname;
 }
 
 function escapeRegExp(value: string) {

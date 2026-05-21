@@ -7,6 +7,7 @@ import {
   Copy,
   Crown,
   FileText,
+  KeyRound,
   LayoutDashboard,
   Mail,
   Plus,
@@ -21,6 +22,7 @@ import {
   acceptInvite,
   createTeam,
   deleteTeam,
+  extractInviteToken,
   getTeam,
   listInvites,
   listMyTeams,
@@ -103,8 +105,10 @@ export function TeamCreatePage() {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [memberLimit, setMemberLimit] = useState(10);
+  const [inviteLink, setInviteLink] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
 
   const submit = async (event) => {
     event.preventDefault();
@@ -120,11 +124,30 @@ export function TeamCreatePage() {
     }
   };
 
+  const submitJoin = async (event) => {
+    event.preventDefault();
+    const token = extractInviteToken(inviteLink);
+    if (!token) {
+      setError("Paste a valid team invite link.");
+      return;
+    }
+    setError("");
+    setIsJoining(true);
+    try {
+      const accepted = await acceptInvite(token);
+      navigate(`/team/${accepted.team.slug}`);
+    } catch (teamError) {
+      setError(teamError.message);
+    } finally {
+      setIsJoining(false);
+    }
+  };
+
   return (
     <main className="team-page">
       <section className="team-panel team-form-panel">
         <span className="micro-label">Team workspace</span>
-        <h1>Create a team</h1>
+        <h1>Create or join a team</h1>
         <form className="team-form" onSubmit={submit}>
           <label>
             Team name
@@ -149,6 +172,21 @@ export function TeamCreatePage() {
           {error && <p role="alert">{error}</p>}
           <button type="submit" disabled={isSubmitting}>
             <UsersRound size={16} /> {isSubmitting ? "Creating" : "Create Team"}
+          </button>
+        </form>
+        <form className="team-form" onSubmit={submitJoin}>
+          <label>
+            Invite link
+            <input
+              aria-label="Invite link"
+              value={inviteLink}
+              onChange={(event) => setInviteLink(event.target.value)}
+              placeholder="https://northwatch.app/invite/..."
+              required
+            />
+          </label>
+          <button type="submit" disabled={isJoining || !inviteLink.trim()}>
+            <KeyRound size={16} /> {isJoining ? "Joining" : "Join Team"}
           </button>
         </form>
       </section>
