@@ -406,4 +406,51 @@ describe("intel service", () => {
       ]
     });
   });
+
+  it("adds Seeking Alpha market news when a server-side RapidAPI key is configured", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(String(url)).toBe("https://seeking-alpha.p.rapidapi.com/news/v2/list?category=market-news%3A%3Afinancials&size=40");
+      expect(init.headers["x-rapidapi-key"]).toBe("server-secret");
+      expect(init.headers["x-rapidapi-host"]).toBe("seeking-alpha.p.rapidapi.com");
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: "531181",
+              attributes: {
+                title: "Banks rally after rate decision",
+                content: "Financial stocks moved higher after the latest market update.",
+                publishOn: "2026-05-19T08:00:00.000Z"
+              },
+              links: {
+                self: "/news/531181-banks-rally-after-rate-decision"
+              }
+            }
+          ]
+        })
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      newsSources: [],
+      rapidApiSeekingAlphaKey: "server-secret",
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchNews({ force: true });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        title: "Banks rally after rate decision",
+        summary: "Financial stocks moved higher after the latest market update.",
+        source: "Seeking Alpha",
+        sourcePriority: 11,
+        region: "global",
+        category: "business",
+        publishedAt: "2026-05-19T08:00:00.000Z",
+        url: "https://seekingalpha.com/news/531181-banks-rally-after-rate-decision"
+      })
+    ]);
+  });
 });

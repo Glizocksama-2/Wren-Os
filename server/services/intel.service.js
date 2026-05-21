@@ -60,6 +60,8 @@ const FLAGS = { USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", ZAR: "🇿�
 const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
 const NSE_RAPIDAPI_HOST = "nairobi-stock-exchange-nse.p.rapidapi.com";
 const NSE_RAPIDAPI_STOCKS_URL = `https://${NSE_RAPIDAPI_HOST}/stocks`;
+const SEEKING_ALPHA_RAPIDAPI_HOST = "seeking-alpha.p.rapidapi.com";
+const SEEKING_ALPHA_NEWS_URL = `https://${SEEKING_ALPHA_RAPIDAPI_HOST}/news/v2/list`;
 const DEFAULT_WORLD_BANK_INDICATORS = [
   { code: "FP.CPI.TOTL.ZG", label: "World Bank Inflation", unit: "%", decimals: 2 },
   { code: "NY.GDP.MKTP.CD", label: "Kenya GDP", unit: "", scale: "usd", decimals: 1 },
@@ -86,7 +88,11 @@ export function createIntelService(options = {}) {
   const globalStocks = options.globalStocks ?? GLOBAL_STOCKS;
   const forexCodes = options.forexCodes ?? FOREX_CODES;
   const worldBankIndicators = options.worldBankIndicators ?? DEFAULT_WORLD_BANK_INDICATORS;
-  const rapidApiNseKey = normalizeSecret(options.rapidApiNseKey ?? process.env.RAPIDAPI_NSE_KEY ?? process.env.NSE_RAPIDAPI_KEY ?? "");
+  const genericRapidApiKey = normalizeSecret(options.rapidApiKey ?? process.env.RAPIDAPI_KEY ?? "");
+  const rapidApiNseKey = normalizeSecret(options.rapidApiNseKey ?? process.env.RAPIDAPI_NSE_KEY ?? process.env.NSE_RAPIDAPI_KEY ?? "") || genericRapidApiKey;
+  const rapidApiSeekingAlphaKey = normalizeSecret(
+    options.rapidApiSeekingAlphaKey ?? process.env.RAPIDAPI_SEEKING_ALPHA_KEY ?? process.env.SEEKING_ALPHA_RAPIDAPI_KEY ?? ""
+  ) || genericRapidApiKey || rapidApiNseKey;
   const alphaVantageApiKey = normalizeSecret(
     options.alphaVantageApiKey ?? process.env.ALPHA_VANTAGE_API_KEY ?? process.env.ALPHAVANTAGE_API_KEY ?? ""
   );
@@ -124,7 +130,9 @@ export function createIntelService(options = {}) {
 
   async function fetchNews(options = {}) {
     return fetchWithCache("news", TTL.news, async () => {
-      const settled = await Promise.allSettled(newsSources.map((source) => fetchNewsSource(source)));
+      const loaders = newsSources.map((source) => fetchNewsSource(source));
+      if (rapidApiSeekingAlphaKey) loaders.push(fetchSeekingAlphaNews());
+      const settled = await Promise.allSettled(loaders);
       const errors = [];
       const byUrl = new Map();
       settled.forEach((result) => {
@@ -221,6 +229,19 @@ export function createIntelService(options = {}) {
         category: detectCategory(`${title} ${summary}`)
       };
     }).filter((item) => item.title && item.url);
+  }
+
+  async function fetchSeekingAlphaNews() {
+    const url = new URL(SEEKING_ALPHA_NEWS_URL);
+    url.searchParams.set("category", "market-news::financials");
+    url.searchParams.set("size", "40");
+    const payload = await fetchJson(url.toString(), 8000, {
+      "x-rapidapi-key": rapidApiSeekingAlphaKey,
+      "x-rapidapi-host": SEEKING_ALPHA_RAPIDAPI_HOST
+    });
+    return extractArrayPayload(payload)
+      .map((row) => normalizeSeekingAlphaNewsItem(row, now()))
+      .filter(Boolean);
   }
 
   async function fetchCryptoPrices() {
@@ -747,6 +768,54 @@ function normalizeRapidApiNseStock(row, updatedAt) {
     source: "RapidAPI NSE",
     updatedAt
   };
+}
+
+function normalizeSeekingAlphaNewsItem(row, fallbackDate) {
+  if (!row || typeof row !== "object") return null;
+  const attributes = row.attributes && typeof row.attributes === "object" ? row.attributes : {};
+  const title = cleanText(
+    readObjectValue(attributes, ["title", "headline", "name"]) ??
+    readObjectValue(row, ["title", "headline", "name"])
+  );
+  const summary = cleanText(
+    readObjectValue(attributes, ["summary", "description", "content", "teaser"]) ??
+    readObjectValue(row, ["summary", "description", "content", "teaser"])
+  );
+  const url = normalizeSeekingAlphaUrl(
+    readObjectValue(attributes, ["url", "canonicalUrl", "uri"]) ??
+    row.links?.self ??
+    readObjectValue(row, ["url", "link", "uri"]),
+    row.id
+  );
+  if (!title || !url) return null;
+  const publishedAt = normalizeDate(
+    readObjectValue(attributes, ["publishOn", "publishedAt", "published", "createdAt", "lastModified"]) ??
+    readObjectValue(row, ["publishOn", "publishedAt", "published", "createdAt", "lastModified"]),
+    fallbackDate
+  );
+  return {
+    id: stableId(url),
+    title,
+    summary,
+    source: "Seeking Alpha",
+    sourcePriority: 11,
+    region: "global",
+    publishedAt,
+    url,
+    category: detectCategory(`${title} ${summary}`)
+  };
+}
+
+function normalizeSeekingAlphaUrl(value, id) {
+  const text = cleanText(value);
+  if (text.startsWith("http://") || text.startsWith("https://")) {
+    return text.replace("http://", "https://").replace("https://seekingalpha.com/api/v3", "https://seekingalpha.com");
+  }
+  if (text.startsWith("/")) {
+    return `https://seekingalpha.com${text.replace(/^\/api\/v3/, "")}`;
+  }
+  if (text) return `https://seekingalpha.com/${text.replace(/^\/+/, "")}`;
+  return id ? `https://seekingalpha.com/news/${encodeURIComponent(String(id))}` : "";
 }
 
 function sortKenyaStocks(items) {
