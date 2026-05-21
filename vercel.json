@@ -15,6 +15,10 @@
       "destination": "/api/auth/:path*"
     },
     {
+      "source": "/api/:path*",
+      "destination": "/api/[...path]?path=:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/"
     }

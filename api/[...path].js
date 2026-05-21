@@ -26,7 +26,32 @@ export default function handler(request, response) {
     return;
   }
 
+  normalizeProxyRequestUrl(request);
   return app(request, response);
+}
+
+export function normalizeProxyRequestUrl(request) {
+  const requestUrl = request.url ?? "/";
+  const host = request.headers?.host ?? "northwatch.local";
+  const url = new URL(requestUrl, `https://${host}`);
+  const rewritePath = url.searchParams.get("path");
+
+  if (!rewritePath) {
+    return requestUrl;
+  }
+
+  url.searchParams.delete("path");
+  const normalizedPath = rewritePath
+    .replace(/^\/+/, "")
+    .replace(/\/{2,}/g, "/");
+
+  if (!normalizedPath || normalizedPath.includes("://")) {
+    return requestUrl;
+  }
+
+  const search = url.searchParams.toString();
+  request.url = `/api/${normalizedPath}${search ? `?${search}` : ""}`;
+  return request.url;
 }
 
 function getConfigurationDetail(error) {
