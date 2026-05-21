@@ -453,4 +453,107 @@ describe("intel service", () => {
       })
     ]);
   });
+
+  it("adds Real-Time News Data search results when a server-side RapidAPI key is configured", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(String(url)).toBe("https://real-time-news-data.p.rapidapi.com/search?query=Kenya+business&limit=20&time_published=anytime&country=KE&lang=en");
+      expect(init.headers["x-rapidapi-key"]).toBe("server-secret");
+      expect(init.headers["x-rapidapi-host"]).toBe("real-time-news-data.p.rapidapi.com");
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              article_id: "rt-news-1",
+              title: "Kenya banks lift market sentiment",
+              link: "https://example.com/kenya-banks",
+              snippet: "Nairobi investors tracked bank shares after a new market update.",
+              published_datetime_utc: "2026-05-19T07:30:00.000Z",
+              source_name: "Example Markets"
+            }
+          ]
+        })
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      newsSources: [],
+      rapidApiRealTimeNewsKey: "server-secret",
+      realTimeNewsQueries: ["Kenya business"],
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchNews({ force: true });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        title: "Kenya banks lift market sentiment",
+        summary: "Nairobi investors tracked bank shares after a new market update.",
+        source: "Real-Time News Data",
+        publisher: "Example Markets",
+        sourcePriority: 12,
+        region: "kenya",
+        category: "business",
+        publishedAt: "2026-05-19T07:30:00.000Z",
+        url: "https://example.com/kenya-banks"
+      })
+    ]);
+  });
+
+  it("adds Real-Time News Data full-story coverage when a story id is configured", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(String(url)).toBe("https://real-time-news-data.p.rapidapi.com/full-story-coverage?story=story-123&sort=RELEVANCE&country=US&lang=en");
+      expect(init.headers["x-rapidapi-key"]).toBe("server-secret");
+      expect(init.headers["x-rapidapi-host"]).toBe("real-time-news-data.p.rapidapi.com");
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            article_id: "story-123",
+            title: "Markets react to central bank decision",
+            link: "https://example.com/markets-main",
+            snippet: "Coverage of the latest monetary policy decision.",
+            published_datetime_utc: "2026-05-19T07:00:00.000Z",
+            source_name: "Example Wire",
+            sub_articles: [
+              {
+                article_id: "story-123-related",
+                title: "Analysts watch banking counters",
+                link: "https://example.com/markets-related",
+                snippet: "Banking stocks drew attention after the decision.",
+                published_datetime_utc: "2026-05-19T07:05:00.000Z",
+                source_name: "Example Finance"
+              }
+            ]
+          }
+        })
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      newsSources: [],
+      rapidApiRealTimeNewsKey: "server-secret",
+      realTimeNewsQueries: [],
+      realTimeNewsStoryId: "story-123",
+      realTimeNewsCountry: "US",
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchNews({ force: true });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        title: "Analysts watch banking counters",
+        url: "https://example.com/markets-related",
+        publisher: "Example Finance",
+        category: "business"
+      }),
+      expect.objectContaining({
+        title: "Markets react to central bank decision",
+        url: "https://example.com/markets-main",
+        publisher: "Example Wire",
+        category: "business"
+      })
+    ]);
+  });
 });

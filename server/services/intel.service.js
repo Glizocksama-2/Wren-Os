@@ -62,6 +62,9 @@ const NSE_RAPIDAPI_HOST = "nairobi-stock-exchange-nse.p.rapidapi.com";
 const NSE_RAPIDAPI_STOCKS_URL = `https://${NSE_RAPIDAPI_HOST}/stocks`;
 const SEEKING_ALPHA_RAPIDAPI_HOST = "seeking-alpha.p.rapidapi.com";
 const SEEKING_ALPHA_NEWS_URL = `https://${SEEKING_ALPHA_RAPIDAPI_HOST}/news/v2/list`;
+const REAL_TIME_NEWS_RAPIDAPI_HOST = "real-time-news-data.p.rapidapi.com";
+const REAL_TIME_NEWS_SEARCH_URL = `https://${REAL_TIME_NEWS_RAPIDAPI_HOST}/search`;
+const REAL_TIME_NEWS_FULL_STORY_URL = `https://${REAL_TIME_NEWS_RAPIDAPI_HOST}/full-story-coverage`;
 const DEFAULT_WORLD_BANK_INDICATORS = [
   { code: "FP.CPI.TOTL.ZG", label: "World Bank Inflation", unit: "%", decimals: 2 },
   { code: "NY.GDP.MKTP.CD", label: "Kenya GDP", unit: "", scale: "usd", decimals: 1 },
@@ -93,6 +96,16 @@ export function createIntelService(options = {}) {
   const rapidApiSeekingAlphaKey = normalizeSecret(
     options.rapidApiSeekingAlphaKey ?? process.env.RAPIDAPI_SEEKING_ALPHA_KEY ?? process.env.SEEKING_ALPHA_RAPIDAPI_KEY ?? ""
   ) || genericRapidApiKey || rapidApiNseKey;
+  const rapidApiRealTimeNewsKey = normalizeSecret(
+    options.rapidApiRealTimeNewsKey ?? process.env.RAPIDAPI_REAL_TIME_NEWS_KEY ?? process.env.REAL_TIME_NEWS_RAPIDAPI_KEY ?? ""
+  ) || genericRapidApiKey || rapidApiNseKey;
+  const realTimeNewsQueries = normalizeStringList(
+    options.realTimeNewsQueries ?? process.env.RAPIDAPI_REAL_TIME_NEWS_QUERIES ?? "Kenya business,Africa technology,Africa crypto"
+  );
+  const realTimeNewsStoryId = normalizeSecret(options.realTimeNewsStoryId ?? process.env.RAPIDAPI_REAL_TIME_NEWS_STORY_ID ?? "");
+  const realTimeNewsCountry = normalizeSecret(options.realTimeNewsCountry ?? process.env.RAPIDAPI_REAL_TIME_NEWS_COUNTRY ?? "KE");
+  const realTimeNewsLang = normalizeSecret(options.realTimeNewsLang ?? process.env.RAPIDAPI_REAL_TIME_NEWS_LANG ?? "en");
+  const realTimeNewsLimit = Math.max(1, Math.min(50, Number(options.realTimeNewsLimit ?? process.env.RAPIDAPI_REAL_TIME_NEWS_LIMIT ?? 20) || 20));
   const alphaVantageApiKey = normalizeSecret(
     options.alphaVantageApiKey ?? process.env.ALPHA_VANTAGE_API_KEY ?? process.env.ALPHAVANTAGE_API_KEY ?? ""
   );
@@ -132,6 +145,10 @@ export function createIntelService(options = {}) {
     return fetchWithCache("news", TTL.news, async () => {
       const loaders = newsSources.map((source) => fetchNewsSource(source));
       if (rapidApiSeekingAlphaKey) loaders.push(fetchSeekingAlphaNews());
+      if (rapidApiRealTimeNewsKey) {
+        realTimeNewsQueries.forEach((query) => loaders.push(fetchRealTimeNewsSearch(query)));
+        if (realTimeNewsStoryId) loaders.push(fetchRealTimeNewsCoverage(realTimeNewsStoryId));
+      }
       const settled = await Promise.allSettled(loaders);
       const errors = [];
       const byUrl = new Map();
@@ -242,6 +259,33 @@ export function createIntelService(options = {}) {
     return extractArrayPayload(payload)
       .map((row) => normalizeSeekingAlphaNewsItem(row, now()))
       .filter(Boolean);
+  }
+
+  async function fetchRealTimeNewsSearch(query) {
+    const url = new URL(REAL_TIME_NEWS_SEARCH_URL);
+    url.searchParams.set("query", query);
+    url.searchParams.set("limit", String(realTimeNewsLimit));
+    url.searchParams.set("time_published", "anytime");
+    url.searchParams.set("country", realTimeNewsCountry);
+    url.searchParams.set("lang", realTimeNewsLang);
+    const payload = await fetchJson(url.toString(), 8000, {
+      "x-rapidapi-key": rapidApiRealTimeNewsKey,
+      "x-rapidapi-host": REAL_TIME_NEWS_RAPIDAPI_HOST
+    });
+    return normalizeRealTimeNewsRows(payload, now(), newsRegionFromCountry(realTimeNewsCountry));
+  }
+
+  async function fetchRealTimeNewsCoverage(storyId) {
+    const url = new URL(REAL_TIME_NEWS_FULL_STORY_URL);
+    url.searchParams.set("story", storyId);
+    url.searchParams.set("sort", "RELEVANCE");
+    url.searchParams.set("country", realTimeNewsCountry);
+    url.searchParams.set("lang", realTimeNewsLang);
+    const payload = await fetchJson(url.toString(), 8000, {
+      "x-rapidapi-key": rapidApiRealTimeNewsKey,
+      "x-rapidapi-host": REAL_TIME_NEWS_RAPIDAPI_HOST
+    });
+    return normalizeRealTimeNewsRows(payload, now(), newsRegionFromCountry(realTimeNewsCountry));
   }
 
   async function fetchCryptoPrices() {
@@ -736,6 +780,11 @@ function normalizeSecret(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeStringList(value) {
+  if (Array.isArray(value)) return value.map((item) => normalizeSecret(item)).filter(Boolean);
+  return String(value ?? "").split(",").map((item) => normalizeSecret(item)).filter(Boolean);
+}
+
 function extractArrayPayload(payload) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== "object") return [];
@@ -816,6 +865,60 @@ function normalizeSeekingAlphaUrl(value, id) {
   }
   if (text) return `https://seekingalpha.com/${text.replace(/^\/+/, "")}`;
   return id ? `https://seekingalpha.com/news/${encodeURIComponent(String(id))}` : "";
+}
+
+function normalizeRealTimeNewsRows(payload, fallbackDate, region) {
+  return extractRealTimeNewsRows(payload)
+    .map((row) => normalizeRealTimeNewsItem(row, fallbackDate, region))
+    .filter(Boolean);
+}
+
+function extractRealTimeNewsRows(payload) {
+  const directRows = extractArrayPayload(payload);
+  const roots = directRows.length
+    ? directRows
+    : payload?.data && typeof payload.data === "object"
+      ? [payload.data]
+      : [];
+  return roots.flatMap((row) => [
+    row,
+    ...toArray(row?.sub_articles),
+    ...toArray(row?.subArticles),
+    ...toArray(row?.articles),
+    ...toArray(row?.related_articles),
+    ...toArray(row?.relatedArticles)
+  ]);
+}
+
+function normalizeRealTimeNewsItem(row, fallbackDate, region) {
+  if (!row || typeof row !== "object") return null;
+  const title = cleanText(readObjectValue(row, ["title", "headline", "name"]));
+  const url = cleanText(readObjectValue(row, ["link", "url", "articleUrl", "article_url"]));
+  if (!title || !url) return null;
+  const summary = cleanText(readObjectValue(row, ["snippet", "summary", "description", "content", "text"]));
+  const publisher = cleanText(readObjectValue(row, ["source_name", "sourceName", "publisher", "source"]));
+  const publishedAt = normalizeDate(readObjectValue(row, ["published_datetime_utc", "publishedAt", "published", "pubDate", "date"]), fallbackDate);
+  return {
+    id: stableId(url || readObjectValue(row, ["article_id", "id"])),
+    title,
+    summary,
+    source: "Real-Time News Data",
+    publisher,
+    sourcePriority: 12,
+    region,
+    publishedAt,
+    url,
+    category: detectCategory(`${title} ${summary}`)
+  };
+}
+
+function newsRegionFromCountry(country) {
+  const value = String(country ?? "").trim().toUpperCase();
+  if (value === "KE") return "kenya";
+  if (["DZ", "AO", "BJ", "BW", "BF", "BI", "CM", "CV", "CF", "TD", "KM", "CG", "CD", "DJ", "EG", "GQ", "ER", "ET", "GA", "GM", "GH", "GN", "GW", "CI", "LS", "LR", "LY", "MG", "MW", "ML", "MR", "MU", "MA", "MZ", "NA", "NE", "NG", "RW", "ST", "SN", "SC", "SL", "SO", "ZA", "SS", "SD", "SZ", "TZ", "TG", "TN", "UG", "ZM", "ZW"].includes(value)) {
+    return "africa";
+  }
+  return "global";
 }
 
 function sortKenyaStocks(items) {
