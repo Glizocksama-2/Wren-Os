@@ -474,7 +474,7 @@ export function createIntelService(options = {}) {
     try {
       payload = await fetchJson(primaryUrl);
     } catch {
-      sourceUrl = buildWorldBankIndicatorUrl(indicator.code, "all");
+      sourceUrl = buildWorldBankIndicatorUrl(indicator.code, "all", 20000);
       payload = await fetchJson(sourceUrl);
     }
     const allRows = Array.isArray(payload) && Array.isArray(payload[1]) ? payload[1] : [];
@@ -494,10 +494,10 @@ export function createIntelService(options = {}) {
     };
   }
 
-  function buildWorldBankIndicatorUrl(code, country) {
+  function buildWorldBankIndicatorUrl(code, country, perPage = 8) {
     const url = new URL(`https://api.worldbank.org/v2/country/${country}/indicator/${encodeURIComponent(code)}`);
     url.searchParams.set("format", "json");
-    url.searchParams.set("per_page", "8");
+    url.searchParams.set("per_page", String(perPage));
     return url.toString();
   }
 

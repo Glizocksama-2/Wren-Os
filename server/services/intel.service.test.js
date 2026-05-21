@@ -238,6 +238,7 @@ describe("intel service", () => {
       expect.stringContaining("https://api.worldbank.org/v2/country/KE/indicator/SP.POP.TOTL"),
       expect.stringContaining("https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL")
     ]));
+    expect(requestedUrls.find((url) => url.includes("/country/all/indicator/SP.POP.TOTL"))).toContain("per_page=20000");
     expect(result.items).toEqual(expect.arrayContaining([
       expect.objectContaining({
         label: "Population",
