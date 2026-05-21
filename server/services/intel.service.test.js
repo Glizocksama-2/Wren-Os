@@ -200,6 +200,54 @@ describe("intel service", () => {
     ]));
   });
 
+  it("falls back to World Bank V2 country-all data when Kenya indicator calls fail", async () => {
+    const requestedUrls = [];
+    const fetchImpl = vi.fn(async (url) => {
+      const requestUrl = String(url);
+      requestedUrls.push(requestUrl);
+      if (requestUrl.includes("api.worldbank.org/v2/country/KE/indicator/SP.POP.TOTL")) {
+        return { ok: false, status: 502, json: async () => ({}) };
+      }
+      if (requestUrl.includes("api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL")) {
+        return {
+          ok: true,
+          json: async () => [
+            { page: 1, pages: 1 },
+            [
+              { countryiso3code: "UGA", date: "2024", value: 50000000 },
+              { countryiso3code: "KEN", date: "2025", value: null },
+              { countryiso3code: "KEN", date: "2024", value: 56000000 }
+            ]
+          ]
+        };
+      }
+      return {
+        ok: true,
+        text: async () => "<html>Central Bank Rate 10.5% inflation 4.5% NSE 20 1,800 <tr><td>1 - 100</td><td>6</td></tr></html>"
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      worldBankIndicators: [{ code: "SP.POP.TOTL", label: "Population", unit: "", scale: "compact", decimals: 1 }],
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchIndicators({ force: true });
+
+    expect(requestedUrls).toEqual(expect.arrayContaining([
+      expect.stringContaining("https://api.worldbank.org/v2/country/KE/indicator/SP.POP.TOTL"),
+      expect.stringContaining("https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL")
+    ]));
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "Population",
+        value: "56.0M",
+        referenceYear: "2024",
+        source: "World Bank"
+      })
+    ]));
+  });
+
   it("uses Alpha Vantage global quotes when a server-side key is configured", async () => {
     const fetchImpl = vi.fn(async (url) => {
       expect(String(url)).toContain("function=GLOBAL_QUOTE");

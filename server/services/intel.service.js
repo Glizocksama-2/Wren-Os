@@ -58,7 +58,6 @@ const GLOBAL_STOCKS = [
 const FOREX_CODES = ["USD", "EUR", "GBP", "ZAR", "NGN", "UGX", "TZS", "ETB", "RWF", "AED", "CNY"];
 const FLAGS = { USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", ZAR: "🇿🇦", NGN: "🇳🇬", UGX: "🇺🇬", TZS: "🇹🇿", ETB: "🇪🇹", RWF: "🇷🇼", AED: "🇦🇪", CNY: "🇨🇳" };
 const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
-const WORLD_BANK_INDICATOR_BASE_URL = "https://api.worldbank.org/v2/country/KE/indicator";
 const DEFAULT_WORLD_BANK_INDICATORS = [
   { code: "FP.CPI.TOTL.ZG", label: "World Bank Inflation", unit: "%", decimals: 2 },
   { code: "NY.GDP.MKTP.CD", label: "Kenya GDP", unit: "", scale: "usd", decimals: 1 },
@@ -469,9 +468,19 @@ export function createIntelService(options = {}) {
   }
 
   async function fetchWorldBankIndicator(indicator) {
-    const sourceUrl = buildWorldBankIndicatorUrl(indicator.code);
-    const payload = await fetchJson(sourceUrl);
-    const rows = Array.isArray(payload) && Array.isArray(payload[1]) ? payload[1] : [];
+    const primaryUrl = buildWorldBankIndicatorUrl(indicator.code, "KE");
+    let sourceUrl = primaryUrl;
+    let payload;
+    try {
+      payload = await fetchJson(primaryUrl);
+    } catch {
+      sourceUrl = buildWorldBankIndicatorUrl(indicator.code, "all");
+      payload = await fetchJson(sourceUrl);
+    }
+    const allRows = Array.isArray(payload) && Array.isArray(payload[1]) ? payload[1] : [];
+    const rows = sourceUrl.includes("/country/all/")
+      ? allRows.filter((row) => row?.countryiso3code === "KEN" || row?.country?.id === "KEN")
+      : allRows;
     const latest = rows.find((row) => row?.value !== null && row?.value !== undefined && Number.isFinite(Number(row.value)));
     if (!latest) throw new Error(`World Bank indicator ${indicator.code} returned no Kenya data`);
     return {
@@ -485,8 +494,8 @@ export function createIntelService(options = {}) {
     };
   }
 
-  function buildWorldBankIndicatorUrl(code) {
-    const url = new URL(`${WORLD_BANK_INDICATOR_BASE_URL}/${encodeURIComponent(code)}`);
+  function buildWorldBankIndicatorUrl(code, country) {
+    const url = new URL(`https://api.worldbank.org/v2/country/${country}/indicator/${encodeURIComponent(code)}`);
     url.searchParams.set("format", "json");
     url.searchParams.set("per_page", "8");
     return url.toString();
