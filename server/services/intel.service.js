@@ -58,6 +58,8 @@ const GLOBAL_STOCKS = [
 const FOREX_CODES = ["USD", "EUR", "GBP", "ZAR", "NGN", "UGX", "TZS", "ETB", "RWF", "AED", "CNY"];
 const FLAGS = { USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", ZAR: "🇿🇦", NGN: "🇳🇬", UGX: "🇺🇬", TZS: "🇹🇿", ETB: "🇪🇹", RWF: "🇷🇼", AED: "🇦🇪", CNY: "🇨🇳" };
 const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
+const NSE_RAPIDAPI_HOST = "nairobi-stock-exchange-nse.p.rapidapi.com";
+const NSE_RAPIDAPI_STOCKS_URL = `https://${NSE_RAPIDAPI_HOST}/stocks`;
 const DEFAULT_WORLD_BANK_INDICATORS = [
   { code: "FP.CPI.TOTL.ZG", label: "World Bank Inflation", unit: "%", decimals: 2 },
   { code: "NY.GDP.MKTP.CD", label: "Kenya GDP", unit: "", scale: "usd", decimals: 1 },
@@ -84,6 +86,7 @@ export function createIntelService(options = {}) {
   const globalStocks = options.globalStocks ?? GLOBAL_STOCKS;
   const forexCodes = options.forexCodes ?? FOREX_CODES;
   const worldBankIndicators = options.worldBankIndicators ?? DEFAULT_WORLD_BANK_INDICATORS;
+  const rapidApiNseKey = normalizeSecret(options.rapidApiNseKey ?? process.env.RAPIDAPI_NSE_KEY ?? process.env.NSE_RAPIDAPI_KEY ?? "");
   const alphaVantageApiKey = normalizeSecret(
     options.alphaVantageApiKey ?? process.env.ALPHA_VANTAGE_API_KEY ?? process.env.ALPHAVANTAGE_API_KEY ?? ""
   );
@@ -149,12 +152,7 @@ export function createIntelService(options = {}) {
 
   async function fetchNSEStocks(options = {}) {
     const ttl = isNairobiMarketOpen(now()) ? TTL.nseStocksOpen : TTL.nseStocksClosed;
-    return fetchWithCache("stocksKenya", ttl, async () => ({
-      type: "stocksKenya",
-      marketOpen: isNairobiMarketOpen(now()),
-      updatedAt: now().toISOString(),
-      items: await fetchStockList(KENYA_STOCKS, "KES")
-    }), options);
+    return fetchWithCache("stocksKenya", ttl, async () => fetchKenyaStocks(), options);
   }
 
   async function fetchGlobalStocks(options = {}) {
@@ -297,6 +295,46 @@ export function createIntelService(options = {}) {
       source: "Alpha Vantage",
       updatedAt: usd.updatedAt ?? kes.updatedAt ?? now().toISOString()
     };
+  }
+
+  async function fetchKenyaStocks() {
+    const marketOpen = isNairobiMarketOpen(now());
+    const fallback = async (errors = []) => ({
+      type: "stocksKenya",
+      marketOpen,
+      updatedAt: now().toISOString(),
+      source: "Yahoo Finance",
+      items: await fetchStockList(KENYA_STOCKS, "KES"),
+      errors
+    });
+
+    if (!rapidApiNseKey) return fallback();
+    try {
+      const items = await fetchRapidApiNseStocks();
+      return {
+        type: "stocksKenya",
+        marketOpen,
+        updatedAt: now().toISOString(),
+        source: "RapidAPI NSE",
+        items,
+        errors: []
+      };
+    } catch (error) {
+      return fallback([getErrorMessage(error)]);
+    }
+  }
+
+  async function fetchRapidApiNseStocks() {
+    const payload = await fetchJson(NSE_RAPIDAPI_STOCKS_URL, 8000, {
+      "x-rapidapi-key": rapidApiNseKey,
+      "x-rapidapi-host": NSE_RAPIDAPI_HOST,
+      "Content-Type": "application/json"
+    });
+    const rows = extractArrayPayload(payload);
+    const timestamp = now().toISOString();
+    const items = rows.map((row) => normalizeRapidApiNseStock(row, timestamp)).filter(Boolean);
+    if (items.length === 0) throw new Error("RapidAPI NSE returned no stock rows");
+    return sortKenyaStocks(items);
   }
 
   async function fetchStockList(symbols, currency, options = {}) {
@@ -516,8 +554,8 @@ export function createIntelService(options = {}) {
     }));
   }
 
-  async function fetchJson(url, timeoutMs = 8000) {
-    const response = await fetchWithTimeout(url, { headers: { Accept: "application/json", "User-Agent": "Northwatch Intel/1.0" } }, timeoutMs);
+  async function fetchJson(url, timeoutMs = 8000, headers = {}) {
+    const response = await fetchWithTimeout(url, { headers: { Accept: "application/json", "User-Agent": "Northwatch Intel/1.0", ...headers } }, timeoutMs);
     if (!response.ok) throw new Error(`${redactUrlSecrets(url)} returned HTTP ${response.status}`);
     return response.json();
   }
@@ -675,6 +713,76 @@ function stableId(value) {
 
 function normalizeSecret(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function extractArrayPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object") return [];
+  for (const key of ["data", "stocks", "results", "result", "items"]) {
+    if (Array.isArray(payload[key])) return payload[key];
+  }
+  return Object.values(payload).find(Array.isArray) ?? [];
+}
+
+function normalizeRapidApiNseStock(row, updatedAt) {
+  if (!row || typeof row !== "object") return null;
+  const ticker = cleanTicker(readObjectValue(row, ["symbol", "ticker", "code", "stockCode", "securityCode", "instrument"]));
+  const price = parseNumeric(readObjectValue(row, ["price", "currentPrice", "lastPrice", "lastTradedPrice", "closingPrice", "last", "value"]));
+  if (!ticker || !Number.isFinite(price)) return null;
+  const company = cleanText(readObjectValue(row, ["company", "companyName", "name", "security", "stock", "instrumentName"]) ?? ticker);
+  const change = parseNumeric(readObjectValue(row, ["change", "priceChange", "changeAmount", "dailyChange", "movement"])) ?? 0;
+  const changePercent = parseNumeric(readObjectValue(row, ["changePercent", "percentageChange", "percentChange", "changePercentage", "change_percentage", "percent"])) ?? 0;
+  return {
+    ticker,
+    querySymbol: `${ticker}.NR`,
+    company,
+    currency: "KES",
+    price,
+    change,
+    changePercent,
+    volume: parseNumeric(readObjectValue(row, ["volume", "shares", "volumeTraded", "tradedVolume", "turnoverVolume"])) ?? 0,
+    weekHigh52: parseNumeric(readObjectValue(row, ["weekHigh52", "52WeekHigh", "high52", "fiftyTwoWeekHigh", "yearHigh"])) ?? 0,
+    weekLow52: parseNumeric(readObjectValue(row, ["weekLow52", "52WeekLow", "low52", "fiftyTwoWeekLow", "yearLow"])) ?? 0,
+    marketCap: parseNumeric(readObjectValue(row, ["marketCap", "capitalization", "marketCapitalization"])) ?? 0,
+    source: "RapidAPI NSE",
+    updatedAt
+  };
+}
+
+function sortKenyaStocks(items) {
+  const priority = new Map(KENYA_STOCKS.map(([, ticker], index) => [ticker, index]));
+  return [...items].sort((left, right) => {
+    const leftRank = priority.get(left.ticker) ?? Number.MAX_SAFE_INTEGER;
+    const rightRank = priority.get(right.ticker) ?? Number.MAX_SAFE_INTEGER;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    return left.ticker.localeCompare(right.ticker);
+  });
+}
+
+function readObjectValue(row, candidates) {
+  const normalizedEntries = Object.entries(row).map(([key, value]) => [normalizeKey(key), value]);
+  for (const candidate of candidates) {
+    const normalized = normalizeKey(candidate);
+    const match = normalizedEntries.find(([key]) => key === normalized);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
+function normalizeKey(value) {
+  return String(value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function cleanTicker(value) {
+  return cleanText(value).toUpperCase().replace(/\.(NR|NSE|NAIROBI)$/i, "").replace(/[^A-Z0-9]/g, "");
+}
+
+function parseNumeric(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const text = cleanText(value);
+  if (!text) return null;
+  const match = text.replace(/,/g, "").match(/[-+]?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
 }
 
 function normalizeStockSymbol(symbol) {

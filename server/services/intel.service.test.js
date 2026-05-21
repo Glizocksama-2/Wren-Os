@@ -355,4 +355,55 @@ describe("intel service", () => {
       source: "Alpha Vantage"
     });
   });
+
+  it("uses the RapidAPI Nairobi Stock Exchange feed when a server-side key is configured", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(String(url)).toBe("https://nairobi-stock-exchange-nse.p.rapidapi.com/stocks");
+      expect(init.headers["x-rapidapi-key"]).toBe("server-secret");
+      expect(init.headers["x-rapidapi-host"]).toBe("nairobi-stock-exchange-nse.p.rapidapi.com");
+      return {
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              symbol: "SCOM",
+              company: "Safaricom PLC",
+              price: "28.75",
+              change: "0.25",
+              percentChange: "0.88%",
+              volume: "1,234,500",
+              weekHigh52: "35.00",
+              weekLow52: "20.00"
+            }
+          ]
+        })
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      rapidApiNseKey: "server-secret",
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchNSEStocks({ force: true });
+
+    expect(result).toMatchObject({
+      type: "stocksKenya",
+      source: "RapidAPI NSE",
+      items: [
+        expect.objectContaining({
+          ticker: "SCOM",
+          company: "Safaricom PLC",
+          currency: "KES",
+          price: 28.75,
+          change: 0.25,
+          changePercent: 0.88,
+          volume: 1234500,
+          weekHigh52: 35,
+          weekLow52: 20,
+          source: "RapidAPI NSE"
+        })
+      ]
+    });
+  });
 });
