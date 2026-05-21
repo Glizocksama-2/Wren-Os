@@ -135,6 +135,71 @@ describe("intel service", () => {
     vi.useRealTimers();
   });
 
+  it("adds Kenya macro indicators from the World Bank V2 indicators API", async () => {
+    const requestedUrls = [];
+    const fetchImpl = vi.fn(async (url) => {
+      const requestUrl = String(url);
+      requestedUrls.push(requestUrl);
+      if (requestUrl.includes("api.worldbank.org/v2/country/KE/indicator/FP.CPI.TOTL.ZG")) {
+        return {
+          ok: true,
+          json: async () => [
+            { page: 1, pages: 1 },
+            [
+              { date: "2025", value: null },
+              { date: "2024", value: 4.51 }
+            ]
+          ]
+        };
+      }
+      if (requestUrl.includes("api.worldbank.org/v2/country/KE/indicator/NY.GDP.MKTP.CD")) {
+        return {
+          ok: true,
+          json: async () => [
+            { page: 1, pages: 1 },
+            [{ date: "2024", value: 113420008000 }]
+          ]
+        };
+      }
+      return {
+        ok: true,
+        text: async () => "<html>Central Bank Rate 10.5% inflation 4.5% NSE 20 1,800 <tr><td>1 - 100</td><td>6</td></tr></html>"
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      worldBankIndicators: [
+        { code: "FP.CPI.TOTL.ZG", label: "World Bank Inflation", unit: "%", decimals: 2 },
+        { code: "NY.GDP.MKTP.CD", label: "Kenya GDP", unit: "", scale: "usd", decimals: 1 }
+      ],
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchIndicators({ force: true });
+
+    expect(requestedUrls).toEqual(expect.arrayContaining([
+      expect.stringContaining("https://api.worldbank.org/v2/country/KE/indicator/FP.CPI.TOTL.ZG"),
+      expect.stringContaining("https://api.worldbank.org/v2/country/KE/indicator/NY.GDP.MKTP.CD")
+    ]));
+    expect(requestedUrls.some((url) => url.includes("/v1/"))).toBe(false);
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "World Bank Inflation",
+        value: "4.51",
+        unit: "%",
+        referenceYear: "2024",
+        source: "World Bank"
+      }),
+      expect.objectContaining({
+        label: "Kenya GDP",
+        value: "USD 113.4B",
+        unit: "",
+        referenceYear: "2024",
+        source: "World Bank"
+      })
+    ]));
+  });
+
   it("uses Alpha Vantage global quotes when a server-side key is configured", async () => {
     const fetchImpl = vi.fn(async (url) => {
       expect(String(url)).toContain("function=GLOBAL_QUOTE");

@@ -58,6 +58,14 @@ const GLOBAL_STOCKS = [
 const FOREX_CODES = ["USD", "EUR", "GBP", "ZAR", "NGN", "UGX", "TZS", "ETB", "RWF", "AED", "CNY"];
 const FLAGS = { USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", ZAR: "🇿🇦", NGN: "🇳🇬", UGX: "🇺🇬", TZS: "🇹🇿", ETB: "🇪🇹", RWF: "🇷🇼", AED: "🇦🇪", CNY: "🇨🇳" };
 const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
+const WORLD_BANK_INDICATOR_BASE_URL = "https://api.worldbank.org/v2/country/KE/indicator";
+const DEFAULT_WORLD_BANK_INDICATORS = [
+  { code: "FP.CPI.TOTL.ZG", label: "World Bank Inflation", unit: "%", decimals: 2 },
+  { code: "NY.GDP.MKTP.CD", label: "Kenya GDP", unit: "", scale: "usd", decimals: 1 },
+  { code: "NY.GDP.MKTP.KD.ZG", label: "GDP Growth", unit: "%", decimals: 2 },
+  { code: "SP.POP.TOTL", label: "Population", unit: "", scale: "compact", decimals: 1 },
+  { code: "SL.UEM.TOTL.ZS", label: "Unemployment", unit: "%", decimals: 2 }
+];
 const TTL = {
   news: 10 * 60 * 1000,
   crypto: 60 * 1000,
@@ -76,6 +84,7 @@ export function createIntelService(options = {}) {
   const cryptoCoins = options.cryptoCoins ?? COINS;
   const globalStocks = options.globalStocks ?? GLOBAL_STOCKS;
   const forexCodes = options.forexCodes ?? FOREX_CODES;
+  const worldBankIndicators = options.worldBankIndicators ?? DEFAULT_WORLD_BANK_INDICATORS;
   const alphaVantageApiKey = normalizeSecret(
     options.alphaVantageApiKey ?? process.env.ALPHA_VANTAGE_API_KEY ?? process.env.ALPHAVANTAGE_API_KEY ?? ""
   );
@@ -163,19 +172,24 @@ export function createIntelService(options = {}) {
 
   async function fetchIndicators(options = {}) {
     return fetchWithCache("indicators", TTL.indicators, async () => {
-      const [cbk, inflation, nse20, mpesa] = await Promise.allSettled([
+      const [cbk, inflation, nse20, mpesa, worldBank] = await Promise.allSettled([
         fetchIndicatorFromPage("https://www.centralbank.go.ke/", /Central Bank Rate[\s\S]{0,240}?(\d+(?:\.\d+)?)\s*%/i, "CBK Rate", "%"),
         fetchIndicatorFromPage("https://www.knbs.or.ke/", /inflation[\s\S]{0,240}?(\d+(?:\.\d+)?)\s*%/i, "Inflation", "%"),
         fetchIndicatorFromPage("https://www.nse.co.ke/market-statistics/", /NSE\s*20[\s\S]{0,240}?(\d{2,}(?:,\d{3})*(?:\.\d+)?)/i, "NSE 20 Index", ""),
-        fetchMpesaRates()
+        fetchMpesaRates(),
+        fetchWorldBankIndicators()
       ]);
-      const items = [unwrapIndicator(cbk, "CBK Rate"), unwrapIndicator(inflation, "Inflation"), unwrapIndicator(nse20, "NSE 20 Index")];
+      const pageIndicators = [unwrapIndicator(cbk, "CBK Rate"), unwrapIndicator(inflation, "Inflation"), unwrapIndicator(nse20, "NSE 20 Index")];
+      const macro = worldBank.status === "fulfilled" ? worldBank.value : { items: [], errors: [getErrorMessage(worldBank.reason)] };
       return {
         type: "indicators",
         updatedAt: now().toISOString(),
-        items,
+        items: [...macro.items, ...pageIndicators],
         mpesaRates: mpesa.status === "fulfilled" ? mpesa.value : [],
-        errors: [cbk, inflation, nse20, mpesa].filter((item) => item.status === "rejected").map((item) => getErrorMessage(item.reason))
+        errors: [
+          ...[cbk, inflation, nse20, mpesa].filter((item) => item.status === "rejected").map((item) => getErrorMessage(item.reason)),
+          ...macro.errors
+        ]
       };
     }, options);
   }
@@ -446,6 +460,38 @@ export function createIntelService(options = {}) {
     };
   }
 
+  async function fetchWorldBankIndicators() {
+    const settled = await Promise.allSettled(worldBankIndicators.map((indicator) => fetchWorldBankIndicator(indicator)));
+    return {
+      items: settled.filter((result) => result.status === "fulfilled").map((result) => result.value),
+      errors: settled.filter((result) => result.status === "rejected").map((result) => getErrorMessage(result.reason))
+    };
+  }
+
+  async function fetchWorldBankIndicator(indicator) {
+    const sourceUrl = buildWorldBankIndicatorUrl(indicator.code);
+    const payload = await fetchJson(sourceUrl);
+    const rows = Array.isArray(payload) && Array.isArray(payload[1]) ? payload[1] : [];
+    const latest = rows.find((row) => row?.value !== null && row?.value !== undefined && Number.isFinite(Number(row.value)));
+    if (!latest) throw new Error(`World Bank indicator ${indicator.code} returned no Kenya data`);
+    return {
+      label: indicator.label,
+      value: formatWorldBankValue(Number(latest.value), indicator),
+      unit: indicator.scale ? "" : indicator.unit ?? "",
+      source: "World Bank",
+      sourceUrl,
+      referenceYear: String(latest.date ?? ""),
+      updatedAt: now().toISOString()
+    };
+  }
+
+  function buildWorldBankIndicatorUrl(code) {
+    const url = new URL(`${WORLD_BANK_INDICATOR_BASE_URL}/${encodeURIComponent(code)}`);
+    url.searchParams.set("format", "json");
+    url.searchParams.set("per_page", "8");
+    return url.toString();
+  }
+
   async function fetchIndicatorFromPage(url, pattern, label, unit) {
     const html = await fetchText(url);
     const match = html.replace(/\s+/g, " ").match(pattern);
@@ -588,6 +634,28 @@ function normalizeDate(value, fallbackDate) {
 function unwrapIndicator(result, label) {
   if (result.status === "fulfilled") return result.value;
   return { label, value: null, unit: "", updatedAt: new Date().toISOString(), error: getErrorMessage(result.reason) };
+}
+
+function formatWorldBankValue(value, indicator) {
+  if (indicator.scale === "usd") return `USD ${formatCompactNumber(value, indicator.decimals ?? 1)}`;
+  if (indicator.scale === "compact") return formatCompactNumber(value, indicator.decimals ?? 1);
+  return formatPlainNumber(value, indicator.decimals ?? 2);
+}
+
+function formatCompactNumber(value, decimals) {
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000_000_000) return `${formatPlainNumber(value / 1_000_000_000_000, decimals)}T`;
+  if (absolute >= 1_000_000_000) return `${formatPlainNumber(value / 1_000_000_000, decimals)}B`;
+  if (absolute >= 1_000_000) return `${formatPlainNumber(value / 1_000_000, decimals)}M`;
+  if (absolute >= 1_000) return `${formatPlainNumber(value / 1_000, decimals)}K`;
+  return formatPlainNumber(value, decimals);
+}
+
+function formatPlainNumber(value, decimals) {
+  return Number(value).toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
 }
 
 function stableId(value) {
