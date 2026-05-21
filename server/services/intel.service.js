@@ -57,6 +57,7 @@ const GLOBAL_STOCKS = [
 
 const FOREX_CODES = ["USD", "EUR", "GBP", "ZAR", "NGN", "UGX", "TZS", "ETB", "RWF", "AED", "CNY"];
 const FLAGS = { USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", ZAR: "🇿🇦", NGN: "🇳🇬", UGX: "🇺🇬", TZS: "🇹🇿", ETB: "🇪🇹", RWF: "🇷🇼", AED: "🇦🇪", CNY: "🇨🇳" };
+const ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query";
 const TTL = {
   news: 10 * 60 * 1000,
   crypto: 60 * 1000,
@@ -72,6 +73,12 @@ export function createIntelService(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   const now = options.now ?? (() => new Date());
   const newsSources = options.newsSources ?? DEFAULT_NEWS_SOURCES;
+  const cryptoCoins = options.cryptoCoins ?? COINS;
+  const globalStocks = options.globalStocks ?? GLOBAL_STOCKS;
+  const forexCodes = options.forexCodes ?? FOREX_CODES;
+  const alphaVantageApiKey = normalizeSecret(
+    options.alphaVantageApiKey ?? process.env.ALPHA_VANTAGE_API_KEY ?? process.env.ALPHAVANTAGE_API_KEY ?? ""
+  );
   const cache = new Map();
 
   async function fetchWithCache(type, ttlMs, loader, { force = false } = {}) {
@@ -129,26 +136,7 @@ export function createIntelService(options = {}) {
   }
 
   async function fetchCrypto(options = {}) {
-    return fetchWithCache("crypto", TTL.crypto, async () => {
-      const ids = COINS.map(([id]) => id).join(",");
-      const response = await fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,kes&include_24hr_change=true&include_market_cap=true`);
-      const items = COINS.map(([id, name, symbol, image]) => {
-        const coin = response[id] ?? {};
-        return {
-          id,
-          name,
-          symbol,
-          image,
-          priceKes: Number(coin.kes ?? 0),
-          priceUsd: Number(coin.usd ?? 0),
-          change24h: Number(coin.usd_24h_change ?? 0),
-          change24hCurrency: "USD",
-          marketCapKes: Number(coin.kes_market_cap ?? 0),
-          marketCapUsd: Number(coin.usd_market_cap ?? 0)
-        };
-      }).sort((left, right) => right.marketCapKes - left.marketCapKes);
-      return { type: "crypto", updatedAt: now().toISOString(), items };
-    }, options);
+    return fetchWithCache("crypto", TTL.crypto, async () => fetchCryptoPrices(), options);
   }
 
   async function fetchNSEStocks(options = {}) {
@@ -165,30 +153,12 @@ export function createIntelService(options = {}) {
     return fetchWithCache("stocksGlobal", TTL.globalStocks, async () => ({
       type: "stocksGlobal",
       updatedAt: now().toISOString(),
-      items: await fetchStockList(GLOBAL_STOCKS, "USD")
+      items: await fetchStockList(globalStocks, "USD", { preferAlphaVantage: Boolean(alphaVantageApiKey) })
     }), options);
   }
 
   async function fetchForex(options = {}) {
-    return fetchWithCache("forex", TTL.forex, async () => {
-      const payload = await fetchJson("https://open.er-api.com/v6/latest/KES");
-      const rates = FOREX_CODES.map((code) => {
-        const oneKesEquals = Number(payload.rates?.[code] ?? 0);
-        return {
-          code,
-          flag: FLAGS[code],
-          oneKesEquals,
-          kesPerUnit: oneKesEquals > 0 ? 1 / oneKesEquals : 0
-        };
-      });
-      return {
-        type: "forex",
-        base: "KES",
-        updatedAt: payload.time_last_update_utc ?? now().toISOString(),
-        usdKes: rates.find((rate) => rate.code === "USD")?.kesPerUnit ?? 0,
-        rates
-      };
-    }, options);
+    return fetchWithCache("forex", TTL.forex, async () => fetchForexRates(), options);
   }
 
   async function fetchIndicators(options = {}) {
@@ -242,9 +212,118 @@ export function createIntelService(options = {}) {
     }).filter((item) => item.title && item.url);
   }
 
-  async function fetchStockList(symbols, currency) {
-    const settled = await Promise.allSettled(symbols.map(([querySymbol, ticker, company]) => fetchYahooStock(querySymbol, ticker, company, currency)));
+  async function fetchCryptoPrices() {
+    try {
+      return await fetchCoinGeckoCrypto();
+    } catch (error) {
+      if (!alphaVantageApiKey) throw error;
+      const fallback = await fetchAlphaVantageCrypto();
+      return { ...fallback, errors: [getErrorMessage(error), ...(fallback.errors ?? [])] };
+    }
+  }
+
+  async function fetchCoinGeckoCrypto() {
+    const ids = cryptoCoins.map(([id]) => id).join(",");
+    const response = await fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd,kes&include_24hr_change=true&include_market_cap=true`);
+    const items = cryptoCoins.map(([id, name, symbol, image]) => {
+      const coin = response[id] ?? {};
+      return {
+        id,
+        name,
+        symbol,
+        image,
+        priceKes: Number(coin.kes ?? 0),
+        priceUsd: Number(coin.usd ?? 0),
+        change24h: Number(coin.usd_24h_change ?? 0),
+        change24hCurrency: "USD",
+        marketCapKes: Number(coin.kes_market_cap ?? 0),
+        marketCapUsd: Number(coin.usd_market_cap ?? 0),
+        source: "CoinGecko"
+      };
+    }).sort((left, right) => right.marketCapKes - left.marketCapKes);
+    return { type: "crypto", updatedAt: now().toISOString(), source: "CoinGecko", items };
+  }
+
+  async function fetchAlphaVantageCrypto() {
+    const settled = await Promise.allSettled(cryptoCoins.map((coin) => fetchAlphaVantageCryptoCoin(coin)));
+    const items = [];
+    const errors = [];
+    settled.forEach((result) => {
+      if (result.status === "fulfilled") {
+        items.push(result.value);
+      } else {
+        errors.push(getErrorMessage(result.reason));
+      }
+    });
+    if (items.length === 0) throw new Error(errors[0] ?? "Alpha Vantage crypto returned no prices");
+    return {
+      type: "crypto",
+      updatedAt: now().toISOString(),
+      source: "Alpha Vantage",
+      items: items.sort((left, right) => right.marketCapKes - left.marketCapKes),
+      errors
+    };
+  }
+
+  async function fetchAlphaVantageCryptoCoin([id, name, symbol, image]) {
+    const [usd, kes] = await Promise.all([
+      fetchAlphaVantageExchangeRate(symbol, "USD"),
+      fetchAlphaVantageExchangeRate(symbol, "KES")
+    ]);
+    return {
+      id,
+      name,
+      symbol,
+      image,
+      priceKes: kes.rate,
+      priceUsd: usd.rate,
+      change24h: 0,
+      change24hCurrency: "USD",
+      marketCapKes: 0,
+      marketCapUsd: 0,
+      source: "Alpha Vantage",
+      updatedAt: usd.updatedAt ?? kes.updatedAt ?? now().toISOString()
+    };
+  }
+
+  async function fetchStockList(symbols, currency, options = {}) {
+    const settled = await Promise.allSettled(symbols.map((symbol) => {
+      const normalized = normalizeStockSymbol(symbol);
+      return options.preferAlphaVantage
+        ? fetchAlphaVantageOrYahooStock(normalized.querySymbol, normalized.ticker, normalized.company, currency)
+        : fetchYahooStock(normalized.querySymbol, normalized.ticker, normalized.company, currency);
+    }));
     return settled.filter((result) => result.status === "fulfilled").map((result) => result.value);
+  }
+
+  async function fetchAlphaVantageOrYahooStock(querySymbol, ticker, company, currency) {
+    try {
+      return await fetchAlphaVantageGlobalQuote(querySymbol, ticker, company, currency);
+    } catch {
+      return fetchYahooStock(querySymbol, ticker, company, currency);
+    }
+  }
+
+  async function fetchAlphaVantageGlobalQuote(querySymbol, ticker, company, currency) {
+    const payload = await fetchAlphaVantageJson({ function: "GLOBAL_QUOTE", symbol: querySymbol });
+    assertAlphaVantagePayload(payload, `quote for ${ticker}`);
+    const quote = payload["Global Quote"];
+    if (!quote || typeof quote !== "object") throw new Error(`No Alpha Vantage global quote for ${ticker}`);
+    return {
+      ticker,
+      querySymbol,
+      company,
+      currency,
+      price: Number(quote["05. price"] ?? 0),
+      change: Number(quote["09. change"] ?? 0),
+      changePercent: Number(String(quote["10. change percent"] ?? "0").replace("%", "")),
+      volume: Number(quote["06. volume"] ?? 0),
+      weekHigh52: 0,
+      weekLow52: 0,
+      marketCap: 0,
+      source: "Alpha Vantage",
+      updatedAt: now().toISOString()
+    };
   }
 
   async function fetchYahooStock(querySymbol, ticker, company, currency) {
@@ -269,7 +348,101 @@ export function createIntelService(options = {}) {
       weekHigh52: Number(meta.fiftyTwoWeekHigh ?? 0),
       weekLow52: Number(meta.fiftyTwoWeekLow ?? 0),
       marketCap: Number(meta.marketCap ?? 0),
+      source: "Yahoo Finance",
       updatedAt: now().toISOString()
+    };
+  }
+
+  async function fetchForexRates() {
+    if (!alphaVantageApiKey) return fetchOpenExchangeForex();
+    try {
+      return await fetchAlphaVantageForex();
+    } catch (error) {
+      if (isTimeoutError(error)) throw error;
+      const fallback = await fetchOpenExchangeForex();
+      return { ...fallback, errors: [getErrorMessage(error), ...(fallback.errors ?? [])] };
+    }
+  }
+
+  async function fetchAlphaVantageForex() {
+    const settled = await Promise.allSettled(forexCodes.map((code) => fetchAlphaVantageForexRate(code)));
+    const rates = [];
+    const errors = [];
+    settled.forEach((result) => {
+      if (result.status === "fulfilled") {
+        rates.push(result.value);
+      } else {
+        errors.push(getErrorMessage(result.reason));
+      }
+    });
+    if (rates.length < forexCodes.length) {
+      throw new Error(errors[0] ?? "Alpha Vantage forex returned incomplete rates");
+    }
+    return {
+      type: "forex",
+      base: "KES",
+      updatedAt: now().toISOString(),
+      usdKes: rates.find((rate) => rate.code === "USD")?.kesPerUnit ?? 0,
+      source: "Alpha Vantage",
+      rates,
+      errors
+    };
+  }
+
+  async function fetchAlphaVantageForexRate(code) {
+    const exchangeRate = await fetchAlphaVantageExchangeRate("KES", code);
+    const oneKesEquals = exchangeRate.rate;
+    if (!Number.isFinite(oneKesEquals) || oneKesEquals <= 0) {
+      throw new Error(`No Alpha Vantage KES/${code} exchange rate`);
+    }
+    return {
+      code,
+      flag: FLAGS[code],
+      oneKesEquals,
+      kesPerUnit: 1 / oneKesEquals,
+      source: "Alpha Vantage",
+      updatedAt: exchangeRate.updatedAt
+    };
+  }
+
+  async function fetchAlphaVantageExchangeRate(fromCurrency, toCurrency) {
+    const payload = await fetchAlphaVantageJson({
+      function: "CURRENCY_EXCHANGE_RATE",
+      from_currency: fromCurrency,
+      to_currency: toCurrency
+    });
+    assertAlphaVantagePayload(payload, `${fromCurrency}/${toCurrency} exchange rate`);
+    const rate = payload["Realtime Currency Exchange Rate"];
+    const value = Number(rate?.["5. Exchange Rate"] ?? 0);
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(`No Alpha Vantage ${fromCurrency}/${toCurrency} exchange rate`);
+    }
+    return {
+      rate: value,
+      updatedAt: normalizeDate(rate?.["6. Last Refreshed"], now())
+    };
+  }
+
+  async function fetchOpenExchangeForex() {
+    const payload = await fetchJson("https://open.er-api.com/v6/latest/KES");
+    const rates = forexCodes.map((code) => {
+      const oneKesEquals = Number(payload.rates?.[code] ?? 0);
+      return {
+        code,
+        flag: FLAGS[code],
+        oneKesEquals,
+        kesPerUnit: oneKesEquals > 0 ? 1 / oneKesEquals : 0,
+        source: "open.er-api"
+      };
+    });
+    return {
+      type: "forex",
+      base: "KES",
+      updatedAt: payload.time_last_update_utc ?? now().toISOString(),
+      usdKes: rates.find((rate) => rate.code === "USD")?.kesPerUnit ?? 0,
+      source: "open.er-api",
+      rates,
+      errors: []
     };
   }
 
@@ -290,13 +463,13 @@ export function createIntelService(options = {}) {
 
   async function fetchJson(url, timeoutMs = 8000) {
     const response = await fetchWithTimeout(url, { headers: { Accept: "application/json", "User-Agent": "Northwatch Intel/1.0" } }, timeoutMs);
-    if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`${redactUrlSecrets(url)} returned HTTP ${response.status}`);
     return response.json();
   }
 
   async function fetchText(url, timeoutMs = 8000) {
     const response = await fetchWithTimeout(url, { headers: { Accept: "application/rss+xml, application/xml, text/xml, text/html", "User-Agent": "Northwatch Intel/1.0" } }, timeoutMs);
-    if (!response.ok) throw new Error(`${url} returned HTTP ${response.status}`);
+    if (!response.ok) throw new Error(`${redactUrlSecrets(url)} returned HTTP ${response.status}`);
     return response.text();
   }
 
@@ -307,12 +480,25 @@ export function createIntelService(options = {}) {
       return await fetchImpl(url, { ...options, signal: controller.signal });
     } catch (error) {
       if (controller.signal.aborted || error?.name === "AbortError") {
-        throw new Error(`Request to ${url} timed out after ${timeoutMs}ms`);
+        throw new Error(`Request to ${redactUrlSecrets(url)} timed out after ${timeoutMs}ms`);
       }
       throw error;
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async function fetchAlphaVantageJson(params, timeoutMs = 8000) {
+    return fetchJson(buildAlphaVantageUrl(params), timeoutMs);
+  }
+
+  function buildAlphaVantageUrl(params) {
+    const url = new URL(ALPHA_VANTAGE_BASE_URL);
+    Object.entries(params).forEach(([key, value]) => {
+      url.searchParams.set(key, String(value));
+    });
+    url.searchParams.set("apikey", alphaVantageApiKey);
+    return url.toString();
   }
 
   return { fetchNews, fetchCrypto, fetchNSEStocks, fetchGlobalStocks, fetchForex, fetchIndicators, fetchAll };
@@ -410,8 +596,53 @@ function stableId(value) {
   return `intel-${hash.toString(36)}`;
 }
 
+function normalizeSecret(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeStockSymbol(symbol) {
+  const [querySymbol, tickerOrCompany, company] = symbol;
+  if (company === undefined) {
+    return {
+      querySymbol,
+      ticker: querySymbol,
+      company: tickerOrCompany ?? querySymbol
+    };
+  }
+  return {
+    querySymbol,
+    ticker: tickerOrCompany ?? querySymbol,
+    company: company ?? tickerOrCompany ?? querySymbol
+  };
+}
+
+function assertAlphaVantagePayload(payload, label) {
+  const message = payload?.["Error Message"] ?? payload?.Note ?? payload?.Information;
+  if (message) throw new Error(`Alpha Vantage ${label} did not return live data: ${String(message).slice(0, 200)}`);
+}
+
+function isTimeoutError(error) {
+  return getErrorMessage(error).includes("timed out after");
+}
+
 function getErrorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return redactUrlSecrets(message);
+}
+
+function redactUrlSecrets(value) {
+  const text = String(value);
+  return text.replace(/https?:\/\/[^\s)]+/g, (match) => {
+    try {
+      const url = new URL(match);
+      ["apikey", "api_key", "token", "access_token"].forEach((key) => {
+        if (url.searchParams.has(key)) url.searchParams.set(key, "redacted");
+      });
+      return url.toString();
+    } catch {
+      return match.replace(/((?:apikey|api_key|token|access_token)=)[^&\s)]+/gi, "$1redacted");
+    }
+  }).replace(/((?:apikey|api_key|token|access_token)=)[^&\s)]+/gi, "$1redacted");
 }
 
 function lastNumber(values) {

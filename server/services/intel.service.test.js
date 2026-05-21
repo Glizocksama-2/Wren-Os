@@ -59,6 +59,60 @@ describe("intel service", () => {
     expect(second.items[0].id).toBe("bitcoin");
   });
 
+  it("falls back to Alpha Vantage crypto exchange rates when CoinGecko is unavailable", async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      const requestUrl = String(url);
+      if (requestUrl.includes("api.coingecko.com")) {
+        return { ok: false, status: 503, json: async () => ({}) };
+      }
+      if (requestUrl.includes("to_currency=USD")) {
+        return {
+          ok: true,
+          json: async () => ({
+            "Realtime Currency Exchange Rate": {
+              "5. Exchange Rate": "100000.0000",
+              "6. Last Refreshed": "2026-05-19 08:00:00"
+            }
+          })
+        };
+      }
+      if (requestUrl.includes("to_currency=KES")) {
+        return {
+          ok: true,
+          json: async () => ({
+            "Realtime Currency Exchange Rate": {
+              "5. Exchange Rate": "13000000.0000",
+              "6. Last Refreshed": "2026-05-19 08:00:00"
+            }
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${requestUrl}`);
+    });
+    const service = createIntelService({
+      fetchImpl,
+      alphaVantageApiKey: "server-secret",
+      cryptoCoins: [["bitcoin", "Bitcoin", "BTC", "bitcoin.png"]],
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchCrypto({ force: true });
+
+    expect(result).toMatchObject({
+      type: "crypto",
+      source: "Alpha Vantage",
+      errors: [expect.stringContaining("api.coingecko.com")]
+    });
+    expect(result.items[0]).toMatchObject({
+      id: "bitcoin",
+      symbol: "BTC",
+      priceKes: 13000000,
+      priceUsd: 100000,
+      change24hCurrency: "USD",
+      source: "Alpha Vantage"
+    });
+  });
+
   it("aborts external intel fetches that exceed the request timeout", async () => {
     vi.useFakeTimers();
     const fetchImpl = vi.fn((_url, init) =>
@@ -79,5 +133,112 @@ describe("intel service", () => {
     expect(result.status).toBe("empty");
     expect(result.errors[0]).toMatch(/Request to https:\/\/api\.coingecko\.com\/api\/v3\/simple\/price.*timed out after 8000ms/);
     vi.useRealTimers();
+  });
+
+  it("uses Alpha Vantage global quotes when a server-side key is configured", async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      expect(String(url)).toContain("function=GLOBAL_QUOTE");
+      expect(String(url)).toContain("apikey=server-secret");
+      return {
+        ok: true,
+        json: async () => ({
+          "Global Quote": {
+            "01. symbol": "IBM",
+            "05. price": "189.2000",
+            "09. change": "-1.2300",
+            "10. change percent": "-0.6460%",
+            "06. volume": "123456"
+          }
+        })
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      alphaVantageApiKey: "server-secret",
+      globalStocks: [["IBM", "IBM"]],
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchGlobalStocks({ force: true });
+
+    expect(result.items).toEqual([
+      expect.objectContaining({
+        ticker: "IBM",
+        company: "IBM",
+        currency: "USD",
+        price: 189.2,
+        change: -1.23,
+        changePercent: -0.646,
+        volume: 123456,
+        source: "Alpha Vantage"
+      })
+    ]);
+  });
+
+  it("uses Alpha Vantage forex rates without leaking the server key in timeout errors", async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn((_url, init) =>
+      new Promise((_resolve, reject) => {
+        init.signal.addEventListener("abort", () => {
+          const error = new Error("aborted");
+          error.name = "AbortError";
+          reject(error);
+        });
+      })
+    );
+    const service = createIntelService({
+      fetchImpl,
+      alphaVantageApiKey: "server-secret",
+      forexCodes: ["USD"],
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const pending = service.fetchForex({ force: true });
+    await vi.advanceTimersByTimeAsync(8000);
+    const result = await pending;
+
+    expect(result.status).toBe("empty");
+    expect(result.errors[0]).toContain("alphavantage.co/query");
+    expect(result.errors[0]).not.toContain("server-secret");
+    expect(result.errors[0]).toContain("apikey=redacted");
+    vi.useRealTimers();
+  });
+
+  it("uses Alpha Vantage exchange rates when a server-side key is configured", async () => {
+    const fetchImpl = vi.fn(async (url) => {
+      expect(String(url)).toContain("function=CURRENCY_EXCHANGE_RATE");
+      expect(String(url)).toContain("from_currency=KES");
+      expect(String(url)).toContain("to_currency=USD");
+      return {
+        ok: true,
+        json: async () => ({
+          "Realtime Currency Exchange Rate": {
+            "5. Exchange Rate": "0.00770000",
+            "6. Last Refreshed": "2026-05-19 08:00:00"
+          }
+        })
+      };
+    });
+    const service = createIntelService({
+      fetchImpl,
+      alphaVantageApiKey: "server-secret",
+      forexCodes: ["USD"],
+      now: () => new Date("2026-05-19T08:10:00.000Z")
+    });
+
+    const result = await service.fetchForex({ force: true });
+
+    expect(result).toMatchObject({
+      type: "forex",
+      base: "KES",
+      source: "Alpha Vantage",
+      usdKes: expect.closeTo(129.8701, 4)
+    });
+    expect(result.rates[0]).toMatchObject({
+      code: "USD",
+      oneKesEquals: 0.0077,
+      kesPerUnit: expect.closeTo(129.8701, 4),
+      source: "Alpha Vantage"
+    });
   });
 });
