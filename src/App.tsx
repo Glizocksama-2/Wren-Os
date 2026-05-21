@@ -58,6 +58,7 @@ import { IntelPage } from "./components/IntelPage";
 import { CurrencyProvider } from "./context/CurrencyContext";
 import { buildAutonomousIntelScan } from "./lib/intelAutopilot";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
+import { requestSystemAiAgentReply } from "./lib/systemAi";
 import { toKSH } from "./utils/currency";
 import type { TeamMember, TeamRole, TeamWorkspace } from "./store/cloudDeck";
 import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
@@ -1294,7 +1295,7 @@ function getLegalPanelContent(panel: LegalPanel, consentRecord: LegalConsentReco
       {
         heading: "AI and autonomous intel",
         body: [
-          "Sentinel, Ollama responses, and autonomous intel scans are assistive outputs. They are not legal, financial, medical, security, or investment advice.",
+          "Sentinel, Copilot system AI, Ollama responses, and autonomous intel scans are assistive outputs. They are not legal, financial, medical, security, or investment advice.",
           "Verify sources, prices, financial information, and legal obligations before acting. Do not rely on generated output as the sole basis for high-stakes decisions."
         ]
       },
@@ -3208,6 +3209,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
         <ToggleCard label="Show workout systems" checked={state.settings.showWorkout} onChange={(checked) => dispatch({ type: "settings/update", payload: { showWorkout: checked } })} />
         <div className="custom-card ollama-card">
           <span>Sentinel brain</span>
+          <p>Copilot system AI is used through the protected backend when configured. Ollama remains the local fallback.</p>
           <label className="inline-check">
             <input
               aria-label="Use Ollama for Sentinel"
@@ -3684,17 +3686,18 @@ function AgentDock({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
+  const [systemConversationId, setSystemConversationId] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentConnectionState>(() =>
     state.settings.ollamaEnabled
       ? {
           mode: "checking",
-          label: "Ollama checking",
-          detail: "Checking the local Ollama server."
+          label: "Copilot checking",
+          detail: "Copilot system AI is the primary route; Ollama remains fallback."
         }
       : {
           mode: "disabled",
-          label: "Local brain",
-          detail: "Ollama is disabled in Customize."
+          label: "Copilot system AI",
+          detail: "Using the protected backend route when configured."
         }
   );
   const [agentHealth, setAgentHealth] = useState<AgentHealthRecord[]>(() => createIdleAgentHealth(state.settings));
@@ -3703,8 +3706,8 @@ function AgentDock({
       id: "sentinel-boot",
       role: "agent",
       body: state.settings.ollamaEnabled
-        ? `Ollama route armed for ${state.settings.ollamaModel}.\nIf the local server is running, I will use it. If not, I will fall back to deck logic.`
-        : composeAgentReply(state, metrics, "dashboard", "Brief my next move")
+        ? `Copilot system AI route armed.\nIf it cannot answer, I will fall back to local Ollama (${state.settings.ollamaModel}) and then deck logic.`
+        : `Copilot system AI route armed.\nIf it cannot answer, I will fall back to deck logic.`
     }
   ]);
   const priorityProject = getPriorityProject(state);
@@ -3742,9 +3745,9 @@ function AgentDock({
 
     if (!state.settings.ollamaEnabled) {
       setAgentStatus({
-        mode: "disabled",
-        label: "Local brain",
-        detail: "Ollama is disabled in Customize."
+        mode: "online",
+        label: "Copilot system AI",
+        detail: "Protected backend route is primary. Ollama fallback is disabled."
       });
       return;
     }
@@ -3753,8 +3756,8 @@ function AgentDock({
 
     setAgentStatus({
       mode: "checking",
-      label: "Ollama checking",
-      detail: "Checking the local Ollama server."
+      label: "Ollama fallback checking",
+      detail: "Checking the local Ollama fallback."
     });
 
     checkOllamaConnection(ollamaConfig).then((result) => {
@@ -3772,7 +3775,7 @@ function AgentDock({
       const hasModel = result.models.includes(state.settings.ollamaModel);
       setAgentStatus({
         mode: hasModel ? "online" : "offline",
-        label: hasModel ? `Ollama: ${state.settings.ollamaModel}` : "Model missing",
+        label: hasModel ? `Ollama fallback: ${state.settings.ollamaModel}` : "Ollama model missing",
         detail: hasModel
           ? `${result.models.length} local model${result.models.length === 1 ? "" : "s"} available.`
           : `Pull ${state.settings.ollamaModel} or choose one of: ${result.models.join(", ") || "none installed"}.`
@@ -3834,13 +3837,61 @@ function AgentDock({
       {
         id: pendingId,
         role: "agent",
-        body: state.settings.ollamaEnabled ? `Thinking locally with ${state.settings.ollamaModel}...` : fallbackReply
+        body: "Thinking with Copilot system AI..."
       }
     ]);
     setInput("");
     setIsOpen(true);
 
-    if (!state.settings.ollamaEnabled) return;
+    setAgentStatus((current) => ({
+      ...current,
+      mode: "thinking",
+      label: "Copilot system AI"
+    }));
+
+    try {
+      const result = await requestSystemAiAgentReply({
+        state,
+        metrics,
+        activeView,
+        prompt,
+        history: messages,
+        conversationId: systemConversationId
+      });
+      setSystemConversationId(result.conversationId);
+      setMessages((current) => current.map((message) => (message.id === pendingId ? { ...message, body: result.reply } : message)));
+      setAgentStatus({
+        mode: "online",
+        label: "Copilot system AI",
+        detail: "Last reply came from the protected Copilot backend route."
+      });
+      return;
+    } catch (systemError) {
+      const systemDetail = getErrorMessage(systemError);
+
+      if (!state.settings.ollamaEnabled) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === pendingId
+              ? {
+                  ...message,
+                  body: `${fallbackReply}\n\nCopilot system AI could not answer: ${systemDetail}`
+                }
+              : message
+          )
+        );
+        setAgentStatus({
+          mode: "offline",
+          label: "System AI fallback",
+          detail: systemDetail
+        });
+        return;
+      }
+
+      setMessages((current) =>
+        current.map((message) => (message.id === pendingId ? { ...message, body: `Copilot unavailable: ${systemDetail}\nThinking locally with ${state.settings.ollamaModel}...` } : message))
+      );
+    }
 
     setAgentStatus((current) => ({
       ...current,
@@ -3897,7 +3948,7 @@ function AgentDock({
         </div>
         <div>
           <span>Sentinel Agent</span>
-          <strong>{agentStatus.mode === "thinking" ? "Ollama thinking" : `${activeLabel} scan active`}</strong>
+          <strong>{agentStatus.mode === "thinking" ? `${agentStatus.label} thinking` : `${activeLabel} scan active`}</strong>
         </div>
         <button type="button" aria-label={isOpen ? "Collapse Sentinel Agent" : "Open Sentinel Agent"} onClick={() => setIsOpen(!isOpen)}>
           {isOpen ? <X size={16} /> : <Sparkles size={16} />}
@@ -4325,6 +4376,7 @@ function createIdleAgentHealth(settings: DeckSettings): AgentHealthRecord[] {
   const checkedAt = new Date().toISOString();
   return [
     { id: "sentinel", label: "Sentinel", status: "idle", checkedAt, detail: "Waiting for /health." },
+    { id: "copilot", label: "Copilot", status: "idle", checkedAt, detail: "System AI backend route waiting for auth." },
     {
       id: "ollama",
       label: "Ollama",

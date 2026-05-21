@@ -4,6 +4,7 @@ import express from "express";
 import helmet from "helmet";
 import { createAuthService } from "./auth/authService.js";
 import { createInviteMailer } from "./email/inviteMailer.js";
+import { createCopilotService } from "./services/copilot.service.js";
 import { authenticate } from "./middleware/authenticate.js";
 import { createPool, createPostgresAuthDb, createPostgresTeamDb, createPostgresUserDataDb } from "./db/postgres.js";
 import { createAuthRouter } from "./routes/auth.js";
@@ -11,6 +12,7 @@ import { createIntelRouter } from "./routes/intel.js";
 import { createInviteAcceptRouter } from "./routes/teamInvites.js";
 import { createLegacyCommandDeckRouter } from "./routes/legacyCommandDeck.js";
 import { createNotificationsRouter } from "./routes/notifications.js";
+import { createSystemAiRouter } from "./routes/systemAi.js";
 import { createTelegramRouter } from "./routes/telegram.js";
 import { createTeamsRouter } from "./routes/teams.js";
 import { createUserDataRouter } from "./routes/userData.js";
@@ -23,6 +25,7 @@ export function createApp(options = {}) {
   const teamDb = options.teamDb ?? (pool ? createPostgresTeamDb(pool) : null);
   const authService = options.authService ?? createAuthService({ db: authDb, jwtSecret: options.jwtSecret });
   const mailer = options.mailer ?? createInviteMailer();
+  const systemAiService = options.systemAiService ?? createCopilotService();
   const appBaseUrl = options.appBaseUrl ?? process.env.NORTHWATCH_APP_URL ?? "http://127.0.0.1:5173";
 
   app.set("trust proxy", 1);
@@ -34,10 +37,28 @@ export function createApp(options = {}) {
   app.get("/", (_request, response) => {
     response.type("html").send(renderRootPage(appBaseUrl));
   });
-  app.get("/health", (_request, response) => response.json({ ok: true, service: "northwatch-auth", checkedAt: new Date().toISOString() }));
+  app.get("/health", (_request, response) => {
+    const checkedAt = new Date().toISOString();
+    const isCopilotConfigured = typeof systemAiService.isConfigured === "function" ? systemAiService.isConfigured() : false;
+    response.json({
+      ok: true,
+      service: "northwatch-auth",
+      checkedAt,
+      agents: [
+        { id: "sentinel", status: "alive", checkedAt, detail: "Northwatch API is running." },
+        {
+          id: "copilot",
+          status: isCopilotConfigured ? "idle" : "dead",
+          checkedAt,
+          detail: isCopilotConfigured ? "Copilot system AI is configured." : "RAPIDAPI_COPILOT_KEY is not set."
+        }
+      ]
+    });
+  });
   app.use("/auth", createAuthRouter({ express, authService }));
   app.use("/api/auth", createAuthRouter({ express, authService }));
   app.use("/api/intel", createIntelRouter({ express, authService }));
+  app.use("/api/system-ai", authenticate({ authService }), createSystemAiRouter({ express, service: systemAiService }));
   if (teamDb) {
     app.use("/api/invites", createInviteAcceptRouter({ express, db: teamDb, authenticate: authenticate({ authService }) }));
   }

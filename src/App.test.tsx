@@ -272,6 +272,41 @@ describe("Northwatch command deck", () => {
     );
   });
 
+  it("uses Copilot system AI for Sentinel replies through the protected backend route", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = getPathname(url);
+      if (pathname === "/health") {
+        return jsonResponse({
+          agents: [
+            { id: "sentinel", status: "alive", checkedAt: "2026-05-19T08:00:00.000Z", detail: "ok" },
+            { id: "copilot", status: "alive", checkedAt: "2026-05-19T08:00:00.000Z", detail: "ready" }
+          ]
+        });
+      }
+      if (pathname === "/api/system-ai/chat") {
+        return jsonResponse({ reply: "Copilot says ship the deployment first.", conversationId: "conv-1", provider: "copilot5" });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open sentinel agent/i }));
+    fireEvent.change(screen.getByLabelText("Ask Sentinel"), { target: { value: "Brief me" } });
+    fireEvent.click(screen.getByRole("button", { name: /send to sentinel/i }));
+
+    expect(await screen.findByText("Copilot says ship the deployment first.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls).toContainEqual([
+        expectUrlPath("/api/system-ai/chat"),
+        expect.objectContaining({ method: "POST", credentials: "include" })
+      ])
+    );
+    const [, init] = fetchMock.mock.calls.find(([url]) => getPathname(url) === "/api/system-ai/chat") ?? [];
+    expect(String(init?.body)).toContain("Northwatch deck snapshot");
+  });
+
   it("keeps JWTs out of localStorage while keyboard shortcuts and dynamic document titles work", () => {
     render(<App />);
 
