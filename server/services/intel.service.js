@@ -100,10 +100,10 @@ export function createIntelService(options = {}) {
     options.rapidApiRealTimeNewsKey ?? process.env.RAPIDAPI_REAL_TIME_NEWS_KEY ?? process.env.REAL_TIME_NEWS_RAPIDAPI_KEY ?? ""
   ) || genericRapidApiKey || rapidApiNseKey;
   const realTimeNewsQueries = normalizeStringList(
-    options.realTimeNewsQueries ?? process.env.RAPIDAPI_REAL_TIME_NEWS_QUERIES ?? "Kenya business,Africa technology,Africa crypto"
+    options.realTimeNewsQueries ?? process.env.RAPIDAPI_REAL_TIME_NEWS_QUERIES ?? "Kenya Africa business technology crypto"
   );
   const realTimeNewsStoryId = normalizeSecret(options.realTimeNewsStoryId ?? process.env.RAPIDAPI_REAL_TIME_NEWS_STORY_ID ?? "");
-  const realTimeNewsCountry = normalizeSecret(options.realTimeNewsCountry ?? process.env.RAPIDAPI_REAL_TIME_NEWS_COUNTRY ?? "KE");
+  const realTimeNewsCountry = normalizeSecret(options.realTimeNewsCountry ?? process.env.RAPIDAPI_REAL_TIME_NEWS_COUNTRY ?? "US");
   const realTimeNewsLang = normalizeSecret(options.realTimeNewsLang ?? process.env.RAPIDAPI_REAL_TIME_NEWS_LANG ?? "en");
   const realTimeNewsLimit = Math.max(1, Math.min(50, Number(options.realTimeNewsLimit ?? process.env.RAPIDAPI_REAL_TIME_NEWS_LIMIT ?? 20) || 20));
   const alphaVantageApiKey = normalizeSecret(
@@ -272,7 +272,7 @@ export function createIntelService(options = {}) {
       "x-rapidapi-key": rapidApiRealTimeNewsKey,
       "x-rapidapi-host": REAL_TIME_NEWS_RAPIDAPI_HOST
     });
-    return normalizeRealTimeNewsRows(payload, now(), newsRegionFromCountry(realTimeNewsCountry));
+    return normalizeRealTimeNewsRows(payload, now(), newsRegionFromQuery(query, realTimeNewsCountry));
   }
 
   async function fetchRealTimeNewsCoverage(storyId) {
@@ -919,6 +919,13 @@ function newsRegionFromCountry(country) {
     return "africa";
   }
   return "global";
+}
+
+function newsRegionFromQuery(query, country) {
+  const value = String(query ?? "").toLowerCase();
+  if (/\b(kenya|kenyan|nairobi|mombasa)\b/.test(value)) return "kenya";
+  if (/\b(africa|african|nigeria|south africa|uganda|tanzania|rwanda|ethiopia|ghana|egypt)\b/.test(value)) return "africa";
+  return newsRegionFromCountry(country);
 }
 
 function sortKenyaStocks(items) {

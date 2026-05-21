@@ -480,6 +480,7 @@ describe("intel service", () => {
       newsSources: [],
       rapidApiRealTimeNewsKey: "server-secret",
       realTimeNewsQueries: ["Kenya business"],
+      realTimeNewsCountry: "KE",
       now: () => new Date("2026-05-19T08:10:00.000Z")
     });
 
