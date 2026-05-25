@@ -228,6 +228,11 @@ export function TeamDashboardPage({ slug }) {
           <a href={`/?workspace=team&team=${details.team.slug}&section=projects`}>
             <LayoutDashboard size={16} /> Open Projects
           </a>
+          {canTeamRole(details.team.role, "invite_member") && (
+            <a className="team-shortcut-primary" href={`/team/${details.team.slug}/settings#invites`}>
+              <Mail size={16} /> Invite teammate
+            </a>
+          )}
           <a href={`/team/${details.team.slug}/settings`}>
             <Settings size={16} /> Team Settings
           </a>
@@ -391,7 +396,7 @@ export function InvitePanel({ team = {}, invites = [], onInvite = async () => {}
   };
 
   return (
-    <section className="team-panel">
+    <section className="team-panel" id="invites">
       <div className="team-panel-head">
         <h2>Invites</h2>
         <span>{invites.length} pending</span>

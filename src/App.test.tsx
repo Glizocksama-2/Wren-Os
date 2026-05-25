@@ -541,7 +541,7 @@ describe("Northwatch command deck", () => {
     expect(await screen.findByText("Team: Invited Ops")).toBeInTheDocument();
   });
 
-  it("creates an add teammate invite link from the active team workspace", async () => {
+  it("creates a visible invite teammate link from the active team workspace", async () => {
     const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
       const pathname = getPathname(url);
       if (pathname === "/api/teams/mine") {
@@ -581,7 +581,7 @@ describe("Northwatch command deck", () => {
 
     await screen.findByText("Team: North Unit");
     fireEvent.change(screen.getByLabelText("Teammate email"), { target: { value: "brian@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: /add teammate/i }));
+    fireEvent.click(screen.getByRole("button", { name: /invite teammate/i }));
 
     await waitFor(() =>
       expect(fetchMock.mock.calls).toContainEqual([

@@ -83,6 +83,23 @@ describe("Northwatch team UI", () => {
     expect(screen.getByRole("link", { name: /open kanban/i })).toHaveAttribute("href", "/?workspace=team&team=birunda-farms&section=kanban");
   });
 
+  it("shows a direct invite teammate button for team admins on the dashboard", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          team: { id: "team-1", name: "Birunda Farms", slug: "birunda-farms", role: "owner" },
+          members: [{ userId: "user-1", displayName: "Sam", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }],
+          activity: []
+        })
+      )
+    );
+
+    render(<TeamDashboardPage slug="birunda-farms" />);
+
+    expect(await screen.findByRole("link", { name: /invite teammate/i })).toHaveAttribute("href", "/team/birunda-farms/settings#invites");
+  });
+
   it("renders team settings with member management, invites, and owner delete confirmation", async () => {
     vi.stubGlobal(
       "fetch",

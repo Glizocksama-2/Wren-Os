@@ -3986,7 +3986,7 @@ function AccountModule({
               <div className="team-ops-head">
                 <Copy size={16} />
                 <div>
-                  <strong>Add teammate</strong>
+                  <strong>Invite teammate</strong>
                   <span>{activeTeam ? `For ${activeTeam.name}` : "Switch to a team first"}</span>
                 </div>
               </div>
@@ -4016,7 +4016,7 @@ function AccountModule({
                   </select>
                 </label>
                 <button type="submit" disabled={!canInviteTeam || isTeamBusy || !teammateEmail.trim()}>
-                  <Plus size={16} /> Add teammate
+                  <Plus size={16} /> Invite teammate
                 </button>
               </form>
               <p className="panel-copy">

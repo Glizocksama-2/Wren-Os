@@ -2388,7 +2388,7 @@ p {
 }
 
 .team-shortcuts {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   margin-top: 18px;
 }
 
@@ -2407,6 +2407,11 @@ p {
   color: var(--text);
   text-decoration: none;
   font-weight: 900;
+}
+
+.team-shortcuts a.team-shortcut-primary {
+  border-color: rgb(var(--accent-rgb) / 0.5);
+  background: rgb(var(--accent-rgb) / 0.24);
 }
 
 .team-form label,
