@@ -10,6 +10,14 @@ describe("team API client", () => {
     expect(resolveTeamApiBaseUrl({ envBaseUrl: "", location: { hostname: "127.0.0.1" } })).toBe("http://127.0.0.1:4000");
   });
 
+  it("routes Vite dev hosts on a LAN to the Express API instead of the frontend shell", () => {
+    expect(resolveTeamApiBaseUrl({ envBaseUrl: "", location: { protocol: "http:", hostname: "192.168.1.44", port: "5173" } })).toBe("http://192.168.1.44:4000");
+  });
+
+  it("normalizes an accidental Vite frontend API base URL to the Express API port", () => {
+    expect(resolveTeamApiBaseUrl({ envBaseUrl: "http://192.168.1.44:5173", location: { protocol: "http:", hostname: "192.168.1.44", port: "5173" } })).toBe("http://192.168.1.44:4000");
+  });
+
   it("keeps JSON error messages from the API", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,

@@ -1,4 +1,6 @@
 const configuredAuthApiBaseUrl = import.meta.env.VITE_AUTH_API_BASE_URL ?? "";
+const LOCAL_API_PORT = "4000";
+const VITE_FRONTEND_PORTS = new Set(["5173", "5174", "4173"]);
 
 export async function listMyTeams() {
   const response = await teamRequest("/api/teams/mine");
@@ -140,11 +142,14 @@ export async function teamRequest(path, init = {}) {
 export function resolveTeamApiBaseUrl(options = {}) {
   const envBaseUrl = options.envBaseUrl ?? configuredAuthApiBaseUrl;
   const normalized = String(envBaseUrl ?? "").trim().replace(/\/$/, "");
+  const location = options.location ?? globalThis.location;
+  const devServerApiBaseUrl = getDevServerApiBaseUrl(normalized, location);
+  if (devServerApiBaseUrl) return devServerApiBaseUrl;
+
   if (normalized) return normalized;
 
-  const location = options.location ?? globalThis.location;
-  if (["127.0.0.1", "localhost", "::1"].includes(location?.hostname)) {
-    return "http://127.0.0.1:4000";
+  if (isLoopbackHost(location?.hostname)) {
+    return `http://${formatUrlHost(location.hostname)}:${LOCAL_API_PORT}`;
   }
 
   return "";
@@ -152,6 +157,34 @@ export function resolveTeamApiBaseUrl(options = {}) {
 
 function looksLikeHtml(value) {
   return /<!doctype html|<html[\s>]/i.test(String(value ?? ""));
+}
+
+function getDevServerApiBaseUrl(configuredBaseUrl, location) {
+  if (configuredBaseUrl) {
+    try {
+      const url = new URL(configuredBaseUrl);
+      if (VITE_FRONTEND_PORTS.has(url.port)) {
+        return `http://${formatUrlHost(url.hostname)}:${LOCAL_API_PORT}`;
+      }
+    } catch {
+      return "";
+    }
+  }
+
+  if (VITE_FRONTEND_PORTS.has(String(location?.port ?? ""))) {
+    return `http://${formatUrlHost(location.hostname)}:${LOCAL_API_PORT}`;
+  }
+
+  return "";
+}
+
+function isLoopbackHost(hostname) {
+  return ["127.0.0.1", "localhost", "::1"].includes(hostname);
+}
+
+function formatUrlHost(hostname) {
+  const host = hostname || "127.0.0.1";
+  return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
 }
 
 export function slugifyTeamName(value) {

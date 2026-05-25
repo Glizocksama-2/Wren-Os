@@ -4,8 +4,8 @@ import {
   normalizeCommandDeck,
   type CommandDeckState
 } from "../store/commandDeck";
+import { resolveTeamApiBaseUrl } from "./teamApi.js";
 
-const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL?.trim() ?? "").replace(/\/$/, "");
 const TEAM_COMMAND_DECK_TITLE = "northwatch-command-deck";
 const TEAM_COMMAND_DECK_KIND = "northwatch_command_deck";
 
@@ -101,7 +101,7 @@ function teamDocumentsUrl(teamId: string, documentId: string | null = null): str
   const path = documentId
     ? `/api/documents/${encodeURIComponent(documentId)}?${query}`
     : `/api/documents?${query}`;
-  return `${AUTH_API_BASE_URL}${path}`;
+  return `${resolveTeamApiBaseUrl()}${path}`;
 }
 
 async function writeTeamCommandDeck(teamId: string, deck: CommandDeckState, documentId: string | null): Promise<string> {
