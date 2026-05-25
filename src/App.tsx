@@ -66,6 +66,7 @@ import { requestSystemAiAgentReply } from "./lib/systemAi";
 import { getLiveWeatherForecast, type LiveWeatherSnapshot } from "./lib/weather";
 import { analyzeFoodPlate, type FoodPlateAnalysis } from "./lib/workoutNutrition";
 import { toKSH } from "./utils/currency";
+import { canTeamRole } from "../shared/teamPermissions.js";
 import type { TeamMember, TeamRole, TeamWorkspace } from "./store/cloudDeck";
 import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
 import {
@@ -1631,6 +1632,10 @@ function TopBar({
   const profileDetails = [settings.age.trim() ? `Age ${settings.age.trim()}` : "", settings.phoneNumber.trim()]
     .filter(Boolean)
     .join(" / ");
+  const inviteHref =
+    activeWorkspace.type === "team" && canTeamRole(activeWorkspace.role, "invite_member")
+      ? `/team/${encodeURIComponent(activeWorkspace.slug)}/settings#invites`
+      : "";
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1664,6 +1669,11 @@ function TopBar({
           {workspaceLabel}
         </span>
         <WorkspaceSwitcher activeWorkspace={activeWorkspace} onWorkspaceChange={onWorkspaceChange as any} />
+        {inviteHref && (
+          <a className="topbar-invite-link" href={inviteHref}>
+            <UsersRound size={14} /> Invite teammate
+          </a>
+        )}
         <NotificationBell />
         <span className={`cloud-status-pill ${cloudStatus.mode}`} title={cloudStatus.detail}>
           <Cloud size={14} />

@@ -1153,6 +1153,7 @@ p {
 .workspace-status-pill,
 .cloud-status-pill,
 .topbar-icon-button,
+.topbar-invite-link,
 .auth-user-chip {
   display: inline-flex;
   min-height: 30px;
@@ -1166,6 +1167,13 @@ p {
   padding: 0 10px;
   font-size: 13px;
   font-weight: 900;
+}
+
+.topbar-invite-link {
+  border-color: rgb(var(--accent-rgb) / 0.45);
+  background: rgb(var(--accent-rgb) / 0.16);
+  color: var(--accent);
+  text-decoration: none;
 }
 
 .auth-user-chip {

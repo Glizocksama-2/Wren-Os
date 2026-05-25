@@ -580,6 +580,7 @@ describe("Northwatch command deck", () => {
     fireEvent.click(screen.getByRole("button", { name: /create team/i }));
 
     await screen.findByText("Team: North Unit");
+    expect(screen.getByRole("link", { name: /invite teammate/i })).toHaveAttribute("href", "/team/north-unit/settings#invites");
     fireEvent.change(screen.getByLabelText("Teammate email"), { target: { value: "brian@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /invite teammate/i }));
 
