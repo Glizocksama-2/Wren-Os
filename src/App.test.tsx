@@ -60,6 +60,7 @@ describe("Northwatch command deck", () => {
     expect(window.localStorage.getItem("wren-os.workspace.v1")).not.toBeNull();
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).toContain("Operator");
     expect(window.localStorage.getItem(COMMAND_DECK_STORAGE_KEY)).not.toContain("EStarzFc");
+    expect(screen.queryByText(/war room/i)).not.toBeInTheDocument();
   });
 
   it("adds and completes to do items", () => {
@@ -594,6 +595,50 @@ describe("Northwatch command deck", () => {
       ])
     );
     expect(screen.getByLabelText("Team invite link")).toHaveValue("https://northwatch.app/invite/invite-token");
+  });
+
+  it("renders an active team workspace as a cooperative war room dashboard", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = getPathname(url);
+      if (pathname === "/api/teams/mine") {
+        return jsonResponse({ teams: [] });
+      }
+      if (pathname === "/api/teams" && init?.method === "POST") {
+        return jsonResponse({ team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" } }, 201);
+      }
+      if (pathname === "/api/teams/north-unit") {
+        return jsonResponse({
+          team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" },
+          members: [
+            { teamId: "team-1", userId: "user-1", email: "sam@example.com", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" },
+            { teamId: "team-1", userId: "user-2", email: "brian@example.com", role: "member", joinedAt: "2026-05-19T12:10:00.000Z" }
+          ],
+          activity: []
+        });
+      }
+      if (pathname === "/api/documents") {
+        return jsonResponse({ data: [] });
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Account" }));
+    fireEvent.change(screen.getByLabelText("Team name"), { target: { value: "North Unit" } });
+    fireEvent.click(screen.getByRole("button", { name: /create team/i }));
+
+    await screen.findByText("Team: North Unit");
+    clickNav("Command");
+
+    expect(await screen.findByRole("heading", { name: /north unit war room/i })).toBeInTheDocument();
+    expect(screen.getByText(/shared team workspace/i)).toBeInTheDocument();
+    expect(screen.getByText(/role owner/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 teammates/i)).toBeInTheDocument();
+    expect(screen.getByText(/shared modules: tasks, projects, intel, calendar, finances, workout, books, journal/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /invite teammate/i }).map((link) => link.getAttribute("href"))).toContain("/team/north-unit/settings#invites");
   });
 
   it("opens a team as an isolated shared deck instead of showing personal tasks", async () => {

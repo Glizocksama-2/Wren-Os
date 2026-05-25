@@ -69,6 +69,7 @@ import { toKSH } from "./utils/currency";
 import { canTeamRole } from "../shared/teamPermissions.js";
 import type { TeamMember, TeamRole, TeamWorkspace } from "./store/cloudDeck";
 import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
+import { TeamWarRoomHero, TeamWarRoomPanels } from "./team/TeamWarRoom";
 import {
   createFreshTeamCommandDeck,
   loadCachedTeamCommandDeck,
@@ -958,7 +959,7 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   }, [activateWorkspaceSelection, teams]);
 
   return (
-    <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
+    <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background} data-workspace={activeTeamWorkspace.type}>
       <TechBackdrop metrics={metrics} />
       <aside className="tactical-rail" aria-label="Primary">
         <div className="rail-brand-shell" ref={logoMenuRef}>
@@ -1023,7 +1024,17 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
           />
         )}
         <section className="deck-content">
-          {view === "dashboard" && <Dashboard state={state} metrics={metrics} dispatch={dispatch} setView={setView} setNotice={setNotice} />}
+          {view === "dashboard" && (
+            <Dashboard
+              state={state}
+              metrics={metrics}
+              activeTeamWorkspace={activeTeamWorkspace}
+              teamMembers={teamMembers}
+              dispatch={dispatch}
+              setView={setView}
+              setNotice={setNotice}
+            />
+          )}
           {view === "todo" && <TodoModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "daily" && <DailyModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "projects" && <ProjectsModule state={state} dispatch={dispatch} setNotice={setNotice} />}
@@ -1774,42 +1785,52 @@ function ShortcutOverlay({ onClose }: { onClose: () => void }) {
 function Dashboard({
   state,
   metrics,
+  activeTeamWorkspace,
+  teamMembers,
   dispatch,
   setView,
   setNotice
 }: {
   state: CommandDeckState;
   metrics: ReturnType<typeof getDeckMetrics>;
+  activeTeamWorkspace: TeamWorkspaceSelection;
+  teamMembers: TeamMember[];
   dispatch: React.Dispatch<CommandDeckAction>;
   setView: (view: DeckView) => void;
   setNotice: (message: string) => void;
 }) {
   const openProjects = state.projects.filter((project) => project.status === "pending").slice(0, 4);
   const topTasks = state.tasks.filter((task) => task.status !== "done").slice(0, 4);
+  const isTeamWorkspace = activeTeamWorkspace.type === "team";
+  const activityItems = buildLocalActivityFeed(state);
 
   return (
-    <div className="dashboard-layout">
-      <section className="hero-command">
-        <div className="hero-copy">
-          <span className="system-dot">System operational</span>
-          <h1>Your command deck, live. Built to keep you ready to move.</h1>
-          <p>
-            A fresh local-first base for tasks, projects, market intel, training, reading, journal, calendar, and finances.
-          </p>
-          <div className="hero-actions">
-            <button type="button" onClick={() => setView("todo")}>Add to do</button>
-            <button type="button" onClick={() => setView("daily")}>Daily list</button>
-            <button type="button" onClick={() => setView("projects")}>Open projects</button>
+    <div className={`dashboard-layout ${isTeamWorkspace ? "team-war-room-layout" : ""}`}>
+      {isTeamWorkspace ? (
+        <TeamWarRoomHero workspace={activeTeamWorkspace} members={teamMembers} metrics={metrics} activityItems={activityItems} onOpenView={setView} />
+      ) : (
+        <section className="hero-command">
+          <div className="hero-copy">
+            <span className="system-dot">System operational</span>
+            <h1>Your command deck, live. Built to keep you ready to move.</h1>
+            <p>
+              A fresh local-first base for tasks, projects, market intel, training, reading, journal, calendar, and finances.
+            </p>
+            <div className="hero-actions">
+              <button type="button" onClick={() => setView("todo")}>Add to do</button>
+              <button type="button" onClick={() => setView("daily")}>Daily list</button>
+              <button type="button" onClick={() => setView("projects")}>Open projects</button>
+            </div>
+            <div className="hero-signal-row" aria-label="Northwatch live systems">
+              <span><Bot size={14} /> Sentinel agent online</span>
+              <span><Radar size={14} /> {metrics.intelItems} intel targets</span>
+              <span><Zap size={14} /> {metrics.openTasks} active orders</span>
+              <span><Repeat2 size={14} /> {metrics.routinesDoneToday}/{metrics.routinesDueToday} daily systems</span>
+            </div>
           </div>
-          <div className="hero-signal-row" aria-label="Northwatch live systems">
-            <span><Bot size={14} /> Sentinel agent online</span>
-            <span><Radar size={14} /> {metrics.intelItems} intel targets</span>
-            <span><Zap size={14} /> {metrics.openTasks} active orders</span>
-            <span><Repeat2 size={14} /> {metrics.routinesDoneToday}/{metrics.routinesDueToday} daily systems</span>
-          </div>
-        </div>
-        {state.settings.showOrbit && <OrbitGauge value={metrics.readiness} />}
-      </section>
+          {state.settings.showOrbit && <OrbitGauge value={metrics.readiness} />}
+        </section>
+      )}
 
       <section className="github-scan-strip dashboard-scan">
         <Github size={18} />
@@ -1844,6 +1865,8 @@ function Dashboard({
       )}
 
       <MetricGrid metrics={metrics} />
+
+      {isTeamWorkspace && <TeamWarRoomPanels state={state} members={teamMembers} activityItems={activityItems} onOpenView={setView} />}
 
       <section className="deck-panel wide-panel">
         <PanelHead title="Immediate Orders" action={<button onClick={() => setView("todo")} type="button">Open to do</button>} />

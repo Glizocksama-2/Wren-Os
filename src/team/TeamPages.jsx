@@ -36,6 +36,8 @@ import {
   updateMemberRole,
   updateTeam
 } from "./teamApi.js";
+import { loadTeamCommandDeck } from "./teamDeckApi";
+import { TeamWarRoomSnapshot } from "./TeamWarRoom";
 
 const TEAM_ROLES = ["admin", "member", "viewer"];
 
@@ -196,13 +198,23 @@ export function TeamCreatePage() {
 
 export function TeamDashboardPage({ slug }) {
   const [details, setDetails] = useState(null);
+  const [sharedDeck, setSharedDeck] = useState({ deck: null, updatedAt: null, isLoading: true });
   const [error, setError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
+    setSharedDeck({ deck: null, updatedAt: null, isLoading: true });
     getTeam(slug)
-      .then((teamDetails) => {
+      .then(async (teamDetails) => {
         if (isMounted) setDetails(teamDetails);
+        try {
+          const loadedDeck = await loadTeamCommandDeck(teamDetails.team.id);
+          if (isMounted) {
+            setSharedDeck({ deck: loadedDeck.deck, updatedAt: loadedDeck.updatedAt, isLoading: false });
+          }
+        } catch {
+          if (isMounted) setSharedDeck({ deck: null, updatedAt: null, isLoading: false });
+        }
       })
       .catch((teamError) => {
         if (isMounted) setError(teamError.message);
@@ -218,9 +230,10 @@ export function TeamDashboardPage({ slug }) {
   return (
     <main className="team-page">
       <section className="team-hero">
-        <span className="micro-label">Team workspace</span>
-        <h1>{details.team.name}</h1>
-        <p>{details.members.length} member{details.members.length === 1 ? "" : "s"} in this shared Northwatch workspace.</p>
+        <span className="micro-label">Team War Room</span>
+        <h1>{details.team.name} War Room</h1>
+        <p>{details.members.length} teammate{details.members.length === 1 ? "" : "s"} in this shared Northwatch workspace.</p>
+        <TeamWarRoomSnapshot team={details.team} members={details.members} deck={sharedDeck.deck} updatedAt={sharedDeck.updatedAt} isLoading={sharedDeck.isLoading} />
         <div className="team-shortcuts">
           <a href={`/?workspace=team&team=${details.team.slug}&section=kanban`}>
             <ClipboardList size={16} /> Open Kanban

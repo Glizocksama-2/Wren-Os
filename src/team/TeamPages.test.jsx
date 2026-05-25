@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { freshCommandDeck } from "../store/commandDeck";
 import {
   InviteAcceptPage,
   NotificationBell,
@@ -78,7 +79,7 @@ describe("Northwatch team UI", () => {
 
     render(<TeamDashboardPage slug="birunda-farms" />);
 
-    expect(await screen.findByRole("heading", { name: "Birunda Farms" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Birunda Farms War Room/i })).toBeInTheDocument();
     expect(screen.getByText(/Sam created task Fix n8n node/i)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open kanban/i })).toHaveAttribute("href", "/?workspace=team&team=birunda-farms&section=kanban");
   });
@@ -98,6 +99,59 @@ describe("Northwatch team UI", () => {
     render(<TeamDashboardPage slug="birunda-farms" />);
 
     expect(await screen.findByRole("link", { name: /invite teammate/i })).toHaveAttribute("href", "/team/birunda-farms/settings#invites");
+  });
+
+  it("loads shared command deck metrics into the team war room dashboard", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            team: { id: "team-1", name: "Birunda Farms", slug: "birunda-farms", role: "owner" },
+            members: [
+              { userId: "user-1", displayName: "Sam", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" },
+              { userId: "user-2", displayName: "Brian", role: "member", joinedAt: "2026-05-19T12:10:00.000Z" }
+            ],
+            activity: [{ id: "activity-1", actorName: "Sam", action: "updated project", itemName: "Client Portal", createdAt: "2026-05-19T12:15:00.000Z" }]
+          })
+        )
+        .mockResolvedValueOnce(
+          jsonResponse({
+            data: [
+              {
+                id: "deck-doc-1",
+                title: "northwatch-command-deck",
+                payload: {
+                  kind: "northwatch_command_deck",
+                  deck: {
+                    ...freshCommandDeck,
+                    tasks: [
+                      { id: "task-1", title: "Ship shared board", priority: "high", kanbanPriority: "urgent", dueDate: null, status: "pending", createdAt: "2026-05-19T12:00:00.000Z", updatedAt: "2026-05-19T12:00:00.000Z" },
+                      { id: "task-2", title: "Review handoff", priority: "medium", kanbanPriority: "normal", dueDate: null, status: "in_progress", createdAt: "2026-05-19T12:05:00.000Z", updatedAt: "2026-05-19T12:05:00.000Z" }
+                    ],
+                    projects: [
+                      { id: "project-1", name: "Client Portal", objective: "Launch", nextAction: "Review sprint", status: "pending", dueDate: null, progress: 42, source: "manual", repositoryUrl: null, language: null, visibility: null, defaultBranch: null, lastPushedAt: null, openIssues: 0, openPullRequests: 0, createdAt: "2026-05-19T12:00:00.000Z", updatedAt: "2026-05-19T12:00:00.000Z" }
+                    ],
+                    finances: [{ id: "finance-1", label: "Team budget", type: "income", amount: 12000, date: "2026-05-19", status: "cleared" }],
+                    intel: [{ id: "intel-1", title: "NSE Watch", symbol: "NSE", kind: "stock", signal: "watching", thesis: "Market pulse", sourceUrl: null, notes: [], createdAt: "2026-05-19T12:00:00.000Z", updatedAt: "2026-05-19T12:00:00.000Z" }]
+                  }
+                },
+                updatedAt: "2026-05-19T12:20:00.000Z"
+              }
+            ]
+          })
+        )
+    );
+
+    render(<TeamDashboardPage slug="birunda-farms" />);
+
+    expect(await screen.findByRole("heading", { name: /birunda farms war room/i })).toBeInTheDocument();
+    expect(screen.getByText(/2 teammates/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 active orders/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 pending project/i)).toBeInTheDocument();
+    expect(screen.getByText(/KSh 12,000.00/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sam updated project Client Portal/i)).toBeInTheDocument();
   });
 
   it("renders team settings with member management, invites, and owner delete confirmation", async () => {
