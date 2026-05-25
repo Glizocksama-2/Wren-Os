@@ -11,6 +11,10 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "sources:snapshot": "node scripts/wren-source-snapshot.mjs",
+    "supabase": "supabase",
+    "supabase:link": "supabase link",
+    "supabase:migrations": "supabase migration list",
+    "supabase:push": "supabase db push",
     "test": "vitest",
     "test:run": "vitest run"
   },
@@ -39,6 +43,7 @@
     "@types/react-dom": "^19.0.0",
     "caniuse-lite": "^1.0.30001792",
     "jsdom": "^26.0.0",
+    "supabase": "^2.101.0",
     "supertest": "^7.2.2",
     "vitest": "^3.0.0"
   }

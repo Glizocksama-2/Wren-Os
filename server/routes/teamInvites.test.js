@@ -57,7 +57,8 @@ describe("team invite routes", () => {
         status: "pending",
         expiresAt: "2026-05-21T12:00:00.000Z",
         team: { id: "team-1", name: "Birunda Farms", slug: "birunda-farms", memberLimit: 10 },
-        inviter: { displayName: "Admin" }
+        inviter: { displayName: "Admin" },
+        recipientExists: false
       }),
       acceptTeamInvite: vi.fn().mockResolvedValue({
         team: { id: "team-1", name: "Birunda Farms", slug: "birunda-farms" },
@@ -69,7 +70,7 @@ describe("team invite routes", () => {
     const preview = await request(app).get("/api/invites/invite-token").expect(200);
     const accepted = await request(app).post("/api/invites/invite-token/accept").set("Cookie", "northwatch_session=token").expect(200);
 
-    expect(preview.body.invite).toMatchObject({ teamName: "Birunda Farms", inviterName: "Admin", role: "member" });
+    expect(preview.body.invite).toMatchObject({ teamName: "Birunda Farms", inviterName: "Admin", role: "member", recipientExists: false });
     expect(accepted.body.team.slug).toBe("birunda-farms");
     expect(db.acceptTeamInvite).toHaveBeenCalledWith({
       token: "invite-token",

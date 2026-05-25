@@ -1,0 +1,2 @@
+-- Northwatch local Supabase seed placeholder.
+-- Keep this file so `supabase db reset` can run with the default CLI config.

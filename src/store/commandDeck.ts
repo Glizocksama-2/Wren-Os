@@ -116,6 +116,21 @@ export interface JournalEntry {
   date: string;
   mood: string;
   body: string;
+  weather: JournalWeatherSnapshot | null;
+}
+
+export interface JournalWeatherSnapshot {
+  provider: string;
+  location: string;
+  description: string;
+  temperatureC: number | null;
+  feelsLikeC: number | null;
+  humidity: number | null;
+  windKph: number | null;
+  latitude: number;
+  longitude: number;
+  forecastAt: string;
+  capturedAt: string;
 }
 
 export interface FinanceEntry {
@@ -234,8 +249,8 @@ export type CommandDeckAction =
   | { type: "book/update"; id: string; title: string; author: string; currentChapter: number; totalChapters: number; currentPage: number; totalPages: number }
   | { type: "book/progress"; id: string; currentChapter: number; totalChapters: number; currentPage: number; totalPages: number }
   | { type: "book/delete"; id: string }
-  | { type: "journal/add"; mood: string; body: string }
-  | { type: "journal/update"; id: string; mood: string; body: string }
+  | { type: "journal/add"; mood: string; body: string; weather?: JournalWeatherSnapshot | null }
+  | { type: "journal/update"; id: string; mood: string; body: string; weather?: JournalWeatherSnapshot | null }
   | { type: "journal/delete"; id: string }
   | { type: "finance/add"; label: string; financeType: FinanceType; amount: number; date: string }
   | { type: "finance/update"; id: string; label: string; financeType: FinanceType; amount: number; date: string }
@@ -621,13 +636,13 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "journal/add":
       return touch({
         ...state,
-        journal: [{ id: makeId("journal"), date: todayInput(), mood: action.mood, body: action.body }, ...state.journal]
+        journal: [{ id: makeId("journal"), date: todayInput(), mood: action.mood, body: action.body, weather: action.weather ?? null }, ...state.journal]
       }, timestamp);
 
     case "journal/update":
       return touch({
         ...state,
-        journal: state.journal.map((entry) => (entry.id === action.id ? { ...entry, mood: action.mood, body: action.body } : entry))
+        journal: state.journal.map((entry) => (entry.id === action.id ? { ...entry, mood: action.mood, body: action.body, weather: action.weather ?? null } : entry))
       }, timestamp);
 
     case "journal/delete":
@@ -879,7 +894,7 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>, options: 
     calendar: Array.isArray(value.calendar) ? value.calendar : [],
     workouts: Array.isArray(value.workouts) ? value.workouts : [],
     books: Array.isArray(value.books) ? value.books.map(normalizeBook) : [],
-    journal: Array.isArray(value.journal) ? value.journal : [],
+    journal: Array.isArray(value.journal) ? value.journal.map(normalizeJournalEntry) : [],
     finances: Array.isArray(value.finances) ? value.finances : [],
     intel: Array.isArray(value.intel) ? value.intel.map(normalizeIntelItem) : [],
     intelAutopilot: normalizeIntelAutopilot(value.intelAutopilot),
@@ -1096,7 +1111,8 @@ function migrateLegacyDocument(document: Record<string, unknown>, fallbackTimest
     id: `legacy-doc-${getString(document.id) ?? makeId("doc")}`,
     date: updatedAt.slice(0, 10),
     mood: `Knowledge: ${title}`,
-    body: body ? `${title}\n\n${body}` : title
+    body: body ? `${title}\n\n${body}` : title,
+    weather: null
   };
 }
 
@@ -1107,7 +1123,42 @@ function migrateLegacyContentJournal(item: Record<string, unknown>, fallbackTime
     id: `legacy-content-journal-${getString(item.id) ?? makeId("content-note")}`,
     date: updatedAt.slice(0, 10),
     mood: `Content: ${getString(item.stage) ?? "tracked"}`,
-    body: `${title}${getString(item.platform) ? `\nPlatform: ${getString(item.platform)}` : ""}`
+    body: `${title}${getString(item.platform) ? `\nPlatform: ${getString(item.platform)}` : ""}`,
+    weather: null
+  };
+}
+
+function normalizeJournalEntry(entry: Partial<JournalEntry>): JournalEntry {
+  return {
+    id: getString(entry.id) ?? makeId("journal"),
+    date: getString(entry.date) ?? todayInput(),
+    mood: getString(entry.mood) ?? "Logged",
+    body: getString(entry.body) ?? "",
+    weather: normalizeJournalWeather(entry.weather)
+  };
+}
+
+function normalizeJournalWeather(value: unknown): JournalWeatherSnapshot | null {
+  if (!isRecord(value)) return null;
+  const latitude = getFiniteNumber(value.latitude);
+  const longitude = getFiniteNumber(value.longitude);
+  const forecastAt = getString(value.forecastAt);
+  const capturedAt = getString(value.capturedAt);
+
+  if (latitude === null || longitude === null || !forecastAt || !capturedAt) return null;
+
+  return {
+    provider: getString(value.provider) ?? "rapidapi-open-weather13",
+    location: getString(value.location) ?? "Selected location",
+    description: getString(value.description) ?? "Weather data available",
+    temperatureC: getFiniteNumber(value.temperatureC),
+    feelsLikeC: getFiniteNumber(value.feelsLikeC),
+    humidity: getFiniteNumber(value.humidity),
+    windKph: getFiniteNumber(value.windKph),
+    latitude,
+    longitude,
+    forecastAt,
+    capturedAt
   };
 }
 
@@ -1210,6 +1261,15 @@ function getString(value: unknown): string | null {
 
 function getNullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function getFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -74,7 +74,7 @@ export function LoginPage() {
           </button>
         </form>
         {message && <p className="auth-error">{message}</p>}
-        <a className="auth-switch-link" href="/register">Don't have an account? Register</a>
+        <a className="auth-switch-link" href={buildAuthPath("/register")}>Don't have an account? Register</a>
       </section>
     </main>
   );
@@ -139,7 +139,7 @@ export function RegisterPage() {
           </button>
         </form>
         {message && <p className="auth-error">{message}</p>}
-        <a className="auth-switch-link" href="/login">Already have an account? Log in</a>
+        <a className="auth-switch-link" href={buildAuthPath("/login")}>Already have an account? Log in</a>
       </section>
     </main>
   );
@@ -162,4 +162,9 @@ function getAuthMessage(error: unknown) {
   if (error instanceof AuthApiError) return error.message;
   if (error instanceof Error) return error.message;
   return "Northwatch auth failed.";
+}
+
+function buildAuthPath(path: "/login" | "/register") {
+  const redirect = new URLSearchParams(window.location.search).get("redirect");
+  return redirect?.startsWith("/") ? `${path}?redirect=${encodeURIComponent(redirect)}` : path;
 }

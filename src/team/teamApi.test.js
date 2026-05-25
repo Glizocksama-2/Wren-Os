@@ -28,9 +28,27 @@ describe("team API client", () => {
       status: 404,
       statusText: "Not Found",
       headers: new Headers({ "content-type": "text/html" }),
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON");
+      },
       text: async () => "<!doctype html><html><body>Northwatch</body></html>"
     }));
 
-    await expect(teamRequest("/api/teams")).rejects.toThrow(/returned the frontend app instead of the Northwatch API/i);
+    await expect(teamRequest("/api/teams")).rejects.toThrow(/returned the frontend app/i);
+  });
+
+  it("keeps non-JSON API error bodies instead of hiding them behind a generic 500", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: "Internal Server Error",
+      headers: new Headers({ "content-type": "text/plain" }),
+      json: async () => {
+        throw new SyntaxError("Unexpected token d in JSON");
+      },
+      text: async () => "database policy rejected team insert"
+    }));
+
+    await expect(teamRequest("/api/teams")).rejects.toThrow("database policy rejected team insert");
   });
 });

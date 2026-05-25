@@ -85,6 +85,7 @@ grant update (role) on table public.team_memberships to authenticated;
 grant delete on table public.team_memberships to authenticated;
 
 drop policy if exists "team_memberships_select_self" on public.team_memberships;
+drop policy if exists "team_memberships_select_self_or_owner" on public.team_memberships;
 create policy "team_memberships_select_self_or_owner"
 on public.team_memberships
 for select

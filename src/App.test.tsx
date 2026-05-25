@@ -5,7 +5,7 @@ import App, {
   PRIVACY_VERSION,
   TERMS_VERSION
 } from "./App";
-import { COMMAND_DECK_STORAGE_KEY } from "./store/commandDeck";
+import { COMMAND_DECK_STORAGE_KEY, freshCommandDeck, getCommandDeckStorageKey } from "./store/commandDeck";
 
 describe("Northwatch command deck", () => {
   beforeEach(() => {
@@ -212,6 +212,92 @@ describe("Northwatch command deck", () => {
     fireEvent.click(screen.getByRole("button", { name: /add finance/i }));
     expect(screen.getByText("Client payment")).toBeInTheDocument();
     expect(screen.getAllByText(/KSh 500.00/).length).toBeGreaterThan(0);
+  }, 15000);
+
+  it("attaches live weather snapshots to journal entries", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (getPathname(url) === "/api/weather/forecast") {
+        return jsonResponse({
+          provider: "rapidapi-open-weather13",
+          checkedAt: "2026-05-22T08:00:00.000Z",
+          location: "Nairobi, KE",
+          latitude: -1.286389,
+          longitude: 36.817223,
+          current: {
+            provider: "rapidapi-open-weather13",
+            location: "Nairobi, KE",
+            description: "light rain",
+            temperatureC: 21.5,
+            feelsLikeC: 22,
+            humidity: 68,
+            windKph: 14,
+            latitude: -1.286389,
+            longitude: 36.817223,
+            forecastAt: "2026-05-22T09:00:00.000Z",
+            capturedAt: "2026-05-22T08:00:00.000Z"
+          },
+          forecast: []
+        });
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    clickNav("Journal");
+    expect(await screen.findAllByText(/Nairobi, KE \/ light rain \/ 21.5 C/)).not.toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Journal entry"), { target: { value: "Rain shaped the afternoon sprint." } });
+    fireEvent.click(screen.getByRole("button", { name: /save entry/i }));
+
+    const journalCard = screen.getByText("Rain shaped the afternoon sprint.").closest(".journal-card") as HTMLElement;
+    expect(within(journalCard).getByText(/Nairobi, KE \/ light rain \/ 21.5 C/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/weather/forecast?latitude=-1.286389&longitude=36.817223&lang=EN"),
+      expect.objectContaining({ method: "GET", credentials: "include" })
+    );
+  });
+
+  it("analyzes food plates from the workout page through the protected backend route", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      if (getPathname(url) === "/api/workout/analyze-food") {
+        return jsonResponse({
+          foodName: "Breakfast plate",
+          calories: 520,
+          protein: "21g",
+          carbs: "64g",
+          fat: "18g",
+          recommendations: ["Add water", "Pair with a light walk"],
+          provider: "rapidapi-workout-planner"
+        });
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    clickNav("Workout");
+    fireEvent.change(screen.getByLabelText("Food image URL"), { target: { value: "https://example.com/breakfast.jpg" } });
+    fireEvent.change(screen.getByLabelText("Nutrition language"), { target: { value: "en" } });
+    fireEvent.click(screen.getByRole("button", { name: /analyze plate/i }));
+
+    expect(await screen.findByText("Breakfast plate")).toBeInTheDocument();
+    expect(screen.getByText("520 kcal")).toBeInTheDocument();
+    expect(screen.getByText("Protein 21g")).toBeInTheDocument();
+    expect(screen.getByText("Add water")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Food image URL"), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: /analyze plate/i }));
+    expect(screen.queryByText("Breakfast plate")).not.toBeInTheDocument();
+    expect(screen.getByText(/Food analysis failed: Add a public food image URL first./i)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      expectUrlPath("/api/workout/analyze-food"),
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: JSON.stringify({ imageUrl: "https://example.com/breakfast.jpg", lang: "en" })
+      })
+    );
   });
 
   it("renders the live intel market engine", async () => {
@@ -307,6 +393,61 @@ describe("Northwatch command deck", () => {
     expect(String(init?.body)).toContain("Northwatch deck snapshot");
   });
 
+  it("can read Copilot replies aloud with selected voice and language", async () => {
+    const spoken: Array<{ text: string; lang: string; voice: string | null }> = [];
+    const voices = [
+      { name: "Amina English", lang: "en-KE", voiceURI: "amina-en-ke" },
+      { name: "Sofia Espanol", lang: "es-ES", voiceURI: "sofia-es" }
+    ];
+
+    class MockUtterance {
+      text: string;
+      lang = "";
+      voice: { name: string; lang: string; voiceURI: string } | null = null;
+
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+
+    vi.stubGlobal("SpeechSynthesisUtterance", MockUtterance);
+    vi.stubGlobal("speechSynthesis", {
+      getVoices: vi.fn(() => voices),
+      cancel: vi.fn(),
+      speak: vi.fn((utterance: MockUtterance) => spoken.push({ text: utterance.text, lang: utterance.lang, voice: utterance.voice?.voiceURI ?? null }))
+    });
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const pathname = getPathname(url);
+      if (pathname === "/api/system-ai/chat") {
+        return jsonResponse({ reply: "Open [Northwatch](https://northwatch.app) for the briefing.", conversationId: "voice-1", provider: "copilot5" });
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open sentinel agent/i }));
+    expect(screen.getByRole("heading", { name: /ask, act, or listen/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /turn voice on/i }));
+    fireEvent.change(screen.getByLabelText("Speech language"), { target: { value: "en-KE" } });
+    fireEvent.change(screen.getByLabelText("Speech voice"), { target: { value: "amina-en-ke" } });
+    fireEvent.change(screen.getByLabelText("Ask Sentinel"), { target: { value: "Read my brief" } });
+    fireEvent.click(screen.getByRole("button", { name: /send to sentinel/i }));
+
+    expect(await screen.findByText("Open [Northwatch](https://northwatch.app) for the briefing.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(spoken).toContainEqual({
+        text: "Open Northwatch for the briefing.",
+        lang: "en-KE",
+        voice: "amina-en-ke"
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /turn voice off/i }));
+    expect(window.speechSynthesis.cancel).toHaveBeenCalled();
+  });
+
   it("keeps JWTs out of localStorage while keyboard shortcuts and dynamic document titles work", () => {
     render(<App />);
 
@@ -391,13 +532,127 @@ describe("Northwatch command deck", () => {
     fireEvent.click(screen.getByRole("button", { name: /create team/i }));
 
     await waitFor(() => expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/teams"), expect.objectContaining({ method: "POST" })]));
-    expect(await screen.findByText("North Unit")).toBeInTheDocument();
+    expect((await screen.findAllByText("North Unit")).length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByLabelText("Invite link"), { target: { value: "https://northwatch.app/invite/invite-token" } });
     fireEvent.click(screen.getByRole("button", { name: /join team/i }));
 
     await waitFor(() => expect(fetchMock.mock.calls).toContainEqual([expectUrlPath("/api/invites/invite-token/accept"), expect.objectContaining({ method: "POST" })]));
-    expect(await screen.findByText("Invited Ops")).toBeInTheDocument();
+    expect(await screen.findByText("Team: Invited Ops")).toBeInTheDocument();
+  });
+
+  it("creates an add teammate invite link from the active team workspace", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = getPathname(url);
+      if (pathname === "/api/teams/mine") {
+        return jsonResponse({ teams: [] });
+      }
+      if (pathname === "/api/teams" && init?.method === "POST") {
+        return jsonResponse({ team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" } }, 201);
+      }
+      if (pathname === "/api/teams/north-unit") {
+        return jsonResponse({
+          team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" },
+          members: [{ userId: "user-1", email: "sam@example.com", role: "owner" }]
+        });
+      }
+      if (pathname === "/api/teams/north-unit/invites" && init?.method === "POST") {
+        return jsonResponse({
+          invite: {
+            id: "invite-1",
+            email: "brian@example.com",
+            role: "member",
+            status: "pending",
+            acceptUrl: "https://northwatch.app/invite/invite-token"
+          }
+        }, 201);
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Account" }));
+
+    fireEvent.change(screen.getByLabelText("Team name"), { target: { value: "North Unit" } });
+    fireEvent.click(screen.getByRole("button", { name: /create team/i }));
+
+    await screen.findByText("Team: North Unit");
+    fireEvent.change(screen.getByLabelText("Teammate email"), { target: { value: "brian@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /add teammate/i }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls).toContainEqual([
+        expectUrlPath("/api/teams/north-unit/invites"),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ email: "brian@example.com", role: "member" })
+        })
+      ])
+    );
+    expect(screen.getByLabelText("Team invite link")).toHaveValue("https://northwatch.app/invite/invite-token");
+  });
+
+  it("opens a team as an isolated shared deck instead of showing personal tasks", async () => {
+    window.localStorage.setItem(
+      getCommandDeckStorageKey("user-1"),
+      JSON.stringify({
+        ...freshCommandDeck,
+        tasks: [
+          {
+            id: "task-personal",
+            title: "Private personal task",
+            priority: "critical",
+            kanbanPriority: "urgent",
+            dueDate: null,
+            status: "pending",
+            createdAt: "2026-05-25T08:00:00.000Z",
+            updatedAt: "2026-05-25T08:00:00.000Z"
+          }
+        ],
+        settings: { ...freshCommandDeck.settings, callsign: "Sam Personal" }
+      })
+    );
+
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = new URL(String(url), "http://127.0.0.1:5173");
+      if (requestUrl.pathname === "/api/teams/mine") {
+        return jsonResponse({ teams: [{ id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" }] });
+      }
+      if (requestUrl.pathname === "/api/teams/north-unit") {
+        return jsonResponse({
+          team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" },
+          members: [{ userId: "user-1", email: "sam@example.com", role: "owner" }],
+          activity: []
+        });
+      }
+      if (requestUrl.pathname === "/api/documents" && requestUrl.searchParams.get("workspace_type") === "team") {
+        if (init?.method === "POST") return jsonResponse({ data: { id: "team-deck-doc", title: "northwatch-command-deck" } }, 201);
+        return jsonResponse({ data: [] });
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    clickNav("To Do");
+    expect(screen.getByText("Private personal task")).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: /workspace personal/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /north unit owner/i }));
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => {
+        const requestUrl = new URL(String(url), "http://127.0.0.1:5173");
+        return requestUrl.pathname === "/api/documents" && requestUrl.searchParams.get("workspace_type") === "team" && requestUrl.searchParams.get("team_id") === "team-1";
+      })).toBe(true)
+    );
+    expect(await screen.findByText("You're all caught up.")).toBeInTheDocument();
+    expect(screen.queryByText("Private personal task")).not.toBeInTheDocument();
+    expect(screen.getByText("Team: North Unit")).toBeInTheDocument();
   });
 
   it("shows per-user Telegram setup instructions in Settings", async () => {

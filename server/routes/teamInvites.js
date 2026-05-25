@@ -102,7 +102,8 @@ function serializeInvitePreview(invite) {
     inviterName: invite.inviter?.displayName ?? invite.invitedByName ?? "A Northwatch admin",
     role: invite.role,
     status: invite.status,
-    expiresAt: invite.expiresAt ?? invite.expires_at
+    expiresAt: invite.expiresAt ?? invite.expires_at,
+    recipientExists: invite.recipientExists ?? null
   };
 }
 

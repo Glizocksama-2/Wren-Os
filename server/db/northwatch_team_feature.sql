@@ -10,6 +10,74 @@ create table if not exists teams (
   updated_at timestamptz not null default now()
 );
 
+alter table teams add column if not exists slug text;
+alter table teams add column if not exists owner_id uuid references users(id) on delete cascade;
+alter table teams add column if not exists member_limit integer not null default 10;
+alter table teams add column if not exists updated_at timestamptz not null default now();
+
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = current_schema()
+      and table_name = 'teams'
+      and column_name = 'created_by'
+  ) then
+    execute 'alter table teams alter column created_by drop not null';
+    execute 'update teams set owner_id = created_by where owner_id is null and exists (select 1 from users where users.id = teams.created_by)';
+  end if;
+end;
+$$;
+
+create or replace function northwatch_backfill_team_slugs()
+returns void
+language plpgsql
+as $$
+begin
+  update teams
+  set slug =
+    left(
+      coalesce(
+        nullif(trim(both '-' from regexp_replace(lower(trim(coalesce(name, 'team'))), '[^a-z0-9]+', '-', 'g')), ''),
+        'team'
+      ),
+      63
+    ) || '-' || left(replace(id::text, '-', ''), 8)
+  where slug is null or btrim(slug) = '';
+
+  update teams
+  set slug = trim(both '-' from regexp_replace(lower(trim(slug)), '[^a-z0-9]+', '-', 'g'))
+  where slug !~ '^[a-z0-9]+(?:-[a-z0-9]+)*$';
+
+  update teams
+  set slug = 'team-' || left(replace(id::text, '-', ''), 8)
+  where slug is null or slug = '' or slug !~ '^[a-z0-9]+(?:-[a-z0-9]+)*$';
+
+  with ranked as (
+    select id, slug, row_number() over (partition by slug order by created_at, id) as slug_rank
+    from teams
+  )
+  update teams
+  set slug = left(ranked.slug, 70) || '-' || left(replace(teams.id::text, '-', ''), 8)
+  from ranked
+  where teams.id = ranked.id
+    and ranked.slug_rank > 1;
+end;
+$$;
+
+select northwatch_backfill_team_slugs();
+drop function if exists northwatch_backfill_team_slugs();
+
+alter table teams alter column slug set not null;
+alter table teams drop constraint if exists teams_name_check;
+alter table teams drop constraint if exists teams_name_length_check;
+alter table teams add constraint teams_name_length_check check (char_length(trim(name)) between 1 and 120);
+alter table teams drop constraint if exists teams_slug_format_check;
+alter table teams add constraint teams_slug_format_check check (slug ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$');
+alter table teams drop constraint if exists teams_member_limit_check;
+alter table teams add constraint teams_member_limit_check check (member_limit between 1 and 100);
+
 create table if not exists team_members (
   id uuid primary key default gen_random_uuid(),
   team_id uuid not null references teams(id) on delete cascade,
@@ -45,6 +113,7 @@ create table if not exists notifications (
 
 create index if not exists teams_owner_id_idx on teams(owner_id);
 create index if not exists teams_slug_idx on teams(slug);
+create unique index if not exists teams_slug_unique_idx on teams(slug);
 create index if not exists team_members_team_id_idx on team_members(team_id);
 create index if not exists team_members_user_id_idx on team_members(user_id);
 create index if not exists team_invites_team_id_status_idx on team_invites(team_id, status);

@@ -87,6 +87,27 @@ describe("Northwatch React auth", () => {
     expect(screen.queryByText(/magic link/i)).not.toBeInTheDocument();
   });
 
+  it("keeps an invite redirect when switching between sign in and sign up", async () => {
+    mockFetch([{ ok: false, status: 401, json: async () => ({ error: "Authentication required." }) }]);
+
+    window.history.replaceState(null, "", "/login?redirect=%2Finvite%2Finvite-token");
+    const loginView = render(
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    );
+    expect(await screen.findByRole("link", { name: /register/i })).toHaveAttribute("href", "/register?redirect=%2Finvite%2Finvite-token");
+    loginView.unmount();
+
+    window.history.replaceState(null, "", "/register?redirect=%2Finvite%2Finvite-token");
+    render(
+      <AuthProvider>
+        <RegisterPage />
+      </AuthProvider>
+    );
+    expect(await screen.findByRole("link", { name: /log in/i })).toHaveAttribute("href", "/login?redirect=%2Finvite%2Finvite-token");
+  });
+
   it("shows a loading state while protected routes verify the httpOnly cookie session", () => {
     vi.stubGlobal("fetch", vi.fn(() => new Promise(() => undefined)));
 
@@ -103,14 +124,19 @@ describe("Northwatch React auth", () => {
   });
 
   it("shows a session expired modal when refresh fails mid-session", async () => {
-    mockFetch([
-      { ok: true, status: 200, json: async () => ({ user: authUser, expiresAt: "2026-05-26T08:00:00.000Z" }) },
+    const fetchMock = mockFetch([
+      { ok: true, status: 200, json: async () => ({ user: authUser, expiresAt: "2026-06-01T08:00:00.000Z" }) },
       { ok: false, status: 401, json: async () => ({ error: "Authentication required." }) }
     ]);
 
     function RefreshButton() {
-      const { refresh } = useAuth();
-      return <button onClick={() => void refresh()}>Force refresh</button>;
+      const { refresh, user } = useAuth();
+      return (
+        <>
+          <span>{user?.email ?? "No authenticated user"}</span>
+          <button onClick={() => void refresh()}>Force refresh</button>
+        </>
+      );
     }
 
     render(
@@ -119,6 +145,8 @@ describe("Northwatch React auth", () => {
       </AuthProvider>
     );
 
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => hasUrlPath(url, "/auth/me"))).toBe(true));
+    expect(await screen.findByText("operator@northwatch.dev")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "Force refresh" }));
 
     expect(await screen.findByText("Session expired. Please log in again.")).toBeInTheDocument();

@@ -6,12 +6,17 @@ import { createAuthService } from "../server/auth/authService.js";
 import { authenticate } from "../server/middleware/authenticate.js";
 import { createAuthRouter } from "../server/routes/auth.js";
 import { createIntelRouter } from "../server/routes/intel.js";
+import { createSystemAiRouter } from "../server/routes/systemAi.js";
+import { createWeatherRouter } from "../server/routes/weather.js";
+import { createWorkoutRouter } from "../server/routes/workout.js";
+import { createCopilotService } from "../server/services/copilot.service.js";
 
 const port = Number(process.env.PORT ?? 4000);
 const appBaseUrl = process.env.NORTHWATCH_APP_URL ?? "http://127.0.0.1:5173";
 const jwtSecret = process.env.JWT_SECRET ?? crypto.randomBytes(48).toString("hex");
 const authDb = createMemoryAuthDb();
 const authService = createAuthService({ db: authDb, jwtSecret });
+const systemAiService = createCopilotService();
 const protectedApi = authenticate({ authService });
 const telegramConfigs = new Map();
 const resourceData = new Map();
@@ -53,12 +58,30 @@ app.get("/", (_request, response) => {
 });
 
 app.get("/health", (_request, response) => {
-  response.json({ ok: true, service: "northwatch-local-api", checkedAt: new Date().toISOString() });
+  const checkedAt = new Date().toISOString();
+  response.json({
+    ok: true,
+    service: "northwatch-local-api",
+    checkedAt,
+    agents: [
+      { id: "sentinel", label: "Sentinel", status: "alive", checkedAt, detail: "Northwatch local API is responding." },
+      {
+        id: "copilot",
+        label: "Copilot",
+        status: systemAiService.isConfigured() ? "idle" : "dead",
+        checkedAt,
+        detail: systemAiService.isConfigured() ? "Copilot system AI is configured." : "RAPIDAPI_COPILOT_KEY is not set."
+      }
+    ]
+  });
 });
 
 app.use("/auth", createAuthRouter({ express, authService }));
 app.use("/api/auth", createAuthRouter({ express, authService }));
 app.use("/api/intel", createIntelRouter({ express, authService }));
+app.use("/api/system-ai", protectedApi, createSystemAiRouter({ express, service: systemAiService }));
+app.use("/api/workout", protectedApi, createWorkoutRouter({ express }));
+app.use("/api/weather", protectedApi, createWeatherRouter({ express }));
 
 app.get("/api/activity", protectedApi, (_request, response) => {
   response.json({ events: [] });

@@ -110,15 +110,15 @@ export async function teamRequest(path, init = {}) {
 
   if (!response.ok) {
     let message = `Team request failed (${response.status}${response.statusText ? ` ${response.statusText}` : ""}).`;
-    if (contentType.includes("application/json") || typeof response.json === "function") {
+    if (contentType.includes("application/json")) {
       const parsed = await response.json().catch(() => null);
       message = parsed?.error ?? parsed?.errors?.join(" ") ?? message;
     } else {
       const body = typeof response.text === "function" ? await response.text().catch(() => "") : "";
       if (looksLikeHtml(body)) {
-        message = `Team API route ${path} returned the frontend app instead of the Northwatch API. Make sure VITE_AUTH_API_BASE_URL points to your Express API, and that the API server is running.`;
+        message = `Team API route ${path} returned the frontend app or an HTML error page instead of the Northwatch API. Make sure VITE_AUTH_API_BASE_URL points to your Express API, and that the API server is running.`;
       } else if (body.trim()) {
-        message = body.trim().slice(0, 240);
+        message = body.trim().slice(0, 500);
       }
     }
     const error = new Error(message);

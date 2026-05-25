@@ -120,6 +120,19 @@ describe("Northwatch team UI", () => {
     expect(screen.getByRole("link", { name: /sign up/i })).toHaveAttribute("href", "/register?redirect=%2Finvite%2Finvite-token");
   });
 
+  it("points new invite recipients to sign up before joining the team", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ invite: { teamName: "Birunda Farms", inviterName: "Admin", role: "member", status: "pending", recipientExists: false } }))
+    );
+
+    render(<InviteAcceptPage token="invite-token" isAuthenticated={false} />);
+
+    expect(await screen.findByText(/create an account to join Birunda Farms/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /sign up to join/i })).toHaveAttribute("href", "/register?redirect=%2Finvite%2Finvite-token");
+    expect(screen.getByRole("link", { name: /already have an account/i })).toHaveAttribute("href", "/login?redirect=%2Finvite%2Finvite-token");
+  });
+
   it("shows unread notifications in a bell dropdown and can mark them read", async () => {
     const fetchMock = vi
       .fn()

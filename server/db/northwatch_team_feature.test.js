@@ -12,6 +12,14 @@ describe("northwatch team feature migration", () => {
 
     expect(sql).toContain("create table if not exists teams");
     expect(sql).toContain("owner_id uuid not null references users(id)");
+    expect(sql).toContain("alter table teams add column if not exists slug text");
+    expect(sql).toContain("northwatch_backfill_team_slugs");
+    expect(sql).toContain("create unique index if not exists teams_slug_unique_idx on teams(slug)");
+    expect(sql).toContain("alter table teams add column if not exists owner_id uuid references users(id) on delete cascade");
+    expect(sql).toContain("alter table teams add column if not exists member_limit integer not null default 10");
+    expect(sql).toContain("alter table teams add column if not exists updated_at timestamptz not null default now()");
+    expect(sql).toContain("alter table teams alter column created_by drop not null");
+    expect(sql).toContain("alter table teams add constraint teams_name_length_check");
     expect(sql).toContain("create table if not exists team_members");
     expect(sql).toContain("role text not null check (role in ('owner', 'admin', 'member', 'viewer'))");
     expect(sql).toContain("create table if not exists team_invites");

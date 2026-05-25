@@ -16,6 +16,8 @@ import { createSystemAiRouter } from "./routes/systemAi.js";
 import { createTelegramRouter } from "./routes/telegram.js";
 import { createTeamsRouter } from "./routes/teams.js";
 import { createUserDataRouter } from "./routes/userData.js";
+import { createWeatherRouter } from "./routes/weather.js";
+import { createWorkoutRouter } from "./routes/workout.js";
 
 export function createApp(options = {}) {
   const app = express();
@@ -59,6 +61,8 @@ export function createApp(options = {}) {
   app.use("/api/auth", createAuthRouter({ express, authService }));
   app.use("/api/intel", createIntelRouter({ express, authService }));
   app.use("/api/system-ai", authenticate({ authService }), createSystemAiRouter({ express, service: systemAiService }));
+  app.use("/api/workout", authenticate({ authService }), createWorkoutRouter({ express }));
+  app.use("/api/weather", authenticate({ authService }), createWeatherRouter({ express }));
   if (teamDb) {
     app.use("/api/invites", createInviteAcceptRouter({ express, db: teamDb, authenticate: authenticate({ authService }) }));
   }

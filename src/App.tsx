@@ -25,6 +25,8 @@ import {
   ListTodo,
   LockKeyhole,
   LogOut,
+  Languages,
+  Mic2,
   Newspaper,
   NotebookPen,
   Palette,
@@ -47,6 +49,8 @@ import {
   UserMinus,
   UserRound,
   UsersRound,
+  Volume2,
+  VolumeX,
   Wallet,
   X,
   Zap
@@ -59,15 +63,25 @@ import { CurrencyProvider } from "./context/CurrencyContext";
 import { buildAutonomousIntelScan } from "./lib/intelAutopilot";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
 import { requestSystemAiAgentReply } from "./lib/systemAi";
+import { getLiveWeatherForecast, type LiveWeatherSnapshot } from "./lib/weather";
+import { analyzeFoodPlate, type FoodPlateAnalysis } from "./lib/workoutNutrition";
 import { toKSH } from "./utils/currency";
 import type { TeamMember, TeamRole, TeamWorkspace } from "./store/cloudDeck";
 import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
+import {
+  createFreshTeamCommandDeck,
+  loadCachedTeamCommandDeck,
+  loadTeamCommandDeck,
+  saveCachedTeamCommandDeck,
+  saveTeamCommandDeck
+} from "./team/teamDeckApi";
 import {
   acceptInvite as acceptTeamInvite,
   createTeam as createRemoteTeam,
   extractInviteToken,
   getTeam,
-  listMyTeams
+  listMyTeams,
+  sendInvite as sendTeamInvite
 } from "./team/teamApi.js";
 import {
   type Accent,
@@ -81,6 +95,7 @@ import {
   type IntelItem,
   type IntelKind,
   type IntelSignal,
+  type JournalWeatherSnapshot,
   type KanbanPriority,
   type LogoStyle,
   type Priority,
@@ -117,6 +132,11 @@ const eventTypes: CalendarEntry["type"][] = ["mission", "training", "finance", "
 const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
 const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
 const journalMoodOptions = ["Focused", "Locked in", "Clear", "Restless", "Tired", "Stressed", "Grateful", "Low energy"];
+const DEFAULT_WEATHER_COORDINATES = {
+  latitude: -1.286389,
+  longitude: 36.817223,
+  label: "Nairobi"
+};
 const routineDayOptions: Array<{ value: RoutineDay; label: string; short: string }> = [
   { value: "mon", label: "Monday", short: "Mon" },
   { value: "tue", label: "Tuesday", short: "Tue" },
@@ -158,6 +178,18 @@ type AgentConnectionState = {
   detail: string;
 };
 
+type WeatherCoordinates = {
+  latitude: number;
+  longitude: number;
+  label?: string;
+};
+
+type AgentSpeechSettings = {
+  enabled: boolean;
+  language: string;
+  voiceURI: string;
+};
+
 type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
 type TeamWorkspaceSelection = { type: "personal" } | { type: "team"; teamId: string; slug: string; name: string; role: string };
 const ACTIVE_TEAM_WORKSPACE_STORAGE_KEY = "northwatch.active-team-workspace.v1";
@@ -172,6 +204,7 @@ const TELEGRAM_SEND_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/send`;
 const TELEGRAM_CONFIG_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/config`;
 const LEGACY_COMMAND_DECK_ENDPOINT = `${AUTH_API_BASE_URL}/api/legacy-command-deck`;
 const LEGACY_CLOUD_IMPORT_STORAGE_PREFIX = "northwatch.legacy-cloud-import.v2";
+const AGENT_SPEECH_STORAGE_KEY = "northwatch.sentinel-speech.v1";
 
 type LegalPanel = "settings" | "help" | "privacy" | "terms";
 type AgentHealthStatus = "alive" | "dead" | "idle";
@@ -230,6 +263,65 @@ function saveLegalConsent(record: LegalConsentRecord) {
   window.localStorage.setItem(LEGAL_CONSENT_STORAGE_KEY, JSON.stringify(record));
 }
 
+function loadAgentSpeechSettings(): AgentSpeechSettings {
+  try {
+    const stored = window.localStorage.getItem(AGENT_SPEECH_STORAGE_KEY);
+    if (!stored) return defaultAgentSpeechSettings;
+    return {
+      ...defaultAgentSpeechSettings,
+      ...JSON.parse(stored)
+    };
+  } catch {
+    return defaultAgentSpeechSettings;
+  }
+}
+
+function saveAgentSpeechSettings(settings: AgentSpeechSettings) {
+  window.localStorage.setItem(AGENT_SPEECH_STORAGE_KEY, JSON.stringify(settings));
+}
+
+function getSpeechSynthesis(): SpeechSynthesis | null {
+  if (typeof window === "undefined") return null;
+  return "speechSynthesis" in window ? window.speechSynthesis : null;
+}
+
+function getSpeechVoices(): SpeechSynthesisVoice[] {
+  return getSpeechSynthesis()?.getVoices() ?? [];
+}
+
+function cleanSpeechText(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_#>~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function speakAgentReply(text: string, settings: AgentSpeechSettings, voices: SpeechSynthesisVoice[]): boolean {
+  if (!settings.enabled || typeof SpeechSynthesisUtterance === "undefined") return false;
+  const synthesis = getSpeechSynthesis();
+  const spokenText = cleanSpeechText(text);
+  if (!synthesis || !spokenText) return false;
+
+  const utterance = new SpeechSynthesisUtterance(spokenText);
+  const selectedVoice =
+    voices.find((voice) => voice.voiceURI === settings.voiceURI) ??
+    voices.find((voice) => voice.lang === settings.language) ??
+    voices.find((voice) => voice.lang.toLowerCase().startsWith(settings.language.split("-")[0].toLowerCase()));
+
+  utterance.lang = selectedVoice?.lang ?? settings.language;
+  if (selectedVoice) utterance.voice = selectedVoice;
+  utterance.rate = 0.96;
+  utterance.pitch = 1;
+  synthesis.cancel();
+  synthesis.speak(utterance);
+  return true;
+}
+
+function stopAgentSpeech() {
+  getSpeechSynthesis()?.cancel();
+}
+
 export function hasValidLegalConsent(record: LegalConsentRecord | null): boolean {
   return Boolean(
     record &&
@@ -240,12 +332,28 @@ export function hasValidLegalConsent(record: LegalConsentRecord | null): boolean
 }
 
 const agentQuickPrompts = [
-  "Brief my next move",
+  "Plan my next move",
   "Find the bottleneck",
-  "Scan intel",
-  "Balance today",
+  "Scan market intel",
+  "Draft a status update",
   "Create focus task"
 ];
+
+const speechLanguageOptions = [
+  { value: "en-KE", label: "English (Kenya)" },
+  { value: "en-US", label: "English (US)" },
+  { value: "en-GB", label: "English (UK)" },
+  { value: "sw-KE", label: "Swahili (Kenya)" },
+  { value: "fr-FR", label: "French" },
+  { value: "es-ES", label: "Spanish" },
+  { value: "ar-SA", label: "Arabic" }
+];
+
+const defaultAgentSpeechSettings: AgentSpeechSettings = {
+  enabled: false,
+  language: "en-KE",
+  voiceURI: ""
+};
 
 export default function App(props: AppProps = {}) {
   return (
@@ -257,12 +365,20 @@ export default function App(props: AppProps = {}) {
 
 function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   const authUserId = authUser?.id ?? null;
-  const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeck(window.localStorage, authUserId));
+  const initialWorkspaceRef = useRef<TeamWorkspaceSelection | null>(null);
+  if (!initialWorkspaceRef.current) {
+    initialWorkspaceRef.current = loadActiveTeamWorkspace();
+  }
+  const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeckForWorkspace(window.localStorage, authUserId, initialWorkspaceRef.current ?? { type: "personal" }));
   const [view, setView] = useState<DeckView>("dashboard");
   const [notice, setNotice] = useState("Fresh command deck initialized.");
   const [cloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>({ kind: "personal" });
-  const [activeTeamWorkspace, setActiveTeamWorkspace] = useState<TeamWorkspaceSelection>(() => loadActiveTeamWorkspace());
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() =>
+    initialWorkspaceRef.current?.type === "team"
+      ? { kind: "team", teamId: initialWorkspaceRef.current.teamId }
+      : { kind: "personal" }
+  );
+  const [activeTeamWorkspace, setActiveTeamWorkspace] = useState<TeamWorkspaceSelection>(initialWorkspaceRef.current ?? { type: "personal" });
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
@@ -276,6 +392,8 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   const latestDeckRef = useRef(state);
   const logoMenuRef = useRef<HTMLDivElement | null>(null);
   const lastActivityPollRef = useRef(state.updatedAt);
+  const teamDeckDocumentIdsRef = useRef<Record<string, string | null>>({});
+  const workspaceUrlHandledRef = useRef(false);
   const shortcutChordRef = useRef<{ key: string; armedAt: number } | null>(null);
   const metrics = useMemo(() => getDeckMetrics(state), [state]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => isViewEnabled(item.view, state.settings)), [state.settings]);
@@ -287,8 +405,26 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
 
   useEffect(() => {
     latestDeckRef.current = state;
+    if (activeTeamWorkspace.type === "team") {
+      saveCachedTeamCommandDeck(window.localStorage, authUserId, activeTeamWorkspace.teamId, state);
+      if (!authUserId) return;
+
+      const teamId = activeTeamWorkspace.teamId;
+      const timer = window.setTimeout(() => {
+        void saveTeamCommandDeck(teamId, state, teamDeckDocumentIdsRef.current[teamId] ?? null)
+          .then((documentId) => {
+            if (documentId) teamDeckDocumentIdsRef.current[teamId] = documentId;
+          })
+          .catch(() => {
+            // Keep the local team cache when the shared workspace API is temporarily unavailable.
+          });
+      }, 700);
+
+      return () => window.clearTimeout(timer);
+    }
+
     saveCommandDeck(state, window.localStorage, authUserId);
-  }, [authUserId, state]);
+  }, [activeTeamWorkspace, authUserId, state]);
 
   useEffect(() => {
     if (!authUserId) return;
@@ -561,29 +697,72 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     };
   }, [authUserId]);
 
-  const openTeamWorkspace = async (team: TeamWorkspace) => {
-    setWorkspaceMode({ kind: "team", teamId: team.id });
-    saveActiveTeamWorkspace({
-      type: "team",
-      teamId: team.id,
-      slug: team.slug ?? team.id,
-      name: team.name,
-      role: team.role
-    });
-    setActiveTeamWorkspace({
-      type: "team",
-      teamId: team.id,
-      slug: team.slug ?? team.id,
-      name: team.name,
-      role: team.role
-    });
+  const activateWorkspaceSelection = useCallback(async (workspace: TeamWorkspaceSelection) => {
+    const isSameWorkspace =
+      activeTeamWorkspace.type === workspace.type &&
+      (workspace.type === "personal" || (activeTeamWorkspace.type === "team" && activeTeamWorkspace.teamId === workspace.teamId));
 
-    if (team.slug) {
-      const details = await getTeam(team.slug);
-      setTeamMembers(details.members ?? []);
+    if (isSameWorkspace) return;
+
+    const currentDeck = latestDeckRef.current;
+    if (activeTeamWorkspace.type === "team") {
+      saveCachedTeamCommandDeck(window.localStorage, authUserId, activeTeamWorkspace.teamId, currentDeck);
+      if (authUserId) {
+        await saveTeamCommandDeck(activeTeamWorkspace.teamId, currentDeck, teamDeckDocumentIdsRef.current[activeTeamWorkspace.teamId] ?? null)
+          .then((documentId) => {
+            if (documentId) teamDeckDocumentIdsRef.current[activeTeamWorkspace.teamId] = documentId;
+          })
+          .catch(() => undefined);
+      }
     } else {
-      setTeamMembers([]);
+      saveCommandDeck(currentDeck, window.localStorage, authUserId);
     }
+
+    let nextDeck: CommandDeckState;
+    if (workspace.type === "team") {
+      const cachedDeck = loadCachedTeamCommandDeck(window.localStorage, authUserId, workspace.teamId);
+      try {
+        const remoteDeck = authUserId ? await loadTeamCommandDeck(workspace.teamId) : { deck: null, documentId: null };
+        teamDeckDocumentIdsRef.current[workspace.teamId] = remoteDeck.documentId;
+        nextDeck = remoteDeck.deck ?? cachedDeck ?? createFreshTeamCommandDeck(workspace.name);
+      } catch (error) {
+        if (!cachedDeck) throw error;
+        nextDeck = cachedDeck;
+        setNotice(`Loaded ${workspace.name} from local cache. Shared sync will retry on your next edit.`);
+      }
+
+      setTeams((currentTeams) =>
+        currentTeams.some((team) => team.id === workspace.teamId)
+          ? currentTeams
+          : [...currentTeams, { id: workspace.teamId, name: workspace.name, slug: workspace.slug, role: workspace.role as TeamRole }]
+      );
+      setWorkspaceMode({ kind: "team", teamId: workspace.teamId });
+      if (workspace.slug) {
+        getTeam(workspace.slug)
+          .then((details) => setTeamMembers(details.members ?? []))
+          .catch(() => setTeamMembers([]));
+      }
+    } else {
+      nextDeck = loadCommandDeck(window.localStorage, authUserId);
+      setWorkspaceMode({ kind: "personal" });
+      setTeamMembers([]);
+      teamDeckDocumentIdsRef.current = {};
+    }
+
+    saveActiveTeamWorkspace(workspace);
+    setActiveTeamWorkspace(workspace);
+    dispatch({ type: "deck/import", deck: nextDeck });
+  }, [activeTeamWorkspace, authUserId]);
+
+  const openTeamWorkspace = async (team: TeamWorkspace) => {
+    const workspace = {
+      type: "team",
+      teamId: team.id,
+      slug: team.slug ?? team.id,
+      name: team.name,
+      role: team.role
+    } satisfies TeamWorkspaceSelection;
+    await activateWorkspaceSelection(workspace);
   };
 
   const switchWorkspace = async (nextWorkspace: WorkspaceMode) => {
@@ -591,12 +770,9 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
       workspaceMode.kind === nextWorkspace.kind &&
       (workspaceMode.kind === "personal" || (nextWorkspace.kind === "team" && workspaceMode.teamId === nextWorkspace.teamId));
     if (isSameWorkspace) return;
-    setWorkspaceMode(nextWorkspace);
     setTeamInviteLink("");
     if (nextWorkspace.kind === "personal") {
-      setTeamMembers([]);
-      saveActiveTeamWorkspace({ type: "personal" });
-      setActiveTeamWorkspace({ type: "personal" });
+      await activateWorkspaceSelection({ type: "personal" });
       setNotice("Switched to personal workspace.");
       return;
     }
@@ -666,9 +842,32 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     }
   };
 
-  const createInviteLink = async () => {
+  const createInviteLink = async (email: string, role: TeamRole = "member") => {
     setTeamInviteLink("");
-    setNotice("Team invites are managed from the PostgreSQL team settings page.");
+    const cleanedEmail = email.trim().toLowerCase();
+    if (!activeTeam) {
+      setNotice("Switch to a team workspace before adding a teammate.");
+      return;
+    }
+    if (activeTeam.role !== "owner" && activeTeam.role !== "admin") {
+      setNotice("Only team owners and admins can add teammates.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+      setNotice("Enter a valid teammate email first.");
+      return;
+    }
+
+    setIsTeamBusy(true);
+    try {
+      const invite = await sendTeamInvite(activeTeam.slug ?? activeTeam.id, { email: cleanedEmail, role });
+      setTeamInviteLink(invite.acceptUrl ?? "");
+      setNotice(`Invite sent to ${cleanedEmail}. They can sign in or create an account from the same link.`);
+    } catch (error) {
+      setNotice(`Create teammate invite failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsTeamBusy(false);
+    }
   };
 
   const updateMemberRole = async (memberUserId: string, role: TeamRole) => {
@@ -707,10 +906,55 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   };
 
   const switchExpressWorkspace = (workspace: TeamWorkspaceSelection) => {
-    saveActiveTeamWorkspace(workspace);
-    setActiveTeamWorkspace(workspace);
-    setNotice(workspace.type === "team" ? `Switched to ${workspace.name} workspace.` : "Switched to personal workspace.");
+    setIsTeamBusy(true);
+    activateWorkspaceSelection(workspace)
+      .then(() => {
+        setNotice(workspace.type === "team" ? `Switched to ${workspace.name} workspace.` : "Switched to personal workspace.");
+      })
+      .catch((error) => {
+        setNotice(`Workspace switch failed: ${getErrorMessage(error)}`);
+      })
+      .finally(() => {
+        setIsTeamBusy(false);
+      });
   };
+
+  useEffect(() => {
+    if (workspaceUrlHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestedWorkspace = params.get("workspace");
+    const requestedTeam = params.get("team");
+    const requestedSection = params.get("section");
+
+    if (requestedSection) {
+      const nextView = getViewForUrlSection(requestedSection);
+      if (nextView) setView(nextView);
+    }
+
+    if (requestedWorkspace !== "team" || !requestedTeam) {
+      workspaceUrlHandledRef.current = true;
+      return;
+    }
+
+    if (teams.length === 0) return;
+
+    const selectedTeam = teams.find((team) => team.slug === requestedTeam || team.id === requestedTeam);
+    workspaceUrlHandledRef.current = true;
+    if (!selectedTeam) {
+      setNotice("Team workspace link is not available for this account.");
+      return;
+    }
+
+    void activateWorkspaceSelection({
+      type: "team",
+      teamId: selectedTeam.id,
+      slug: selectedTeam.slug ?? selectedTeam.id,
+      name: selectedTeam.name,
+      role: selectedTeam.role
+    }).catch((error) => {
+      setNotice(`Team workspace link failed: ${getErrorMessage(error)}`);
+    });
+  }, [activateWorkspaceSelection, teams]);
 
   return (
     <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
@@ -1010,6 +1254,14 @@ function loadActiveTeamWorkspace(): TeamWorkspaceSelection {
 
 function saveActiveTeamWorkspace(workspace: TeamWorkspaceSelection) {
   window.localStorage.setItem(ACTIVE_TEAM_WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
+}
+
+function loadCommandDeckForWorkspace(storage: Storage, userId: string | null, workspace: TeamWorkspaceSelection): CommandDeckState {
+  if (workspace.type === "team") {
+    return loadCachedTeamCommandDeck(storage, userId, workspace.teamId) ?? createFreshTeamCommandDeck(workspace.name);
+  }
+
+  return loadCommandDeck(storage, userId);
 }
 
 function TelegramSettingsCard({ onNotice }: { onNotice: (message: string) => void }) {
@@ -2574,6 +2826,11 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
   const [day, setDay] = useState("Monday");
   const [focus, setFocus] = useState("");
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
+  const [foodImageUrl, setFoodImageUrl] = useState("");
+  const [nutritionLang, setNutritionLang] = useState("en");
+  const [plateAnalysis, setPlateAnalysis] = useState<FoodPlateAnalysis | null>(null);
+  const [plateStatus, setPlateStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [plateError, setPlateError] = useState("");
   const plannedCount = state.workouts.filter((entry) => entry.status === "planned").length;
   const doneCount = state.workouts.filter((entry) => entry.status === "done").length;
   const completion = state.workouts.length === 0 ? 0 : Math.round((doneCount / state.workouts.length) * 100);
@@ -2613,6 +2870,31 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
     setFocus("");
   };
 
+  const analyzePlate = async (event: FormEvent) => {
+    event.preventDefault();
+    const imageUrl = foodImageUrl.trim();
+    if (!imageUrl) {
+      setPlateAnalysis(null);
+      setPlateError("Add a public food image URL first.");
+      setPlateStatus("error");
+      return;
+    }
+
+    setPlateAnalysis(null);
+    setPlateStatus("loading");
+    setPlateError("");
+
+    try {
+      const result = await analyzeFoodPlate({ imageUrl, lang: nutritionLang });
+      setPlateAnalysis(result);
+      setPlateStatus("idle");
+      setNotice("Food plate analyzed.");
+    } catch (error) {
+      setPlateStatus("error");
+      setPlateError(getErrorMessage(error));
+    }
+  };
+
   return (
     <ModuleShell title="Workout" description="Plan training and mark sessions complete.">
       <section className="life-layout workout-layout">
@@ -2645,6 +2927,60 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
             {Object.entries(focusMix).map(([label, count]) => <span key={label}>{label} x{count}</span>)}
           </div>
         </section>
+      </section>
+      <section className="deck-panel nutrition-panel">
+        <PanelHead title="AI plate check" />
+        <form className="command-form nutrition-form" onSubmit={analyzePlate}>
+          <label>
+            <span>Food image URL</span>
+            <input
+              aria-label="Food image URL"
+              value={foodImageUrl}
+              onChange={(event) => setFoodImageUrl(event.target.value)}
+              placeholder="https://example.com/breakfast.jpg"
+            />
+          </label>
+          <label>
+            <span>Language</span>
+            <select aria-label="Nutrition language" value={nutritionLang} onChange={(event) => setNutritionLang(event.target.value)}>
+              <option value="en">English</option>
+              <option value="sw">Swahili</option>
+              <option value="fr">French</option>
+              <option value="es">Spanish</option>
+              <option value="ar">Arabic</option>
+            </select>
+          </label>
+          <button type="submit" disabled={plateStatus === "loading"}>
+            <Radar size={16} /> {plateStatus === "loading" ? "Analyzing..." : "Analyze plate"}
+          </button>
+        </form>
+        {plateStatus === "error" && <div className="empty-state">Food analysis failed: {plateError}</div>}
+        {!plateAnalysis && plateStatus !== "error" && <div className="empty-state">No food plate analyzed yet.</div>}
+        {plateAnalysis && (
+          <article className="nutrition-result">
+            <div className="nutrition-preview">
+              <img src={foodImageUrl} alt={plateAnalysis.foodName} />
+            </div>
+            <div className="nutrition-result-body">
+              <span className="micro-label">Nutrition guide</span>
+              <h3>{plateAnalysis.foodName}</h3>
+              {plateAnalysis.summary && <p>{plateAnalysis.summary}</p>}
+              <div className="nutrition-macros">
+                <span>{formatCalories(plateAnalysis.calories)}</span>
+                {plateAnalysis.protein && <span>Protein {plateAnalysis.protein}</span>}
+                {plateAnalysis.carbs && <span>Carbs {plateAnalysis.carbs}</span>}
+                {plateAnalysis.fat && <span>Fat {plateAnalysis.fat}</span>}
+              </div>
+              {plateAnalysis.recommendations.length > 0 && (
+                <ul className="nutrition-tips">
+                  {plateAnalysis.recommendations.map((tip) => (
+                    <li key={tip}>{tip}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </article>
+        )}
       </section>
       <form className="command-form" onSubmit={submit}>
         <label><span>Session</span><input aria-label="Workout name" value={name} onChange={(event) => setName(event.target.value)} /></label>
@@ -2849,6 +3185,10 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
   const [mood, setMood] = useState("Focused");
   const [body, setBody] = useState("");
   const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
+  const [currentWeather, setCurrentWeather] = useState<JournalWeatherSnapshot | null>(null);
+  const [attachWeather, setAttachWeather] = useState(true);
+  const [weatherStatus, setWeatherStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [weatherError, setWeatherError] = useState("");
   const latestEntry = state.journal[0];
   const moodMix = state.journal.reduce<Record<string, number>>((acc, entry) => {
     acc[entry.mood] = (acc[entry.mood] ?? 0) + 1;
@@ -2857,15 +3197,73 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
   const visibleMoodOptions = journalMoodOptions.includes(mood) ? journalMoodOptions : [mood, ...journalMoodOptions];
   const prompts = ["What moved today?", "What is the next clean action?", "What pattern is repeating?"];
 
+  const refreshWeather = useCallback(
+    async (coordinates: WeatherCoordinates = DEFAULT_WEATHER_COORDINATES, options: { quiet?: boolean } = {}) => {
+      setWeatherStatus("loading");
+      setWeatherError("");
+      try {
+        const forecast = await getLiveWeatherForecast({
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+          lang: "EN"
+        });
+        const nextWeather = normalizeJournalWeatherSnapshot(forecast.current, forecast, coordinates);
+        setCurrentWeather(nextWeather);
+        setAttachWeather(true);
+        setWeatherStatus("idle");
+        if (!options.quiet) setNotice(`Live weather refreshed for ${nextWeather.location}.`);
+      } catch (error) {
+        const message = getErrorMessage(error);
+        setWeatherStatus("error");
+        setWeatherError(message);
+        if (!options.quiet) setNotice(`Weather refresh failed: ${message}`);
+      }
+    },
+    [setNotice]
+  );
+
+  useEffect(() => {
+    void refreshWeather(DEFAULT_WEATHER_COORDINATES, { quiet: true });
+  }, [refreshWeather]);
+
+  const useBrowserLocation = () => {
+    if (!navigator.geolocation) {
+      const message = "Browser location is unavailable. Using Nairobi forecast instead.";
+      setWeatherError(message);
+      setNotice(message);
+      void refreshWeather(DEFAULT_WEATHER_COORDINATES);
+      return;
+    }
+
+    setWeatherStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        void refreshWeather({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          label: "Current location"
+        });
+      },
+      (error) => {
+        const message = error.message || "Location permission was not granted.";
+        setWeatherStatus("error");
+        setWeatherError(message);
+        setNotice(`Weather location failed: ${message}`);
+      },
+      { enableHighAccuracy: false, maximumAge: 300000, timeout: 10000 }
+    );
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!body.trim()) return;
+    const weather = attachWeather ? currentWeather : null;
     if (editingJournalId) {
-      dispatch({ type: "journal/update", id: editingJournalId, mood: mood.trim() || "Logged", body: body.trim() });
+      dispatch({ type: "journal/update", id: editingJournalId, mood: mood.trim() || "Logged", body: body.trim(), weather });
       setEditingJournalId(null);
       setNotice("Journal entry updated.");
     } else {
-      dispatch({ type: "journal/add", mood: mood.trim() || "Logged", body: body.trim() });
+      dispatch({ type: "journal/add", mood: mood.trim() || "Logged", body: body.trim(), weather });
       setNotice("Journal entry saved.");
     }
     setBody("");
@@ -2875,12 +3273,15 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
     setEditingJournalId(entry.id);
     setMood(entry.mood);
     setBody(entry.body);
+    setCurrentWeather(entry.weather);
+    setAttachWeather(Boolean(entry.weather));
   };
 
   const cancelEdit = () => {
     setEditingJournalId(null);
     setMood("Focused");
     setBody("");
+    setAttachWeather(true);
   };
 
   return (
@@ -2910,6 +3311,34 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
             <span>total journal entries</span>
           </div>
         </section>
+        <section className="deck-panel life-panel weather-panel">
+          <PanelHead
+            title="Live weather"
+            action={
+              <button type="button" onClick={() => refreshWeather()} disabled={weatherStatus === "loading"}>
+                <RotateCcw size={14} /> {weatherStatus === "loading" ? "Refreshing" : "Refresh"}
+              </button>
+            }
+          />
+          {currentWeather ? (
+            <div className="weather-readout">
+              <Cloud size={18} />
+              <div>
+                <strong>{formatWeatherTemperature(currentWeather.temperatureC)}</strong>
+                <span>{formatJournalWeather(currentWeather)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state compact-empty">No live weather loaded yet.</div>
+          )}
+          {weatherStatus === "error" && <p className="weather-error">Weather unavailable: {weatherError}</p>}
+          <div className="weather-actions">
+            <button type="button" onClick={useBrowserLocation} disabled={weatherStatus === "loading"}>
+              <Target size={14} /> Use my location
+            </button>
+            <span>Default: {DEFAULT_WEATHER_COORDINATES.label}</span>
+          </div>
+        </section>
       </section>
       <form className="journal-form" onSubmit={submit}>
         <fieldset className="mood-picker">
@@ -2930,6 +3359,16 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
           </div>
         </fieldset>
         <label><span>Entry</span><textarea aria-label="Journal entry" value={body} onChange={(event) => setBody(event.target.value)} rows={8} /></label>
+        <label className="journal-weather-control">
+          <input
+            type="checkbox"
+            checked={attachWeather}
+            disabled={!currentWeather}
+            onChange={(event) => setAttachWeather(event.target.checked)}
+          />
+          <span><Cloud size={14} /> Attach live weather to this entry</span>
+          <em>{currentWeather ? formatJournalWeather(currentWeather) : "Refresh forecast to attach weather."}</em>
+        </label>
         <button type="submit"><Plus size={16} /> {editingJournalId ? "Save changes" : "Save entry"}</button>
         {editingJournalId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
@@ -2940,9 +3379,20 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
             <span>{formatDate(entry.date)}</span>
             <h3>{entry.mood}</h3>
             <p>{entry.body}</p>
+            {entry.weather && (
+              <div className="journal-weather-chip">
+                <Cloud size={14} />
+                {formatJournalWeather(entry.weather)}
+              </div>
+            )}
             <div className="card-actions">
               <TelegramButton
-                payload={{ kind: "doc", title: entry.mood, body: entry.body, meta: formatDate(entry.date) }}
+                payload={{
+                  kind: "doc",
+                  title: entry.mood,
+                  body: entry.body,
+                  meta: entry.weather ? `${formatDate(entry.date)} / ${formatJournalWeather(entry.weather)}` : formatDate(entry.date)
+                }}
                 onNotice={setNotice}
               />
               <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
@@ -2953,6 +3403,46 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
       </section>
     </ModuleShell>
   );
+}
+
+function normalizeJournalWeatherSnapshot(
+  snapshot: LiveWeatherSnapshot,
+  forecast: { provider: string; checkedAt: string; location: string; latitude: number; longitude: number },
+  coordinates: WeatherCoordinates
+): JournalWeatherSnapshot {
+  return {
+    provider: snapshot.provider || forecast.provider || "rapidapi-open-weather13",
+    location: snapshot.location || forecast.location || coordinates.label || "Selected location",
+    description: snapshot.description || "Weather data available",
+    temperatureC: getWeatherNumber(snapshot.temperatureC),
+    feelsLikeC: getWeatherNumber(snapshot.feelsLikeC),
+    humidity: getWeatherNumber(snapshot.humidity),
+    windKph: getWeatherNumber(snapshot.windKph),
+    latitude: getWeatherNumber(snapshot.latitude) ?? getWeatherNumber(forecast.latitude) ?? coordinates.latitude,
+    longitude: getWeatherNumber(snapshot.longitude) ?? getWeatherNumber(forecast.longitude) ?? coordinates.longitude,
+    forecastAt: snapshot.forecastAt || forecast.checkedAt || new Date().toISOString(),
+    capturedAt: snapshot.capturedAt || forecast.checkedAt || new Date().toISOString()
+  };
+}
+
+function formatJournalWeather(weather: JournalWeatherSnapshot): string {
+  const details = [
+    weather.location,
+    weather.description,
+    formatWeatherTemperature(weather.temperatureC),
+    weather.humidity === null ? null : `${Math.round(weather.humidity)}% humidity`,
+    weather.windKph === null ? null : `${weather.windKph.toFixed(1)} kph wind`
+  ].filter(Boolean);
+
+  return details.join(" / ");
+}
+
+function formatWeatherTemperature(value: number | null): string {
+  return value === null ? "Temp unavailable" : `${value.toFixed(1)} C`;
+}
+
+function getWeatherNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function FinancesModule({ state, dispatch, setNotice }: ModuleProps) {
@@ -3295,7 +3785,7 @@ function AccountModule({
   onSwitchWorkspace: (workspace: WorkspaceMode) => Promise<void>;
   onCreateTeam: (name: string) => Promise<void>;
   onJoinTeam: (teamCode: string) => Promise<void>;
-  onCreateInviteLink: () => Promise<void>;
+  onCreateInviteLink: (email: string, role: TeamRole) => Promise<void>;
   onUpdateMemberRole: (memberUserId: string, role: TeamRole) => Promise<void>;
   onRemoveMember: (memberUserId: string) => Promise<void>;
   onRecoverEmailDeck: () => Promise<void>;
@@ -3304,10 +3794,13 @@ function AccountModule({
 }) {
   const [teamName, setTeamName] = useState("");
   const [teamCode, setTeamCode] = useState("");
+  const [teammateEmail, setTeammateEmail] = useState("");
+  const [teammateRole, setTeammateRole] = useState<TeamRole>("member");
   const lastSync = cloudStatus.lastSyncedAt ? formatDateTime(cloudStatus.lastSyncedAt) : "Not synced yet";
   const userEmail = cloudStatus.userEmail ?? authUser?.email ?? "Local operator";
   const isCloudUser = Boolean(cloudStatus.userEmail || authUser?.email);
   const canManageTeam = activeTeam?.role === "owner";
+  const canInviteTeam = activeTeam?.role === "owner" || activeTeam?.role === "admin";
   const activeTeamName = activeTeam?.name ?? "No team selected";
   const displayName = getDisplayName(state.settings);
   const commandCenterName = getCommandCenterName(state.settings);
@@ -3326,6 +3819,13 @@ function AccountModule({
     event.preventDefault();
     await onJoinTeam(teamCode);
     setTeamCode("");
+  };
+
+  const submitAddTeammate = async (event: FormEvent) => {
+    event.preventDefault();
+    await onCreateInviteLink(teammateEmail, teammateRole);
+    setTeammateEmail("");
+    setTeammateRole("member");
   };
 
   return (
@@ -3486,18 +3986,47 @@ function AccountModule({
               <div className="team-ops-head">
                 <Copy size={16} />
                 <div>
-                  <strong>Invite links</strong>
+                  <strong>Add teammate</strong>
                   <span>{activeTeam ? `For ${activeTeam.name}` : "Switch to a team first"}</span>
                 </div>
               </div>
-              <button type="button" onClick={() => void onCreateInviteLink()} disabled={!canManageTeam || isTeamBusy}>
-                <Plus size={16} /> Create invite link
-              </button>
+              <form className="team-form" onSubmit={submitAddTeammate}>
+                <label>
+                  <span>Teammate email</span>
+                  <input
+                    aria-label="Teammate email"
+                    type="email"
+                    value={teammateEmail}
+                    onChange={(event) => setTeammateEmail(event.target.value)}
+                    placeholder="teammate@example.com"
+                    disabled={!canInviteTeam || isTeamBusy}
+                  />
+                </label>
+                <label>
+                  <span>Role</span>
+                  <select
+                    aria-label="Teammate role"
+                    value={teammateRole}
+                    onChange={(event) => setTeammateRole(event.target.value as TeamRole)}
+                    disabled={!canInviteTeam || isTeamBusy}
+                  >
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                </label>
+                <button type="submit" disabled={!canInviteTeam || isTeamBusy || !teammateEmail.trim()}>
+                  <Plus size={16} /> Add teammate
+                </button>
+              </form>
+              <p className="panel-copy">
+                Existing users can sign in from the invite. New teammates can create an account, then Northwatch opens their personal vault and this team workspace.
+              </p>
               <input
                 aria-label="Team invite link"
                 value={teamInviteLink}
                 readOnly
-                placeholder={canManageTeam ? "Generated invite link appears here" : "Owner access required"}
+                placeholder={canInviteTeam ? "Generated invite link appears here" : "Owner or admin access required"}
               />
             </div>
             <div className="team-ops-card">
@@ -3710,6 +4239,8 @@ function AgentDock({
         : `Copilot system AI route armed.\nIf it cannot answer, I will fall back to deck logic.`
     }
   ]);
+  const [speechSettings, setSpeechSettings] = useState<AgentSpeechSettings>(() => loadAgentSpeechSettings());
+  const [speechVoices, setSpeechVoices] = useState<SpeechSynthesisVoice[]>(() => getSpeechVoices());
   const priorityProject = getPriorityProject(state);
   const priorityTask = getPriorityTask(state);
   const activeLabel = navItems.find((item) => item.view === activeView)?.label ?? "Command";
@@ -3718,6 +4249,62 @@ function AgentDock({
     endpoint: state.settings.ollamaEndpoint,
     model: state.settings.ollamaModel
   };
+  const speechSupported = typeof SpeechSynthesisUtterance !== "undefined" && Boolean(getSpeechSynthesis());
+  const lastAgentReply = [...messages].reverse().find((message) => message.role === "agent")?.body ?? "";
+
+  useEffect(() => {
+    saveAgentSpeechSettings(speechSettings);
+  }, [speechSettings]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const synthesis = getSpeechSynthesis();
+    const loadVoices = () => setSpeechVoices(getSpeechVoices());
+    loadVoices();
+
+    if (!synthesis) return;
+    synthesis.addEventListener?.("voiceschanged", loadVoices);
+    synthesis.onvoiceschanged = loadVoices;
+
+    return () => {
+      synthesis.removeEventListener?.("voiceschanged", loadVoices);
+      if (synthesis.onvoiceschanged === loadVoices) synthesis.onvoiceschanged = null;
+    };
+  }, [isOpen]);
+
+  const updateSpeechSettings = (patch: Partial<AgentSpeechSettings>) => {
+    setSpeechSettings((current) => ({ ...current, ...patch }));
+  };
+
+  const speakReply = useCallback(
+    (body: string) => {
+      const didSpeak = speakAgentReply(body, speechSettings, speechVoices);
+      if (speechSettings.enabled && !didSpeak) setNotice("Speech output is not available in this browser.");
+    },
+    [setNotice, speechSettings, speechVoices]
+  );
+
+  const toggleSpeech = () => {
+    if (speechSettings.enabled) {
+      stopAgentSpeech();
+      updateSpeechSettings({ enabled: false });
+      return;
+    }
+
+    updateSpeechSettings({ enabled: true });
+  };
+
+  const voiceOptions =
+    speechVoices.length > 0
+      ? speechVoices
+      : [
+          {
+            name: "System default voice",
+            lang: speechSettings.language,
+            voiceURI: ""
+          } as SpeechSynthesisVoice
+        ];
 
   useEffect(() => {
     let isCancelled = false;
@@ -3805,6 +4392,7 @@ function AgentDock({
           body: `${scan.summary}\nI moved you to Intel so you can review the generated findings and notes.`
         }
       ]);
+      speakReply(`${scan.summary}\nI moved you to Intel so you can review the generated findings and notes.`);
       setInput("");
       setIsOpen(true);
       return;
@@ -3824,6 +4412,7 @@ function AgentDock({
           body: `Created a high-priority focus task: ${title}\nI moved you to To Do so you can execute or edit it.`
         }
       ]);
+      speakReply(`Created a high-priority focus task: ${title}. I moved you to To Do so you can execute or edit it.`);
       setInput("");
       setIsOpen(true);
       return;
@@ -3860,6 +4449,7 @@ function AgentDock({
       });
       setSystemConversationId(result.conversationId);
       setMessages((current) => current.map((message) => (message.id === pendingId ? { ...message, body: result.reply } : message)));
+      speakReply(result.reply);
       setAgentStatus({
         mode: "online",
         label: "Copilot system AI",
@@ -3870,16 +4460,18 @@ function AgentDock({
       const systemDetail = getErrorMessage(systemError);
 
       if (!state.settings.ollamaEnabled) {
+        const reply = `${fallbackReply}\n\nCopilot system AI could not answer: ${systemDetail}`;
         setMessages((current) =>
           current.map((message) =>
             message.id === pendingId
               ? {
                   ...message,
-                  body: `${fallbackReply}\n\nCopilot system AI could not answer: ${systemDetail}`
+                  body: reply
                 }
               : message
           )
         );
+        speakReply(reply);
         setAgentStatus({
           mode: "offline",
           label: "System AI fallback",
@@ -3909,6 +4501,7 @@ function AgentDock({
         history: messages
       });
       setMessages((current) => current.map((message) => (message.id === pendingId ? { ...message, body: reply } : message)));
+      speakReply(reply);
       setAgentStatus({
         mode: "online",
         label: `Ollama: ${state.settings.ollamaModel}`,
@@ -3916,16 +4509,18 @@ function AgentDock({
       });
     } catch (error) {
       const detail = getErrorMessage(error);
+      const reply = `${fallbackReply}\n\nOllama could not answer: ${detail}`;
       setMessages((current) =>
         current.map((message) =>
           message.id === pendingId
             ? {
                 ...message,
-                body: `${fallbackReply}\n\nOllama could not answer: ${detail}`
+                body: reply
               }
             : message
         )
       );
+      speakReply(reply);
       setAgentStatus({
         mode: "offline",
         label: "Ollama fallback",
@@ -3965,6 +4560,60 @@ function AgentDock({
                 <em>{agent.checkedAt ? formatClock(agent.checkedAt) : "not checked"}</em>
               </span>
             ))}
+          </div>
+
+          <div className="agent-command-card">
+            <div>
+              <span>Copilot command</span>
+              <h2>Ask, act, or listen</h2>
+              <p>Use natural language for briefs, task creation, intel scans, status drafts, and next-step planning.</p>
+            </div>
+            <button
+              type="button"
+              className={speechSettings.enabled ? "active" : ""}
+              aria-label={speechSettings.enabled ? "Turn voice off" : "Turn voice on"}
+              aria-pressed={speechSettings.enabled}
+              onClick={toggleSpeech}
+              title={speechSupported ? "Toggle spoken AI replies" : "Speech output is not available in this browser"}
+            >
+              {speechSettings.enabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+              {speechSettings.enabled ? "Voice on" : "Voice off"}
+            </button>
+          </div>
+
+          <div className="agent-speech-controls" aria-label="Speech controls">
+            <label className="agent-control-field">
+              <span><Languages size={13} /> Language</span>
+              <select
+                aria-label="Speech language"
+                value={speechSettings.language}
+                onChange={(event) => updateSpeechSettings({ language: event.target.value, voiceURI: "" })}
+              >
+                {speechLanguageOptions.map((language) => (
+                  <option key={language.value} value={language.value}>
+                    {language.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="agent-control-field">
+              <span><Mic2 size={13} /> Voice</span>
+              <select
+                aria-label="Speech voice"
+                value={speechSettings.voiceURI}
+                onChange={(event) => updateSpeechSettings({ voiceURI: event.target.value })}
+              >
+                <option value="">System default</option>
+                {voiceOptions.map((voice) => (
+                  <option key={voice.voiceURI || `${voice.name}-${voice.lang}`} value={voice.voiceURI}>
+                    {voice.name} ({voice.lang})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" onClick={() => speakReply(lastAgentReply)} disabled={!lastAgentReply || !speechSettings.enabled}>
+              Replay
+            </button>
           </div>
 
           <div className="agent-vitals" aria-label="Sentinel live vitals">
@@ -4129,17 +4778,19 @@ function ProjectRow({
   return (
     <div className="ops-row project-row kanban-priority-normal">
       <div className="project-main">
-        <span>{project.name}</span>
-        <em>{project.nextAction || project.objective || "No next action"}</em>
-        <div className="mini-progress" aria-label={`${project.name} progress ${project.progress}%`}>
-          <span style={{ width: `${project.progress}%` }} />
+        <span className="project-title">{project.name}</span>
+        <em className="project-next-action">{project.nextAction || project.objective || "No next action"}</em>
+        <div className="project-progress-line">
+          <div className="mini-progress" aria-label={`${project.name} progress ${project.progress}%`}>
+            <span style={{ width: `${project.progress}%` }} />
+          </div>
+          <strong>{project.progress}%</strong>
         </div>
-      </div>
-      <div className="repo-meta">
-        {project.source === "github" && <span className="source-pill"><Github size={13} /> GitHub</span>}
-        {project.language && <span className="source-pill">{project.language}</span>}
-        {project.defaultBranch && <span className="source-pill"><GitBranch size={13} /> {project.defaultBranch}</span>}
-        <strong>{project.progress}%</strong>
+        <div className="repo-meta">
+          {project.source === "github" && <span className="source-pill"><Github size={13} /> GitHub</span>}
+          {project.language && <span className="source-pill">{project.language}</span>}
+          {project.defaultBranch && <span className="source-pill"><GitBranch size={13} /> {project.defaultBranch}</span>}
+        </div>
       </div>
       <div className="row-actions">
         <TelegramButton
@@ -4467,6 +5118,28 @@ function getDocumentTitleForView(view: DeckView): string {
   return labels[view];
 }
 
+function getViewForUrlSection(section: string): DeckView | null {
+  const normalized = section.trim().toLowerCase();
+  const sections: Record<string, DeckView> = {
+    command: "dashboard",
+    dashboard: "dashboard",
+    kanban: "todo",
+    todo: "todo",
+    projects: "projects",
+    docs: "journal",
+    documents: "journal",
+    journal: "journal",
+    content: "intel",
+    "content-queue": "intel",
+    intel: "intel",
+    calendar: "calendar",
+    workout: "workout",
+    books: "books",
+    finances: "finances"
+  };
+  return sections[normalized] ?? null;
+}
+
 function getNewItemLabel(view: DeckView): string {
   const labels: Record<DeckView, string> = {
     dashboard: "a task",
@@ -4519,6 +5192,12 @@ function getKanbanPriorityLabel(priority: KanbanPriority): string {
   if (priority === "urgent") return "URGENT";
   if (priority === "later") return "LATER";
   return "NORMAL";
+}
+
+function formatCalories(value: FoodPlateAnalysis["calories"]): string {
+  if (typeof value === "number" && Number.isFinite(value)) return `${Math.round(value)} kcal`;
+  if (typeof value === "string" && value.trim()) return value.trim().toLowerCase().includes("kcal") ? value.trim() : `${value.trim()} kcal`;
+  return "Calories unavailable";
 }
 
 function formatClock(value: string): string {

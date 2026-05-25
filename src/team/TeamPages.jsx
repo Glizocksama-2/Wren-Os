@@ -524,16 +524,34 @@ export function InviteAcceptPage({ token, isAuthenticated = false }) {
   if (error) return <TeamError message={error} />;
   if (!invite) return <TeamLoading label="Loading invite" />;
 
+  const loginHref = `/login?redirect=${redirect}`;
+  const registerHref = `/register?redirect=${redirect}`;
+  const inviteIsForNewAccount = invite.recipientExists === false;
+
   return (
     <main className="team-page">
       <section className="team-panel invite-accept-panel">
         <span className="micro-label">Team invite</span>
         <h1>{invite.teamName}</h1>
-        <p>{invite.inviterName} invited you to join {invite.teamName} as {invite.role}.</p>
+        <p>
+          {invite.inviterName} invited you to join {invite.teamName} as {invite.role}.{" "}
+          {inviteIsForNewAccount
+            ? `Create an account to join ${invite.teamName}; Northwatch will keep your personal workspace and add this team workspace after sign up.`
+            : "Sign in with the invited email, or create an account if this is your first time here."}
+        </p>
         {!isAuthenticated ? (
           <div className="auth-choice-actions">
-            <a href={`/login?redirect=${redirect}`}>Sign in</a>
-            <a href={`/register?redirect=${redirect}`}>Sign up</a>
+            {inviteIsForNewAccount ? (
+              <>
+                <a href={registerHref}>Sign up to join</a>
+                <a href={loginHref}>Already have an account? Sign in</a>
+              </>
+            ) : (
+              <>
+                <a href={loginHref}>Sign in to join</a>
+                <a href={registerHref}>Need an account? Sign up</a>
+              </>
+            )}
           </div>
         ) : (
           <button type="button" onClick={accept} disabled={isAccepting}>
