@@ -263,7 +263,7 @@ export function TeamSettingsPage({ slug }) {
   const [details, setDetails] = useState(null);
   const [invites, setInvites] = useState([]);
   const [inviteLoadError, setInviteLoadError] = useState("");
-  const [inviteNotice, setInviteNotice] = useState("");
+  const [inviteNotice, setInviteNotice] = useState(null);
   const [confirmName, setConfirmName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -347,19 +347,11 @@ export function TeamSettingsPage({ slug }) {
         }} />
         <InvitePanel team={details.team} invites={invites} notice={inviteNotice} onInvite={async (input) => {
           const invite = await sendInvite(slug, input);
-          if (invite?.emailDelivery?.delivered) {
-            setInviteNotice(`Invite email sent to ${invite.email}.`);
-          } else if (invite?.emailDelivery?.reason === "send_failed") {
-            setInviteNotice("Invite link created, but email delivery failed. Copy the invite link and send it manually.");
-          } else if (invite?.acceptUrl) {
-            setInviteNotice("Invite link created, but email delivery is not configured. Copy the invite link and send it manually.");
-          } else {
-            setInviteNotice("Invite link created. Copy it from the pending invite row and send it manually.");
-          }
+          setInviteNotice(createInviteNotice(invite));
           await reload();
         }} onRevoke={async (inviteId) => {
           await revokeInvite(slug, inviteId);
-          setInviteNotice("");
+          setInviteNotice(null);
           await reload();
         }} loadError={inviteLoadError} />
       </section>
@@ -415,7 +407,7 @@ export function MemberList({ team = {}, members = [], onRoleChange, onRemove }) 
   );
 }
 
-export function InvitePanel({ team = {}, invites = [], loadError = "", notice = "", onInvite = async () => {}, onRevoke = async () => {} }) {
+export function InvitePanel({ team = {}, invites = [], loadError = "", notice = null, onInvite = async () => {}, onRevoke = async () => {} }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   const canInvite = canTeamRole(team.role, "invite_member");
@@ -434,7 +426,7 @@ export function InvitePanel({ team = {}, invites = [], loadError = "", notice = 
         <span>{invites.length} pending</span>
       </div>
       {loadError && <p className="team-warning" role="status">Pending invites could not be loaded. {loadError}</p>}
-      {notice && <p className="team-warning" role="status">{notice}</p>}
+      <InviteNotification notice={notice} />
       {canInvite && (
         <form className="invite-form" onSubmit={submit}>
           <label>
@@ -468,6 +460,49 @@ export function InvitePanel({ team = {}, invites = [], loadError = "", notice = 
       </div>
     </section>
   );
+}
+
+function InviteNotification({ notice }) {
+  if (!notice) return null;
+  const role = notice.tone === "error" ? "alert" : "status";
+  return (
+    <div className={`team-invite-notification team-invite-notification-${notice.tone}`} role={role} aria-live={notice.tone === "error" ? "assertive" : "polite"}>
+      <strong>{notice.title}</strong>
+      <span>{notice.message}</span>
+    </div>
+  );
+}
+
+function createInviteNotice(invite) {
+  if (invite?.emailDelivery?.delivered) {
+    return {
+      tone: "success",
+      title: "Invite sent",
+      message: `Email delivered to ${invite.email}.`
+    };
+  }
+
+  if (invite?.emailDelivery?.reason === "send_failed") {
+    return {
+      tone: "error",
+      title: "Invite email failed",
+      message: "The invite link still works. Copy the invite link and send it manually."
+    };
+  }
+
+  if (invite?.acceptUrl) {
+    return {
+      tone: "warning",
+      title: "Invite link created",
+      message: "Email delivery is not configured. Copy the invite link and send it manually."
+    };
+  }
+
+  return {
+    tone: "warning",
+    title: "Invite link created",
+    message: "Copy it from the pending invite row and send it manually."
+  };
 }
 
 export function AssigneeSelector({ members = [], value = "", onChange = () => {}, disabled = false }) {

@@ -208,7 +208,7 @@ describe("Northwatch team UI", () => {
     expect(screen.getByText(/Pending invites could not be loaded/i)).toBeInTheDocument();
   });
 
-  it("shows when an invite link was created but email delivery was not configured", async () => {
+  it("shows a success notification when an invite email is delivered", async () => {
     const teamResponse = {
       team: { id: "team-1", name: "Gorosei", slug: "gorosei", role: "owner", memberLimit: 10 },
       members: [{ userId: "user-1", displayName: "Sam", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }],
@@ -229,7 +229,7 @@ describe("Northwatch team UI", () => {
                 role: "member",
                 status: "pending",
                 acceptUrl: "https://northwatch.app/invite/invite-token",
-                emailDelivery: { delivered: false, logged: true }
+                emailDelivery: { delivered: true, logged: false, reason: "sent" }
               }
             },
             201
@@ -245,8 +245,97 @@ describe("Northwatch team UI", () => {
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "brian@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /send invite/i }));
 
-    expect(await screen.findByText(/Invite link created, but email delivery is not configured/i)).toBeInTheDocument();
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveClass("team-invite-notification-success");
+    expect(screen.getByText("Invite sent")).toBeInTheDocument();
+    expect(screen.getByText(/Email delivered to brian@example.com/i)).toBeInTheDocument();
+  });
+
+  it("shows a warning notification when an invite link was created but email delivery is not configured", async () => {
+    const teamResponse = {
+      team: { id: "team-1", name: "Gorosei", slug: "gorosei", role: "owner", memberLimit: 10 },
+      members: [{ userId: "user-1", displayName: "Sam", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }],
+      activity: []
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(teamResponse))
+        .mockResolvedValueOnce(jsonResponse({ invites: [] }))
+        .mockResolvedValueOnce(
+          jsonResponse(
+            {
+              invite: {
+                id: "invite-1",
+                email: "brian@example.com",
+                role: "member",
+                status: "pending",
+                acceptUrl: "https://northwatch.app/invite/invite-token",
+                emailDelivery: { delivered: false, logged: true, reason: "not_configured" }
+              }
+            },
+            201
+          )
+        )
+        .mockResolvedValueOnce(jsonResponse(teamResponse))
+        .mockResolvedValueOnce(jsonResponse({ invites: [{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending", acceptUrl: "https://northwatch.app/invite/invite-token" }] }))
+    );
+
+    render(<TeamSettingsPage slug="gorosei" />);
+
+    expect(await screen.findByRole("heading", { name: /team settings/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "brian@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /send invite/i }));
+
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveClass("team-invite-notification-warning");
+    expect(screen.getByText("Invite link created")).toBeInTheDocument();
+    expect(screen.getByText(/Email delivery is not configured/i)).toBeInTheDocument();
     expect(screen.getByText(/Copy the invite link and send it manually/i)).toBeInTheDocument();
+  });
+
+  it("shows a failure notification when invite email delivery fails", async () => {
+    const teamResponse = {
+      team: { id: "team-1", name: "Gorosei", slug: "gorosei", role: "owner", memberLimit: 10 },
+      members: [{ userId: "user-1", displayName: "Sam", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }],
+      activity: []
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(teamResponse))
+        .mockResolvedValueOnce(jsonResponse({ invites: [] }))
+        .mockResolvedValueOnce(
+          jsonResponse(
+            {
+              invite: {
+                id: "invite-1",
+                email: "brian@example.com",
+                role: "member",
+                status: "pending",
+                acceptUrl: "https://northwatch.app/invite/invite-token",
+                emailDelivery: { delivered: false, logged: false, reason: "send_failed" }
+              }
+            },
+            201
+          )
+        )
+        .mockResolvedValueOnce(jsonResponse(teamResponse))
+        .mockResolvedValueOnce(jsonResponse({ invites: [{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending", acceptUrl: "https://northwatch.app/invite/invite-token" }] }))
+    );
+
+    render(<TeamSettingsPage slug="gorosei" />);
+
+    expect(await screen.findByRole("heading", { name: /team settings/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "brian@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /send invite/i }));
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveClass("team-invite-notification-error");
+    expect(screen.getByText("Invite email failed")).toBeInTheDocument();
+    expect(screen.getByText(/The invite link still works/i)).toBeInTheDocument();
   });
 
   it("previews invites publicly and redirects unauthenticated users to credential auth links", async () => {

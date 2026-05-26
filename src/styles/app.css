@@ -2726,6 +2726,42 @@ p {
   line-height: 1.45;
 }
 
+.team-invite-notification {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.team-invite-notification strong {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.team-invite-notification span {
+  color: var(--muted);
+}
+
+.team-invite-notification-success {
+  border-color: rgb(63 185 128 / 0.38);
+  background: rgb(63 185 128 / 0.12);
+}
+
+.team-invite-notification-warning {
+  border-color: rgb(255 184 77 / 0.35);
+  background: rgb(255 184 77 / 0.11);
+}
+
+.team-invite-notification-error {
+  border-color: rgb(255 92 92 / 0.4);
+  background: rgb(255 92 92 / 0.12);
+}
+
 .team-form label,
 .invite-form label,
 .assignee-selector,
