@@ -152,6 +152,10 @@ export function resolveTeamApiBaseUrl(options = {}) {
     return `http://${formatUrlHost(location.hostname)}:${LOCAL_API_PORT}`;
   }
 
+  if (isPrivateNetworkLocation(location)) {
+    return `http://${formatUrlHost(location.hostname)}:${LOCAL_API_PORT}`;
+  }
+
   return "";
 }
 
@@ -175,6 +179,10 @@ function getDevServerApiBaseUrl(configuredBaseUrl, location) {
     return `http://${formatUrlHost(location.hostname)}:${LOCAL_API_PORT}`;
   }
 
+  if (isPrivateNetworkLocation(location) && isNonStandardHttpPort(location.port)) {
+    return `http://${formatUrlHost(location.hostname)}:${LOCAL_API_PORT}`;
+  }
+
   return "";
 }
 
@@ -185,6 +193,23 @@ function isLoopbackHost(hostname) {
 function formatUrlHost(hostname) {
   const host = hostname || "127.0.0.1";
   return host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+}
+
+function isPrivateNetworkLocation(location) {
+  return location?.protocol === "http:" && isPrivateNetworkHost(location.hostname);
+}
+
+function isPrivateNetworkHost(hostname = "") {
+  return /^10\./.test(hostname)
+    || /^192\.168\./.test(hostname)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
+    || /^169\.254\./.test(hostname)
+    || hostname.endsWith(".local");
+}
+
+function isNonStandardHttpPort(port) {
+  const normalized = String(port ?? "");
+  return Boolean(normalized) && normalized !== "80" && normalized !== "443" && normalized !== LOCAL_API_PORT;
 }
 
 export function slugifyTeamName(value) {
