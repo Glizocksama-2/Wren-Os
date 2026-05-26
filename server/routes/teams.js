@@ -26,17 +26,25 @@ export function createTeamsRouter({ express, db, mailer }) {
   });
 
   router.get("/mine", async (request, response) => {
-    const teams = await db.listTeamsForUser(request.userId);
-    response.json({ teams });
+    try {
+      const teams = await db.listTeamsForUser(request.userId);
+      response.json({ teams });
+    } catch (error) {
+      response.status(error.status ?? 500).json({ error: error.message });
+    }
   });
 
   router.get("/:slug", async (request, response) => {
-    const details = await db.getTeamDetailsBySlug(request.params.slug, request.userId);
-    if (!details) {
-      response.status(404).json({ error: "Team not found." });
-      return;
+    try {
+      const details = await db.getTeamDetailsBySlug(request.params.slug, request.userId);
+      if (!details) {
+        response.status(404).json({ error: "Team not found." });
+        return;
+      }
+      response.json(details);
+    } catch (error) {
+      response.status(error.status ?? 500).json({ error: error.message });
     }
-    response.json(details);
   });
 
   router.patch("/:slug", requireTeamRole({ db, minRole: "admin" }), async (request, response) => {

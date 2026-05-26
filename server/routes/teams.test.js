@@ -51,6 +51,34 @@ describe("team routes", () => {
     expect(db.getTeamDetailsBySlug).toHaveBeenCalledWith("birunda-farms", "user-1");
   });
 
+  it("returns JSON when team details fail instead of leaking an HTML Express error", async () => {
+    const db = createTeamDb();
+    db.getTeamDetailsBySlug.mockRejectedValue(new Error("activity feed relation is missing"));
+    const app = createProtectedTeamApp({ db });
+
+    const response = await request(app)
+      .get("/api/teams/birunda-farms")
+      .set("Cookie", "northwatch_session=token")
+      .expect(500)
+      .expect("content-type", /json/);
+
+    expect(response.body.error).toBe("activity feed relation is missing");
+  });
+
+  it("returns JSON when team listing fails instead of leaking an HTML Express error", async () => {
+    const db = createTeamDb();
+    db.listTeamsForUser.mockRejectedValue(new Error("team membership table is missing"));
+    const app = createProtectedTeamApp({ db });
+
+    const response = await request(app)
+      .get("/api/teams/mine")
+      .set("Cookie", "northwatch_session=token")
+      .expect(500)
+      .expect("content-type", /json/);
+
+    expect(response.body.error).toBe("team membership table is missing");
+  });
+
   it("lets admins update settings but reserves team deletion for owners", async () => {
     const db = createTeamDb();
     db.getTeamMembershipBySlug

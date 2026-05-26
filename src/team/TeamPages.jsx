@@ -262,14 +262,22 @@ export function TeamDashboardPage({ slug }) {
 export function TeamSettingsPage({ slug }) {
   const [details, setDetails] = useState(null);
   const [invites, setInvites] = useState([]);
+  const [inviteLoadError, setInviteLoadError] = useState("");
   const [confirmName, setConfirmName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
   const reload = async () => {
-    const [teamDetails, pendingInvites] = await Promise.all([getTeam(slug), listInvites(slug)]);
+    const teamDetails = await getTeam(slug);
     setDetails(teamDetails);
-    setInvites(pendingInvites);
+    try {
+      const pendingInvites = await listInvites(slug);
+      setInvites(pendingInvites);
+      setInviteLoadError("");
+    } catch (inviteError) {
+      setInvites([]);
+      setInviteLoadError(inviteError.message);
+    }
   };
 
   useEffect(() => {
@@ -342,7 +350,7 @@ export function TeamSettingsPage({ slug }) {
         }} onRevoke={async (inviteId) => {
           await revokeInvite(slug, inviteId);
           await reload();
-        }} />
+        }} loadError={inviteLoadError} />
       </section>
       <section className="team-panel danger-zone">
         <span className="micro-label">Danger Zone</span>
@@ -396,7 +404,7 @@ export function MemberList({ team = {}, members = [], onRoleChange, onRemove }) 
   );
 }
 
-export function InvitePanel({ team = {}, invites = [], onInvite = async () => {}, onRevoke = async () => {} }) {
+export function InvitePanel({ team = {}, invites = [], loadError = "", onInvite = async () => {}, onRevoke = async () => {} }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   const canInvite = canTeamRole(team.role, "invite_member");
@@ -414,6 +422,7 @@ export function InvitePanel({ team = {}, invites = [], onInvite = async () => {}
         <h2>Invites</h2>
         <span>{invites.length} pending</span>
       </div>
+      {loadError && <p className="team-warning" role="status">Pending invites could not be loaded. {loadError}</p>}
       {canInvite && (
         <form className="invite-form" onSubmit={submit}>
           <label>

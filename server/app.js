@@ -78,7 +78,35 @@ export function createApp(options = {}) {
     app.use("/api", protectedApi, createUserDataRouter({ express, db: userDataDb, teamDb }));
   }
 
+  app.use((request, response, next) => {
+    if (request.path.startsWith("/api") || request.path.startsWith("/auth")) {
+      response.status(404).json({ error: `Northwatch API route not found: ${request.path}` });
+      return;
+    }
+    next();
+  });
+  app.use(apiErrorHandler);
+
   return app;
+}
+
+export function apiErrorHandler(error, request, response, next) {
+  if (response.headersSent) {
+    next(error);
+    return;
+  }
+
+  const isApiRequest = request.path.startsWith("/api") || request.path.startsWith("/auth") || request.accepts(["json", "html"]) === "json";
+  if (!isApiRequest) {
+    response.status(error.status ?? error.statusCode ?? 500).type("text").send(error.message ?? "Internal server error.");
+    return;
+  }
+
+  const isJsonParseError = error instanceof SyntaxError && "body" in error;
+  const status = error.status ?? error.statusCode ?? (isJsonParseError ? 400 : 500);
+  response.status(status).json({
+    error: isJsonParseError ? "Malformed JSON request body." : error.message ?? "Internal server error."
+  });
 }
 
 function renderRootPage(appBaseUrl) {

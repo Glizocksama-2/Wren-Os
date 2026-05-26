@@ -167,6 +167,9 @@ function getDevServerApiBaseUrl(configuredBaseUrl, location) {
   if (configuredBaseUrl) {
     try {
       const url = new URL(configuredBaseUrl);
+      if (isPrivateNetworkLocation(location) && isLoopbackHost(url.hostname)) {
+        return `http://${formatUrlHost(location.hostname)}:${LOCAL_API_PORT}`;
+      }
       if (VITE_FRONTEND_PORTS.has(url.port)) {
         return `http://${formatUrlHost(url.hostname)}:${LOCAL_API_PORT}`;
       }

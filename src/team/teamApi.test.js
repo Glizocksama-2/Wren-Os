@@ -19,6 +19,12 @@ describe("team API client", () => {
     expect(resolveTeamApiBaseUrl({ envBaseUrl: "", location: { protocol: "http:", hostname: "10.0.0.12", port: "8080" } })).toBe("http://10.0.0.12:4000");
   });
 
+  it("rewrites loopback API env URLs when the app is opened from a private-network host", () => {
+    expect(resolveTeamApiBaseUrl({ envBaseUrl: "http://127.0.0.1:4000", location: { protocol: "http:", hostname: "192.168.1.44", port: "5173" } })).toBe("http://192.168.1.44:4000");
+    expect(resolveTeamApiBaseUrl({ envBaseUrl: "http://localhost:4000", location: { protocol: "http:", hostname: "10.0.0.12", port: "5173" } })).toBe("http://10.0.0.12:4000");
+    expect(resolveTeamApiBaseUrl({ envBaseUrl: "http://127.0.0.1:4000", location: { protocol: "http:", hostname: "192.168.1.44", port: "" } })).toBe("http://192.168.1.44:4000");
+  });
+
   it("normalizes an accidental Vite frontend API base URL to the Express API port", () => {
     expect(resolveTeamApiBaseUrl({ envBaseUrl: "http://192.168.1.44:5173", location: { protocol: "http:", hostname: "192.168.1.44", port: "5173" } })).toBe("http://192.168.1.44:4000");
   });

@@ -348,19 +348,11 @@ export function createPostgresTeamDb(pool) {
         const teamRow = membership.rows[0];
         if (!teamRow) return null;
         const members = await listMembers(client, teamRow.id);
-        const activity = await client.query(
-          `select af.id, af.title as item_name, af.payload, af.created_at, u.display_name as actor_name
-           from activity_feed af
-           left join users u on u.id = af.user_id
-           where af.workspace_type = 'team' and af.team_id = $1
-           order by af.created_at desc
-           limit 20`,
-          [teamRow.id]
-        );
+        const activityRows = await listOptionalTeamActivity(client, teamRow.id);
         return {
           team: { ...mapTeam(teamRow), role: teamRow.role },
           members,
-          activity: activity.rows.map(mapTeamActivity)
+          activity: activityRows.map(mapTeamActivity)
         };
       });
     },
@@ -583,6 +575,23 @@ async function listMembers(clientOrPool, teamId) {
     [teamId]
   );
   return result.rows.map(mapMember);
+}
+
+async function listOptionalTeamActivity(clientOrPool, teamId) {
+  try {
+    const result = await clientOrPool.query(
+      `select af.id, af.title as item_name, af.payload, af.created_at, u.display_name as actor_name
+       from activity_feed af
+       left join users u on u.id = af.user_id
+       where af.workspace_type = 'team' and af.team_id = $1
+       order by af.created_at desc
+       limit 20`,
+      [teamId]
+    );
+    return result.rows;
+  } catch {
+    return [];
+  }
 }
 
 async function tableHasColumn(clientOrPool, tableName, columnName) {

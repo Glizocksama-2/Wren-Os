@@ -12,6 +12,7 @@ import { createWorkoutRouter } from "../server/routes/workout.js";
 import { createCopilotService } from "../server/services/copilot.service.js";
 
 const port = Number(process.env.PORT ?? 4000);
+const host = process.env.HOST ?? "127.0.0.1";
 const appBaseUrl = process.env.NORTHWATCH_APP_URL ?? "http://127.0.0.1:5173";
 const jwtSecret = process.env.JWT_SECRET ?? crypto.randomBytes(48).toString("hex");
 const authDb = createMemoryAuthDb();
@@ -27,12 +28,7 @@ const teamInvites = new Map();
 const app = express();
 app.set("trust proxy", 1);
 app.use(cors({
-  origin: [
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:5174",
-    "http://localhost:5173",
-    "http://localhost:5174"
-  ],
+  origin: allowLocalDevOrigin,
   credentials: true
 }));
 app.use(express.json({ limit: "1mb" }));
@@ -359,9 +355,31 @@ app.delete("/api/:resource/:id", protectedApi, (request, response) => {
   response.status(204).end();
 });
 
-app.listen(port, "127.0.0.1", () => {
-  console.log(`Northwatch local API listening on http://127.0.0.1:${port}`);
+app.listen(port, host, () => {
+  console.log(`Northwatch local API listening on http://${host}:${port}`);
 });
+
+function allowLocalDevOrigin(origin, callback) {
+  if (!origin) {
+    callback(null, true);
+    return;
+  }
+
+  try {
+    const url = new URL(origin);
+    const isAllowedPort = ["5173", "5174", "4173"].includes(url.port);
+    const isAllowedHost = ["127.0.0.1", "localhost", "::1"].includes(url.hostname)
+      || /^10\./.test(url.hostname)
+      || /^192\.168\./.test(url.hostname)
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname)
+      || /^169\.254\./.test(url.hostname)
+      || url.hostname.endsWith(".local");
+
+    callback(null, url.protocol === "http:" && isAllowedPort && isAllowedHost);
+  } catch {
+    callback(null, false);
+  }
+}
 
 function createMemoryAuthDb() {
   const users = [];

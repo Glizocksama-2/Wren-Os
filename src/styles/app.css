@@ -2715,6 +2715,17 @@ p {
   font-weight: 900;
 }
 
+.team-warning {
+  margin: 12px 13px 0;
+  border: 1px solid rgb(255 184 77 / 0.32);
+  border-radius: 8px;
+  background: rgb(255 184 77 / 0.1);
+  color: #ffd08a;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .team-form label,
 .invite-form label,
 .assignee-selector,

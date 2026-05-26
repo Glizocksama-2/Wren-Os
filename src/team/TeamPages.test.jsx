@@ -178,6 +178,36 @@ describe("Northwatch team UI", () => {
     expect(screen.getByRole("button", { name: /delete team/i })).not.toBeDisabled();
   });
 
+  it("still loads team settings when pending invites cannot be fetched", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            team: { id: "team-1", name: "Gorosei", slug: "gorosei", role: "owner", memberLimit: 10 },
+            members: [{ userId: "user-1", displayName: "Sam", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }],
+            activity: []
+          })
+        )
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          headers: new Headers({ "content-type": "text/html" }),
+          text: async () => "<!doctype html><html><body>database route failed</body></html>",
+          json: async () => {
+            throw new SyntaxError("Unexpected token <");
+          }
+        })
+    );
+
+    render(<TeamSettingsPage slug="gorosei" />);
+
+    expect(await screen.findByRole("heading", { name: /team settings/i })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Gorosei")).toBeInTheDocument();
+    expect(screen.getByText(/Pending invites could not be loaded/i)).toBeInTheDocument();
+  });
+
   it("previews invites publicly and redirects unauthenticated users to credential auth links", async () => {
     vi.stubGlobal(
       "fetch",
