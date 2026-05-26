@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { authenticate } from "../middleware/authenticate.js";
 import { createTeamInvitesRouter, createInviteAcceptRouter } from "./teamInvites.js";
 
+const VALID_INVITE_TOKEN = "11111111-1111-4111-8111-111111111111";
+
 describe("team invite routes", () => {
   it("creates pending invites, emails the accept link, lists them, and revokes by id", async () => {
     const mailer = { sendTeamInvite: vi.fn().mockResolvedValue({ delivered: true, logged: false }) };
@@ -17,7 +19,7 @@ describe("team invite routes", () => {
         teamId: "team-1",
         teamName: "Birunda Farms",
         email: "brian@example.com",
-        token: "invite-token",
+        token: VALID_INVITE_TOKEN,
         role: "member",
         status: "pending",
         expiresAt: "2026-05-21T12:00:00.000Z",
@@ -36,13 +38,13 @@ describe("team invite routes", () => {
     const pending = await request(app).get("/api/teams/birunda-farms/invites").set("Cookie", "northwatch_session=token").expect(200);
     await request(app).delete("/api/teams/birunda-farms/invites/invite-1").set("Cookie", "northwatch_session=token").expect(204);
 
-    expect(created.body.invite.acceptUrl).toBe("https://northwatch.test/invite/invite-token");
+    expect(created.body.invite.acceptUrl).toBe(`https://northwatch.test/invite/${VALID_INVITE_TOKEN}`);
     expect(created.body.invite.emailDelivery).toEqual({ delivered: true, logged: false, reason: "sent" });
     expect(pending.body.invites).toEqual([{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending" }]);
     expect(mailer.sendTeamInvite).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "brian@example.com",
-        acceptUrl: "https://northwatch.test/invite/invite-token",
+        acceptUrl: `https://northwatch.test/invite/${VALID_INVITE_TOKEN}`,
         teamName: "Birunda Farms"
       })
     );
@@ -59,7 +61,7 @@ describe("team invite routes", () => {
         teamId: "team-1",
         teamName: "Birunda Farms",
         email: "brian@example.com",
-        token: "invite-token",
+        token: VALID_INVITE_TOKEN,
         role: "member",
         status: "pending",
         expiresAt: "2026-05-21T12:00:00.000Z",
@@ -75,9 +77,9 @@ describe("team invite routes", () => {
       .send({ email: "Brian@Example.com", role: "member" })
       .expect(201);
 
-    expect(created.body.invite.acceptUrl).toBe("https://wren-os-henna-six.vercel.app/invite/invite-token");
+    expect(created.body.invite.acceptUrl).toBe(`https://wren-os-henna-six.vercel.app/invite/${VALID_INVITE_TOKEN}`);
     expect(created.body.invite.emailDelivery).toEqual({ delivered: false, logged: true, reason: "not_configured" });
-    expect(mailer.sendTeamInvite).toHaveBeenCalledWith(expect.objectContaining({ acceptUrl: "https://wren-os-henna-six.vercel.app/invite/invite-token" }));
+    expect(mailer.sendTeamInvite).toHaveBeenCalledWith(expect.objectContaining({ acceptUrl: `https://wren-os-henna-six.vercel.app/invite/${VALID_INVITE_TOKEN}` }));
   });
 
   it("keeps the invite link usable when SMTP delivery fails", async () => {
@@ -91,7 +93,7 @@ describe("team invite routes", () => {
         teamId: "team-1",
         teamName: "Birunda Farms",
         email: "brian@example.com",
-        token: "invite-token",
+        token: VALID_INVITE_TOKEN,
         role: "member",
         status: "pending",
         expiresAt: "2026-05-21T12:00:00.000Z",
@@ -106,7 +108,7 @@ describe("team invite routes", () => {
       .send({ email: "brian@example.com", role: "member" })
       .expect(201);
 
-    expect(created.body.invite.acceptUrl).toBe("https://northwatch.test/invite/invite-token");
+    expect(created.body.invite.acceptUrl).toBe(`https://northwatch.test/invite/${VALID_INVITE_TOKEN}`);
     expect(created.body.invite.emailDelivery).toEqual({ delivered: false, logged: false, reason: "send_failed", error: "Email delivery failed." });
   });
 
@@ -114,7 +116,7 @@ describe("team invite routes", () => {
     const db = {
       getTeamInviteByToken: vi.fn().mockResolvedValue({
         id: "invite-1",
-        token: "invite-token",
+        token: VALID_INVITE_TOKEN,
         email: "sam@example.com",
         role: "member",
         status: "pending",
@@ -130,16 +132,30 @@ describe("team invite routes", () => {
     };
     const app = createAcceptApp({ db });
 
-    const preview = await request(app).get("/api/invites/invite-token").expect(200);
-    const accepted = await request(app).post("/api/invites/invite-token/accept").set("Cookie", "northwatch_session=token").expect(200);
+    const preview = await request(app).get(`/api/invites/${VALID_INVITE_TOKEN}`).expect(200);
+    const accepted = await request(app).post(`/api/invites/${VALID_INVITE_TOKEN}/accept`).set("Cookie", "northwatch_session=token").expect(200);
 
     expect(preview.body.invite).toMatchObject({ teamName: "Birunda Farms", inviterName: "Admin", role: "member", recipientExists: false });
     expect(accepted.body.team.slug).toBe("birunda-farms");
     expect(db.acceptTeamInvite).toHaveBeenCalledWith({
-      token: "invite-token",
+      token: VALID_INVITE_TOKEN,
       userId: "user-1",
       userEmail: "sam@example.com"
     });
+  });
+
+  it("returns a clean not-found response for malformed invite tokens", async () => {
+    const db = {
+      getTeamInviteByToken: vi.fn(),
+      acceptTeamInvite: vi.fn()
+    };
+    const app = createAcceptApp({ db });
+
+    await request(app).get("/api/invites/not-a-real-token").expect(404, { error: "Invite not found." });
+    await request(app).post("/api/invites/not-a-real-token/accept").set("Cookie", "northwatch_session=token").expect(404, { error: "Invite not found." });
+
+    expect(db.getTeamInviteByToken).not.toHaveBeenCalled();
+    expect(db.acceptTeamInvite).not.toHaveBeenCalled();
   });
 });
 

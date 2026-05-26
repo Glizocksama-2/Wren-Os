@@ -66,6 +66,10 @@ export function createInviteAcceptRouter({ express, db, authenticate }) {
   const router = express.Router({ mergeParams: true });
 
   router.get("/:token", async (request, response) => {
+    if (!isUuid(request.params.token)) {
+      response.status(404).json({ error: "Invite not found." });
+      return;
+    }
     const invite = await db.getTeamInviteByToken(request.params.token);
     if (!invite) {
       response.status(404).json({ error: "Invite not found." });
@@ -75,6 +79,10 @@ export function createInviteAcceptRouter({ express, db, authenticate }) {
   });
 
   router.post("/:token/accept", authenticate, async (request, response) => {
+    if (!isUuid(request.params.token)) {
+      response.status(404).json({ error: "Invite not found." });
+      return;
+    }
     try {
       const accepted = await db.acceptTeamInvite({
         token: request.params.token,
@@ -142,6 +150,10 @@ function isHttpUrl(value) {
   } catch {
     return false;
   }
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? ""));
 }
 
 function serializeInvitePreview(invite) {
