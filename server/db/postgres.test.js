@@ -77,7 +77,7 @@ describe("createPostgresTeamDb", () => {
     expect(teamInsert?.params).toEqual(["North Unit", "north-unit", "22222222-2222-4222-8222-222222222222", 10]);
   });
 
-  it("populates legacy created_by when it can safely store the Northwatch user id", async () => {
+  it("does not populate legacy created_by even when the column exists for old Supabase workspaces", async () => {
     const { pool, queries } = createMockPool({ createdByReferencesExternalUser: false });
     const db = createPostgresTeamDb(pool);
 
@@ -89,7 +89,7 @@ describe("createPostgresTeamDb", () => {
     });
 
     const teamInsert = queries.find((query) => query.sql.includes("insert into teams"));
-    expect(teamInsert?.sql).toContain("created_by");
+    expect(teamInsert?.sql).not.toContain("created_by");
     expect(teamInsert?.params).toEqual(["North Unit", "north-unit", "22222222-2222-4222-8222-222222222222", 10]);
   });
 });

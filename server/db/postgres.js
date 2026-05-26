@@ -259,20 +259,12 @@ export function createPostgresTeamDb(pool) {
   return {
     async createTeam({ name, slug, ownerId, memberLimit = 10 }) {
       return withUserContext(ownerId, async (client) => {
-        const canPopulateLegacyCreatedBy = await columnCanStoreCurrentUserId(client, "teams", "created_by");
-        const teamResult = canPopulateLegacyCreatedBy
-          ? await client.query(
-              `insert into teams (name, slug, owner_id, member_limit, created_by)
-               values ($1, $2, $3, $4, $3)
-               returning id, name, slug, owner_id, member_limit, created_at, updated_at`,
-              [name, slug, ownerId, memberLimit]
-            )
-          : await client.query(
-              `insert into teams (name, slug, owner_id, member_limit)
-               values ($1, $2, $3, $4)
-               returning id, name, slug, owner_id, member_limit, created_at, updated_at`,
-              [name, slug, ownerId, memberLimit]
-            );
+        const teamResult = await client.query(
+          `insert into teams (name, slug, owner_id, member_limit)
+           values ($1, $2, $3, $4)
+           returning id, name, slug, owner_id, member_limit, created_at, updated_at`,
+          [name, slug, ownerId, memberLimit]
+        );
         const team = teamResult.rows[0];
         await client.query(
           `insert into team_members (team_id, user_id, role, invited_by)
@@ -592,44 +584,6 @@ async function listOptionalTeamActivity(clientOrPool, teamId) {
   } catch {
     return [];
   }
-}
-
-async function tableHasColumn(clientOrPool, tableName, columnName) {
-  const result = await clientOrPool.query(
-    `select exists (
-       select 1
-       from information_schema.columns
-       where table_schema = current_schema()
-         and table_name = $1
-         and column_name = $2
-     ) as exists`,
-    [tableName, columnName]
-  );
-  return Boolean(result.rows[0]?.exists);
-}
-
-async function columnCanStoreCurrentUserId(clientOrPool, tableName, columnName) {
-  if (!(await tableHasColumn(clientOrPool, tableName, columnName))) return false;
-
-  const result = await clientOrPool.query(
-    `select exists (
-       select 1
-       from information_schema.table_constraints tc
-       join information_schema.key_column_usage kcu
-         on tc.constraint_schema = kcu.constraint_schema
-        and tc.constraint_name = kcu.constraint_name
-       join information_schema.constraint_column_usage ccu
-         on tc.constraint_schema = ccu.constraint_schema
-        and tc.constraint_name = ccu.constraint_name
-       where tc.constraint_type = 'FOREIGN KEY'
-         and tc.table_schema = current_schema()
-         and tc.table_name = $1
-         and kcu.column_name = $2
-         and (ccu.table_schema <> current_schema() or ccu.table_name <> 'users')
-     ) as has_external_user_reference`,
-    [tableName, columnName]
-  );
-  return !Boolean(result.rows[0]?.has_external_user_reference);
 }
 
 async function insertNotification(clientOrPool, { userId, type, message, link }) {

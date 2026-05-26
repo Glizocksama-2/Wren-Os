@@ -25,6 +25,7 @@ begin
       and column_name = 'created_by'
   ) then
     execute 'alter table teams alter column created_by drop not null';
+    execute 'alter table teams drop constraint if exists teams_created_by_fkey';
     execute 'update teams set owner_id = created_by where owner_id is null and exists (select 1 from users where users.id = teams.created_by)';
   end if;
 end;

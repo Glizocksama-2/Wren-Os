@@ -19,6 +19,7 @@ describe("northwatch team feature migration", () => {
     expect(sql).toContain("alter table teams add column if not exists member_limit integer not null default 10");
     expect(sql).toContain("alter table teams add column if not exists updated_at timestamptz not null default now()");
     expect(sql).toContain("alter table teams alter column created_by drop not null");
+    expect(sql).toContain("alter table teams drop constraint if exists teams_created_by_fkey");
     expect(sql).toContain("alter table teams add constraint teams_name_length_check");
     expect(sql).toContain("create table if not exists team_members");
     expect(sql).toContain("role text not null check (role in ('owner', 'admin', 'member', 'viewer'))");

@@ -6,6 +6,7 @@ const ownerContextMigrationPath = join(process.cwd(), "supabase", "migrations", 
 const backendRoleMigrationPath = join(process.cwd(), "supabase", "migrations", "20260525165503_repair_team_rls_backend_role.sql");
 const noAuthSchemaMigrationPath = join(process.cwd(), "supabase", "migrations", "20260525180245_repair_team_rls_without_auth_schema.sql");
 const expressTeamTablesMigrationPath = join(process.cwd(), "supabase", "migrations", "20260525184009_add_express_team_tables.sql");
+const createdByLegacyFkMigrationPath = join(process.cwd(), "supabase", "migrations", "20260526213303_repair_team_created_by_legacy_fk.sql");
 const inviteRolesMigrationPath = join(process.cwd(), "supabase", "migrations", "20260518020000_add_team_invites_and_member_roles.sql");
 
 describe("team RLS repair migration", () => {
@@ -72,5 +73,14 @@ describe("team RLS repair migration", () => {
     expect(sql).toContain("grant select, insert, update, delete on table public.team_members to northwatch_app");
     expect(sql).toContain("team_members_insert_owner_or_invited_user");
     expect(sql).toContain("invite.token::text = current_setting('app.current_invite_token', true)");
+  });
+
+  it("removes the legacy created_by foreign key from team creation", async () => {
+    const sql = await readFile(createdByLegacyFkMigrationPath, "utf8");
+
+    expect(sql).toContain("alter table public.teams drop constraint if exists teams_created_by_fkey");
+    expect(sql).toContain("alter table public.teams alter column created_by drop not null");
+    expect(sql).toContain("create policy \"teams_insert_owner_or_creator\"");
+    expect(sql).toContain("owner_id = public.northwatch_app_user_id()");
   });
 });
