@@ -8,7 +8,11 @@ describe("intel service", () => {
     const service = createIntelService({
       fetchImpl,
       now: () => new Date("2026-05-19T08:10:00.000Z"),
-      newsSources: [{ name: "TechCabal", url: "https://techcabal.com/feed/", region: "kenya" }]
+      newsSources: [{ name: "TechCabal", url: "https://techcabal.com/feed/", region: "kenya" }],
+      rapidApiKey: "",
+      rapidApiNseKey: "",
+      rapidApiSeekingAlphaKey: "",
+      rapidApiRealTimeNewsKey: ""
     });
 
     const first = await service.fetchNews();

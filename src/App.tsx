@@ -194,6 +194,22 @@ type AgentSpeechSettings = {
 
 type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
 type TeamWorkspaceSelection = { type: "personal" } | { type: "team"; teamId: string; slug: string; name: string; role: string };
+type TeamInviteDeliveryNotice = {
+  tone: "success" | "warning" | "error";
+  title: string;
+  message: string;
+};
+type TeamInviteDeliveryResult = {
+  delivered?: boolean;
+  logged?: boolean;
+  reason?: string;
+  error?: string;
+};
+type TeamInviteApiResult = {
+  email?: string;
+  acceptUrl?: string;
+  emailDelivery?: TeamInviteDeliveryResult;
+};
 const ACTIVE_TEAM_WORKSPACE_STORAGE_KEY = "northwatch.active-team-workspace.v1";
 export const LEGAL_CONSENT_STORAGE_KEY = "northwatch.legal-consent.v1";
 export const TERMS_VERSION = "2026-05-19";
@@ -384,6 +400,7 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
+  const [teamInviteNotice, setTeamInviteNotice] = useState<TeamInviteDeliveryNotice | null>(null);
   const [isTeamBusy, setIsTeamBusy] = useState(false);
   const [isLogoMenuOpen, setIsLogoMenuOpen] = useState(false);
   const [legalPanel, setLegalPanel] = useState<LegalPanel | null>(null);
@@ -846,16 +863,32 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
 
   const createInviteLink = async (email: string, role: TeamRole = "member") => {
     setTeamInviteLink("");
+    setTeamInviteNotice(null);
     const cleanedEmail = email.trim().toLowerCase();
     if (!activeTeam) {
+      setTeamInviteNotice({
+        tone: "warning",
+        title: "Team workspace required",
+        message: "Switch to a team workspace before adding a teammate."
+      });
       setNotice("Switch to a team workspace before adding a teammate.");
       return;
     }
     if (activeTeam.role !== "owner" && activeTeam.role !== "admin") {
+      setTeamInviteNotice({
+        tone: "warning",
+        title: "Invite access required",
+        message: "Only team owners and admins can add teammates."
+      });
       setNotice("Only team owners and admins can add teammates.");
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+      setTeamInviteNotice({
+        tone: "warning",
+        title: "Check teammate email",
+        message: "Enter a valid teammate email first."
+      });
       setNotice("Enter a valid teammate email first.");
       return;
     }
@@ -864,15 +897,17 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     try {
       const invite = await sendTeamInvite(activeTeam.slug ?? activeTeam.id, { email: cleanedEmail, role });
       setTeamInviteLink(invite.acceptUrl ?? "");
-      setNotice(
-        invite.emailDelivery?.delivered
-          ? `Invite email sent to ${cleanedEmail}. They can sign in or create an account from the same link.`
-          : invite.emailDelivery?.reason === "send_failed"
-            ? `Invite link created for ${cleanedEmail}, but email delivery failed. Copy and send the link manually.`
-          : `Invite link created for ${cleanedEmail}. Email delivery is not configured, so copy and send the link manually.`
-      );
+      const inviteNotice = createTeamInviteDeliveryNotice(invite, cleanedEmail);
+      setTeamInviteNotice(inviteNotice);
+      setNotice(`${inviteNotice.title}: ${inviteNotice.message}`);
     } catch (error) {
-      setNotice(`Create teammate invite failed: ${getErrorMessage(error)}`);
+      const message = getErrorMessage(error);
+      setTeamInviteNotice({
+        tone: "error",
+        title: "Invite request failed",
+        message
+      });
+      setNotice(`Create teammate invite failed: ${message}`);
     } finally {
       setIsTeamBusy(false);
     }
@@ -1061,6 +1096,7 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
               activeTeam={activeTeam}
               teamMembers={teamMembers}
               teamInviteLink={teamInviteLink}
+              teamInviteNotice={teamInviteNotice}
               isTeamBusy={isTeamBusy}
               dispatch={dispatch}
               onSwitchWorkspace={switchWorkspace}
@@ -3799,6 +3835,7 @@ function AccountModule({
   activeTeam,
   teamMembers,
   teamInviteLink,
+  teamInviteNotice,
   isTeamBusy,
   dispatch,
   onSwitchWorkspace,
@@ -3819,6 +3856,7 @@ function AccountModule({
   activeTeam: TeamWorkspace | null;
   teamMembers: TeamMember[];
   teamInviteLink: string;
+  teamInviteNotice: TeamInviteDeliveryNotice | null;
   isTeamBusy: boolean;
   dispatch: React.Dispatch<CommandDeckAction>;
   onSwitchWorkspace: (workspace: WorkspaceMode) => Promise<void>;
@@ -4067,6 +4105,7 @@ function AccountModule({
                 readOnly
                 placeholder={canInviteTeam ? "Generated invite link appears here" : "Owner or admin access required"}
               />
+              <TeamInviteDeliveryNotification notice={teamInviteNotice} />
             </div>
             <div className="team-ops-card">
               <div className="team-ops-head">
@@ -4145,6 +4184,17 @@ function AccountModule({
         </section>
       </section>
     </ModuleShell>
+  );
+}
+
+function TeamInviteDeliveryNotification({ notice }: { notice: TeamInviteDeliveryNotice | null }) {
+  if (!notice) return null;
+  const role = notice.tone === "error" ? "alert" : "status";
+  return (
+    <div className={`team-invite-notification team-invite-notification-${notice.tone}`} role={role} aria-live={notice.tone === "error" ? "assertive" : "polite"}>
+      <strong>{notice.title}</strong>
+      <span>{notice.message}</span>
+    </div>
   );
 }
 
@@ -5129,6 +5179,39 @@ function getInitialCloudStatus(): CloudStatus {
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "Unexpected Northwatch error.";
+}
+
+function createTeamInviteDeliveryNotice(invite: TeamInviteApiResult | null | undefined, fallbackEmail = ""): TeamInviteDeliveryNotice {
+  const email = invite?.email ?? fallbackEmail;
+  if (invite?.emailDelivery?.delivered) {
+    return {
+      tone: "success",
+      title: "Invite sent",
+      message: email ? `Email delivered to ${email}.` : "Email delivered to the teammate."
+    };
+  }
+
+  if (invite?.emailDelivery?.reason === "send_failed") {
+    return {
+      tone: "error",
+      title: "Invite email failed",
+      message: "The invite link still works. Copy the invite link and send it manually."
+    };
+  }
+
+  if (invite?.acceptUrl) {
+    return {
+      tone: "warning",
+      title: "Invite link created",
+      message: "Email delivery is not configured. Copy the invite link and send it manually."
+    };
+  }
+
+  return {
+    tone: "warning",
+    title: "Invite link created",
+    message: "Copy the generated invite link and send it manually."
+  };
 }
 
 function getShortcutView(key: string): DeckView | null {

@@ -564,7 +564,8 @@ describe("Northwatch command deck", () => {
             email: "brian@example.com",
             role: "member",
             status: "pending",
-            acceptUrl: "https://northwatch.app/invite/invite-token"
+            acceptUrl: "https://northwatch.app/invite/invite-token",
+            emailDelivery: { delivered: true, logged: false, reason: "sent" }
           }
         }, 201);
       }
@@ -595,6 +596,105 @@ describe("Northwatch command deck", () => {
       ])
     );
     expect(screen.getByLabelText("Team invite link")).toHaveValue("https://northwatch.app/invite/invite-token");
+    const notice = screen.getByText("Invite sent").closest(".team-invite-notification");
+    expect(notice).toHaveClass("team-invite-notification-success");
+    expect(screen.getByText("Email delivered to brian@example.com.")).toBeInTheDocument();
+  });
+
+  it("shows a persistent dashboard invite warning when email delivery is not configured", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = getPathname(url);
+      if (pathname === "/api/teams/mine") {
+        return jsonResponse({ teams: [] });
+      }
+      if (pathname === "/api/teams" && init?.method === "POST") {
+        return jsonResponse({ team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" } }, 201);
+      }
+      if (pathname === "/api/teams/north-unit") {
+        return jsonResponse({
+          team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" },
+          members: [{ userId: "user-1", email: "sam@example.com", role: "owner" }]
+        });
+      }
+      if (pathname === "/api/teams/north-unit/invites" && init?.method === "POST") {
+        return jsonResponse({
+          invite: {
+            id: "invite-1",
+            email: "brian@example.com",
+            role: "member",
+            status: "pending",
+            acceptUrl: "https://northwatch.app/invite/invite-token",
+            emailDelivery: { delivered: false, logged: true, reason: "not_configured" }
+          }
+        }, 201);
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Account" }));
+    fireEvent.change(screen.getByLabelText("Team name"), { target: { value: "North Unit" } });
+    fireEvent.click(screen.getByRole("button", { name: /create team/i }));
+
+    await screen.findByText("Team: North Unit");
+    fireEvent.change(screen.getByLabelText("Teammate email"), { target: { value: "brian@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /invite teammate/i }));
+
+    await waitFor(() => expect(screen.getByLabelText("Team invite link")).toHaveValue("https://northwatch.app/invite/invite-token"));
+    const notice = screen.getByText("Invite link created").closest(".team-invite-notification");
+    expect(notice).toHaveClass("team-invite-notification-warning");
+    expect(screen.getByText("Email delivery is not configured. Copy the invite link and send it manually.")).toBeInTheDocument();
+  });
+
+  it("shows a persistent dashboard invite failure when email delivery fails", async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = getPathname(url);
+      if (pathname === "/api/teams/mine") {
+        return jsonResponse({ teams: [] });
+      }
+      if (pathname === "/api/teams" && init?.method === "POST") {
+        return jsonResponse({ team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" } }, 201);
+      }
+      if (pathname === "/api/teams/north-unit") {
+        return jsonResponse({
+          team: { id: "team-1", name: "North Unit", slug: "north-unit", role: "owner" },
+          members: [{ userId: "user-1", email: "sam@example.com", role: "owner" }]
+        });
+      }
+      if (pathname === "/api/teams/north-unit/invites" && init?.method === "POST") {
+        return jsonResponse({
+          invite: {
+            id: "invite-1",
+            email: "brian@example.com",
+            role: "member",
+            status: "pending",
+            acceptUrl: "https://northwatch.app/invite/invite-token",
+            emailDelivery: { delivered: false, logged: false, reason: "send_failed" }
+          }
+        }, 201);
+      }
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /open northwatch menu/i }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Northwatch menu" })).getByRole("menuitem", { name: "Account" }));
+    fireEvent.change(screen.getByLabelText("Team name"), { target: { value: "North Unit" } });
+    fireEvent.click(screen.getByRole("button", { name: /create team/i }));
+
+    await screen.findByText("Team: North Unit");
+    fireEvent.change(screen.getByLabelText("Teammate email"), { target: { value: "brian@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /invite teammate/i }));
+
+    await waitFor(() => expect(screen.getByLabelText("Team invite link")).toHaveValue("https://northwatch.app/invite/invite-token"));
+    const notice = screen.getByText("Invite email failed").closest(".team-invite-notification");
+    expect(notice).toHaveClass("team-invite-notification-error");
+    expect(screen.getByText("The invite link still works. Copy the invite link and send it manually.")).toBeInTheDocument();
   });
 
   it("renders an active team workspace as a cooperative war room dashboard", async () => {
