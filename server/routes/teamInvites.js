@@ -4,7 +4,7 @@ import { normalizeTeamRole } from "../teamPermissions.js";
 
 const INVITE_EXPIRES_MS = 48 * 60 * 60 * 1000;
 
-export function createTeamInvitesRouter({ express, db, mailer, appBaseUrl = process.env.NORTHWATCH_APP_URL ?? "http://localhost:5173" }) {
+export function createTeamInvitesRouter({ express, db, mailer, appBaseUrl = process.env.NORTHWATCH_APP_URL ?? "" }) {
   const router = express.Router({ mergeParams: true });
   const requireAdmin = requireTeamRole({ db, minRole: "admin" });
 
@@ -27,15 +27,15 @@ export function createTeamInvitesRouter({ express, db, mailer, appBaseUrl = proc
         invitedBy: request.userId,
         expiresAt
       });
-      const acceptUrl = buildInviteUrl(appBaseUrl, invite.token ?? token);
-      await mailer.sendTeamInvite({
+      const acceptUrl = buildInviteUrl(resolveInviteBaseUrl(request, appBaseUrl), invite.token ?? token);
+      const emailDelivery = await sendInviteEmailSafely(mailer, {
         to: email,
         teamName: invite.teamName ?? request.team.name,
         inviterName: invite.invitedByName ?? request.user?.displayName ?? request.user?.email ?? "Northwatch",
         role,
         acceptUrl
       });
-      response.status(201).json({ invite: { ...invite, acceptUrl } });
+      response.status(201).json({ invite: { ...invite, acceptUrl, emailDelivery } });
     } catch (error) {
       response.status(error.status ?? 500).json({ error: error.message });
     }
@@ -92,6 +92,56 @@ export function createInviteAcceptRouter({ express, db, authenticate }) {
 
 export function buildInviteUrl(appBaseUrl, token) {
   return `${String(appBaseUrl).replace(/\/$/, "")}/invite/${encodeURIComponent(token)}`;
+}
+
+export function resolveInviteBaseUrl(request, appBaseUrl) {
+  const configuredBaseUrl = String(appBaseUrl ?? "").trim();
+  if (configuredBaseUrl) return configuredBaseUrl;
+
+  const origin = request.get?.("origin");
+  if (isHttpUrl(origin)) return origin;
+
+  const host = request.get?.("x-forwarded-host") ?? request.get?.("host");
+  if (host) {
+    const forwardedProto = request.get?.("x-forwarded-proto")?.split(",")[0]?.trim();
+    const protocol = forwardedProto || request.protocol || "https";
+    return `${protocol}://${host}`;
+  }
+
+  return "http://localhost:5173";
+}
+
+function normalizeEmailDelivery(result) {
+  const delivered = Boolean(result?.delivered);
+  const logged = Boolean(result?.logged);
+  return {
+    delivered,
+    logged,
+    reason: result?.reason ?? (delivered ? "sent" : logged ? "not_configured" : "unknown")
+  };
+}
+
+async function sendInviteEmailSafely(mailer, payload) {
+  try {
+    return normalizeEmailDelivery(await mailer.sendTeamInvite(payload));
+  } catch {
+    return {
+      delivered: false,
+      logged: false,
+      reason: "send_failed",
+      error: "Email delivery failed."
+    };
+  }
+}
+
+function isHttpUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function serializeInvitePreview(invite) {

@@ -263,6 +263,7 @@ export function TeamSettingsPage({ slug }) {
   const [details, setDetails] = useState(null);
   const [invites, setInvites] = useState([]);
   const [inviteLoadError, setInviteLoadError] = useState("");
+  const [inviteNotice, setInviteNotice] = useState("");
   const [confirmName, setConfirmName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -344,11 +345,21 @@ export function TeamSettingsPage({ slug }) {
           await removeMember(slug, userId);
           await reload();
         }} />
-        <InvitePanel team={details.team} invites={invites} onInvite={async (input) => {
-          await sendInvite(slug, input);
+        <InvitePanel team={details.team} invites={invites} notice={inviteNotice} onInvite={async (input) => {
+          const invite = await sendInvite(slug, input);
+          if (invite?.emailDelivery?.delivered) {
+            setInviteNotice(`Invite email sent to ${invite.email}.`);
+          } else if (invite?.emailDelivery?.reason === "send_failed") {
+            setInviteNotice("Invite link created, but email delivery failed. Copy the invite link and send it manually.");
+          } else if (invite?.acceptUrl) {
+            setInviteNotice("Invite link created, but email delivery is not configured. Copy the invite link and send it manually.");
+          } else {
+            setInviteNotice("Invite link created. Copy it from the pending invite row and send it manually.");
+          }
           await reload();
         }} onRevoke={async (inviteId) => {
           await revokeInvite(slug, inviteId);
+          setInviteNotice("");
           await reload();
         }} loadError={inviteLoadError} />
       </section>
@@ -404,7 +415,7 @@ export function MemberList({ team = {}, members = [], onRoleChange, onRemove }) 
   );
 }
 
-export function InvitePanel({ team = {}, invites = [], loadError = "", onInvite = async () => {}, onRevoke = async () => {} }) {
+export function InvitePanel({ team = {}, invites = [], loadError = "", notice = "", onInvite = async () => {}, onRevoke = async () => {} }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   const canInvite = canTeamRole(team.role, "invite_member");
@@ -423,6 +434,7 @@ export function InvitePanel({ team = {}, invites = [], loadError = "", onInvite 
         <span>{invites.length} pending</span>
       </div>
       {loadError && <p className="team-warning" role="status">Pending invites could not be loaded. {loadError}</p>}
+      {notice && <p className="team-warning" role="status">{notice}</p>}
       {canInvite && (
         <form className="invite-form" onSubmit={submit}>
           <label>

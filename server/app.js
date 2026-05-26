@@ -28,7 +28,8 @@ export function createApp(options = {}) {
   const authService = options.authService ?? createAuthService({ db: authDb, jwtSecret: options.jwtSecret });
   const mailer = options.mailer ?? createInviteMailer();
   const systemAiService = options.systemAiService ?? createCopilotService();
-  const appBaseUrl = options.appBaseUrl ?? process.env.NORTHWATCH_APP_URL ?? "http://127.0.0.1:5173";
+  const configuredAppBaseUrl = options.appBaseUrl ?? process.env.NORTHWATCH_APP_URL ?? "";
+  const appBaseUrl = configuredAppBaseUrl || "http://127.0.0.1:5173";
 
   app.set("trust proxy", 1);
   app.use(helmet());
@@ -72,7 +73,7 @@ export function createApp(options = {}) {
     app.use("/api/telegram", protectedApi, createTelegramRouter({ express, db: userDataDb }));
     app.use("/api/legacy-command-deck", protectedApi, createLegacyCommandDeckRouter({ express, db: userDataDb }));
     if (teamDb) {
-      app.use("/api/teams", protectedApi, createTeamsRouter({ express, db: teamDb, mailer }));
+      app.use("/api/teams", protectedApi, createTeamsRouter({ express, db: teamDb, mailer, appBaseUrl: configuredAppBaseUrl }));
       app.use("/api/notifications", protectedApi, createNotificationsRouter({ express, db: teamDb }));
     }
     app.use("/api", protectedApi, createUserDataRouter({ express, db: userDataDb, teamDb }));

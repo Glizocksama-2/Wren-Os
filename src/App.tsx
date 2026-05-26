@@ -864,7 +864,13 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     try {
       const invite = await sendTeamInvite(activeTeam.slug ?? activeTeam.id, { email: cleanedEmail, role });
       setTeamInviteLink(invite.acceptUrl ?? "");
-      setNotice(`Invite sent to ${cleanedEmail}. They can sign in or create an account from the same link.`);
+      setNotice(
+        invite.emailDelivery?.delivered
+          ? `Invite email sent to ${cleanedEmail}. They can sign in or create an account from the same link.`
+          : invite.emailDelivery?.reason === "send_failed"
+            ? `Invite link created for ${cleanedEmail}, but email delivery failed. Copy and send the link manually.`
+          : `Invite link created for ${cleanedEmail}. Email delivery is not configured, so copy and send the link manually.`
+      );
     } catch (error) {
       setNotice(`Create teammate invite failed: ${getErrorMessage(error)}`);
     } finally {

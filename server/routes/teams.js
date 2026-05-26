@@ -2,7 +2,7 @@ import { requireTeamRole } from "../middleware/requireTeamRole.js";
 import { createTeamInvitesRouter } from "./teamInvites.js";
 import { createTeamMembersRouter } from "./teamMembers.js";
 
-export function createTeamsRouter({ express, db, mailer }) {
+export function createTeamsRouter({ express, db, mailer, appBaseUrl }) {
   const router = express.Router();
 
   router.post("/", async (request, response) => {
@@ -63,7 +63,7 @@ export function createTeamsRouter({ express, db, mailer }) {
   });
 
   router.use("/:slug/members", createTeamMembersRouter({ express, db }));
-  router.use("/:slug/invites", createTeamInvitesRouter({ express, db, mailer }));
+  router.use("/:slug/invites", createTeamInvitesRouter({ express, db, mailer, appBaseUrl }));
 
   return router;
 }

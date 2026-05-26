@@ -7,7 +7,7 @@ import { createTeamInvitesRouter, createInviteAcceptRouter } from "./teamInvites
 
 describe("team invite routes", () => {
   it("creates pending invites, emails the accept link, lists them, and revokes by id", async () => {
-    const mailer = { sendTeamInvite: vi.fn().mockResolvedValue(undefined) };
+    const mailer = { sendTeamInvite: vi.fn().mockResolvedValue({ delivered: true, logged: false }) };
     const db = {
       getTeamMembershipBySlug: vi
         .fn()
@@ -37,6 +37,7 @@ describe("team invite routes", () => {
     await request(app).delete("/api/teams/birunda-farms/invites/invite-1").set("Cookie", "northwatch_session=token").expect(204);
 
     expect(created.body.invite.acceptUrl).toBe("https://northwatch.test/invite/invite-token");
+    expect(created.body.invite.emailDelivery).toEqual({ delivered: true, logged: false, reason: "sent" });
     expect(pending.body.invites).toEqual([{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending" }]);
     expect(mailer.sendTeamInvite).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -45,6 +46,68 @@ describe("team invite routes", () => {
         teamName: "Birunda Farms"
       })
     );
+  });
+
+  it("builds a production invite link from the request origin when no app base URL is configured", async () => {
+    const mailer = { sendTeamInvite: vi.fn().mockResolvedValue({ delivered: false, logged: true }) };
+    const db = {
+      getTeamMembershipBySlug: vi
+        .fn()
+        .mockResolvedValue({ team: { id: "team-1", slug: "birunda-farms", name: "Birunda Farms" }, membership: { role: "admin" } }),
+      createTeamInvite: vi.fn().mockResolvedValue({
+        id: "invite-1",
+        teamId: "team-1",
+        teamName: "Birunda Farms",
+        email: "brian@example.com",
+        token: "invite-token",
+        role: "member",
+        status: "pending",
+        expiresAt: "2026-05-21T12:00:00.000Z",
+        invitedByName: "Sam"
+      })
+    };
+    const app = createInviteApp({ db, mailer, appBaseUrl: "" });
+
+    const created = await request(app)
+      .post("/api/teams/birunda-farms/invites")
+      .set("Cookie", "northwatch_session=token")
+      .set("Origin", "https://wren-os-henna-six.vercel.app")
+      .send({ email: "Brian@Example.com", role: "member" })
+      .expect(201);
+
+    expect(created.body.invite.acceptUrl).toBe("https://wren-os-henna-six.vercel.app/invite/invite-token");
+    expect(created.body.invite.emailDelivery).toEqual({ delivered: false, logged: true, reason: "not_configured" });
+    expect(mailer.sendTeamInvite).toHaveBeenCalledWith(expect.objectContaining({ acceptUrl: "https://wren-os-henna-six.vercel.app/invite/invite-token" }));
+  });
+
+  it("keeps the invite link usable when SMTP delivery fails", async () => {
+    const mailer = { sendTeamInvite: vi.fn().mockRejectedValue(new Error("SMTP rejected the message")) };
+    const db = {
+      getTeamMembershipBySlug: vi
+        .fn()
+        .mockResolvedValue({ team: { id: "team-1", slug: "birunda-farms", name: "Birunda Farms" }, membership: { role: "admin" } }),
+      createTeamInvite: vi.fn().mockResolvedValue({
+        id: "invite-1",
+        teamId: "team-1",
+        teamName: "Birunda Farms",
+        email: "brian@example.com",
+        token: "invite-token",
+        role: "member",
+        status: "pending",
+        expiresAt: "2026-05-21T12:00:00.000Z",
+        invitedByName: "Sam"
+      })
+    };
+    const app = createInviteApp({ db, mailer });
+
+    const created = await request(app)
+      .post("/api/teams/birunda-farms/invites")
+      .set("Cookie", "northwatch_session=token")
+      .send({ email: "brian@example.com", role: "member" })
+      .expect(201);
+
+    expect(created.body.invite.acceptUrl).toBe("https://northwatch.test/invite/invite-token");
+    expect(created.body.invite.emailDelivery).toEqual({ delivered: false, logged: false, reason: "send_failed", error: "Email delivery failed." });
   });
 
   it("previews and accepts a valid invite for the authenticated user", async () => {
@@ -80,7 +143,7 @@ describe("team invite routes", () => {
   });
 });
 
-function createInviteApp({ db, mailer }) {
+function createInviteApp({ db, mailer, appBaseUrl = "https://northwatch.test" }) {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
@@ -91,7 +154,7 @@ function createInviteApp({ db, mailer }) {
         verifyRequest: async (request) => (request.cookies?.northwatch_session ? { userId: "user-1", user: { id: "user-1", email: "sam@example.com", displayName: "Sam" } } : null)
       }
     }),
-    createTeamInvitesRouter({ express, db, mailer, appBaseUrl: "https://northwatch.test" })
+    createTeamInvitesRouter({ express, db, mailer, appBaseUrl })
   );
   return app;
 }

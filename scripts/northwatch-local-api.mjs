@@ -200,7 +200,14 @@ app.post("/api/teams/:slug/invites", protectedApi, (request, response) => {
     status: "pending"
   };
   teamInvites.set(invite.token, invite);
-  response.status(201).json({ invite: { ...invite, acceptUrl: `${appBaseUrl}/invite/${invite.token}` } });
+  console.info(`[northwatch-local] Team invite email is not configured. Invite for ${email}: ${appBaseUrl}/invite/${invite.token}`);
+  response.status(201).json({
+    invite: {
+      ...invite,
+      acceptUrl: `${appBaseUrl}/invite/${invite.token}`,
+      emailDelivery: { delivered: false, logged: true, reason: "not_configured" }
+    }
+  });
 });
 
 app.get("/api/teams/:slug/invites", protectedApi, (request, response) => {

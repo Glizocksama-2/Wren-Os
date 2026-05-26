@@ -30,11 +30,11 @@ export function createInviteMailer(env = process.env, logger = console) {
 
       if (!transporter) {
         logger.info(`[northwatch] Team invite email for ${to}: ${acceptUrl}`);
-        return { delivered: false, logged: true };
+        return { delivered: false, logged: true, reason: "not_configured" };
       }
 
       await transporter.sendMail({ from, to, subject, text, html });
-      return { delivered: true, logged: false };
+      return { delivered: true, logged: false, reason: "sent" };
     }
   };
 }
