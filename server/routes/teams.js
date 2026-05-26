@@ -50,7 +50,7 @@ export function createTeamsRouter({ express, db, mailer, appBaseUrl }) {
   router.patch("/:slug", requireTeamRole({ db, minRole: "admin" }), async (request, response) => {
     const input = sanitizeTeamInput(request.body);
     try {
-      const team = await db.updateTeam(request.team.id, input);
+      const team = await db.updateTeam(request.team.id, input, request.userId);
       response.json({ team });
     } catch (error) {
       response.status(error.status ?? 500).json({ error: error.message });
@@ -58,7 +58,7 @@ export function createTeamsRouter({ express, db, mailer, appBaseUrl }) {
   });
 
   router.delete("/:slug", requireTeamRole({ db, minRole: "owner" }), async (request, response) => {
-    await db.deleteTeam(request.team.id);
+    await db.deleteTeam(request.team.id, request.userId);
     response.status(204).end();
   });
 

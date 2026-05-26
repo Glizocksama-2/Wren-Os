@@ -2836,6 +2836,18 @@ p {
   color: var(--muted);
 }
 
+.invite-link-input {
+  min-width: min(360px, 100%);
+  flex: 1 1 260px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.04);
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
 .team-avatar {
   display: inline-grid;
   width: 34px;

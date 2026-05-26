@@ -5,7 +5,7 @@ export function createTeamMembersRouter({ express, db }) {
   const router = express.Router({ mergeParams: true });
 
   router.get("/", requireTeamRole({ db, minRole: "viewer" }), async (request, response) => {
-    const members = await db.listTeamMembers(request.team.id);
+    const members = await db.listTeamMembers(request.team.id, request.userId);
     response.json({ members });
   });
 

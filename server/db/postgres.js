@@ -256,6 +256,11 @@ export function createPostgresTeamDb(pool) {
     }
   }
 
+  async function withRequiredUserContext(userId, work) {
+    if (!userId) throw httpError(401, "Authenticated user context is required.");
+    return withUserContext(userId, work);
+  }
+
   return {
     async createTeam({ name, slug, ownerId, memberLimit = 10 }) {
       return withUserContext(ownerId, async (client) => {
@@ -349,116 +354,119 @@ export function createPostgresTeamDb(pool) {
       });
     },
 
-    async updateTeam(teamId, { name, slug, memberLimit }) {
-      const result = await pool.query(
-        `update teams
-         set name = coalesce(nullif($2, ''), name),
-             slug = coalesce(nullif($3, ''), slug),
-             member_limit = coalesce($4, member_limit),
-             updated_at = now()
-         where id = $1
-         returning id, name, slug, owner_id, member_limit, created_at, updated_at`,
-        [teamId, name ?? "", slug ?? "", memberLimit ?? null]
-      );
-      return mapTeam(result.rows[0]);
+    async updateTeam(teamId, { name, slug, memberLimit }, userId) {
+      return withRequiredUserContext(userId, async (client) => {
+        const result = await client.query(
+          `update teams
+           set name = coalesce(nullif($2, ''), name),
+               slug = coalesce(nullif($3, ''), slug),
+               member_limit = coalesce($4, member_limit),
+               updated_at = now()
+           where id = $1
+           returning id, name, slug, owner_id, member_limit, created_at, updated_at`,
+          [teamId, name ?? "", slug ?? "", memberLimit ?? null]
+        );
+        return mapTeam(result.rows[0]);
+      });
     },
 
-    async deleteTeam(teamId) {
-      await pool.query("delete from teams where id = $1", [teamId]);
+    async deleteTeam(teamId, userId) {
+      await withRequiredUserContext(userId, (client) => client.query("delete from teams where id = $1", [teamId]));
     },
 
-    async listTeamMembers(teamId) {
-      const result = await pool.query(
-        `select tm.id as membership_id, tm.team_id, tm.user_id, tm.role, tm.joined_at, tm.invited_by,
-                u.email, u.display_name
-         from team_members tm
-         join users u on u.id = tm.user_id
-         where tm.team_id = $1
-         order by case tm.role when 'owner' then 0 when 'admin' then 1 when 'member' then 2 else 3 end, tm.joined_at`,
-        [teamId]
-      );
-      return result.rows.map(mapMember);
+    async listTeamMembers(teamId, userId) {
+      return withRequiredUserContext(userId, (client) => listMembers(client, teamId));
     },
 
     async updateTeamMemberRole({ teamId, actorUserId, targetUserId, role }) {
-      const members = await listMembers(pool, teamId);
-      const actor = members.find((member) => member.userId === actorUserId);
-      const target = members.find((member) => member.userId === targetUserId);
-      if (!actor || !target) throw httpError(404, "Team member not found.");
-      if (target.role === "owner" && actor.role !== "owner") throw httpError(403, "Only owners can change an owner role.");
-      if (target.role === "owner" && role !== "owner" && members.filter((member) => member.role === "owner").length <= 1) {
-        throw httpError(409, "A team must keep at least one owner.");
-      }
-      const result = await pool.query(
-        `update team_members
-         set role = $3
-         where team_id = $1 and user_id = $2
-         returning id as membership_id, team_id, user_id, role, joined_at, invited_by`,
-        [teamId, targetUserId, role]
-      );
-      await insertNotification(pool, {
-        userId: targetUserId,
-        type: "team_role_changed",
-        message: `Your role was changed to ${role}`,
-        link: null
+      return withRequiredUserContext(actorUserId, async (client) => {
+        const members = await listMembers(client, teamId);
+        const actor = members.find((member) => member.userId === actorUserId);
+        const target = members.find((member) => member.userId === targetUserId);
+        if (!actor || !target) throw httpError(404, "Team member not found.");
+        if (target.role === "owner" && actor.role !== "owner") throw httpError(403, "Only owners can change an owner role.");
+        if (target.role === "owner" && role !== "owner" && members.filter((member) => member.role === "owner").length <= 1) {
+          throw httpError(409, "A team must keep at least one owner.");
+        }
+        const result = await client.query(
+          `update team_members
+           set role = $3
+           where team_id = $1 and user_id = $2
+           returning id as membership_id, team_id, user_id, role, joined_at, invited_by`,
+          [teamId, targetUserId, role]
+        );
+        await insertNotification(client, {
+          userId: targetUserId,
+          type: "team_role_changed",
+          message: `Your role was changed to ${role}`,
+          link: null
+        });
+        return mapMember(result.rows[0]);
       });
-      return mapMember(result.rows[0]);
     },
 
     async removeTeamMember({ teamId, actorUserId, targetUserId }) {
-      const members = await listMembers(pool, teamId);
-      const target = members.find((member) => member.userId === targetUserId);
-      if (!target) throw httpError(404, "Team member not found.");
-      if (target.role === "owner") return { removed: false, reason: "owner_protected" };
-      await pool.query("delete from team_members where team_id = $1 and user_id = $2", [teamId, targetUserId]);
-      if (actorUserId !== targetUserId) {
-        await insertNotification(pool, {
-          userId: targetUserId,
-          type: "team_member_removed",
-          message: "You were removed from a Northwatch team",
-          link: null
-        });
-      }
-      return { removed: true };
+      return withRequiredUserContext(actorUserId, async (client) => {
+        const members = await listMembers(client, teamId);
+        const target = members.find((member) => member.userId === targetUserId);
+        if (!target) throw httpError(404, "Team member not found.");
+        if (target.role === "owner") return { removed: false, reason: "owner_protected" };
+        await client.query("delete from team_members where team_id = $1 and user_id = $2", [teamId, targetUserId]);
+        if (actorUserId !== targetUserId) {
+          await insertNotification(client, {
+            userId: targetUserId,
+            type: "team_member_removed",
+            message: "You were removed from a Northwatch team",
+            link: null
+          });
+        }
+        return { removed: true };
+      });
     },
 
     async createTeamInvite({ teamId, email, role, token, invitedBy, expiresAt }) {
-      const result = await pool.query(
-        `insert into team_invites (team_id, email, token, role, invited_by, expires_at, status)
-         values ($1, $2, $3, $4, $5, $6, 'pending')
-         returning id, team_id, email, token, role, invited_by, expires_at, accepted_at, status`,
-        [teamId, email, token, role, invitedBy, expiresAt]
-      );
-      const invite = result.rows[0];
-      const context = await pool.query(
-        `select t.name as team_name, t.slug as team_slug, u.display_name as invited_by_name
-         from teams t
-         join users u on u.id = $2
-         where t.id = $1`,
-        [teamId, invitedBy]
-      );
-      return mapInvite({ ...invite, ...context.rows[0] });
+      return withRequiredUserContext(invitedBy, async (client) => {
+        const result = await client.query(
+          `insert into team_invites (team_id, email, token, role, invited_by, expires_at, status)
+           values ($1, $2, $3, $4, $5, $6, 'pending')
+           returning id, team_id, email, token, role, invited_by, expires_at, accepted_at, status`,
+          [teamId, email, token, role, invitedBy, expiresAt]
+        );
+        const invite = result.rows[0];
+        const context = await client.query(
+          `select t.name as team_name, t.slug as team_slug, u.display_name as invited_by_name
+           from teams t
+           join users u on u.id = $2
+           where t.id = $1`,
+          [teamId, invitedBy]
+        );
+        return mapInvite({ ...invite, ...context.rows[0] });
+      });
     },
 
-    async listTeamInvites(teamId) {
-      const result = await pool.query(
-        `select id, team_id, email, token, role, invited_by, expires_at, accepted_at, status
-         from team_invites
-         where team_id = $1 and status = 'pending'
-         order by expires_at asc`,
-        [teamId]
-      );
-      return result.rows.map(mapInvite);
+    async listTeamInvites(teamId, userId) {
+      return withRequiredUserContext(userId, async (client) => {
+        const result = await client.query(
+          `select id, team_id, email, token, role, invited_by, expires_at, accepted_at, status
+           from team_invites
+           where team_id = $1 and status = 'pending'
+           order by expires_at asc`,
+          [teamId]
+        );
+        return result.rows.map(mapInvite);
+      });
     },
 
-    async revokeTeamInvite({ teamId, inviteId }) {
-      const result = await pool.query(
-        `update team_invites set status = 'revoked'
-         where team_id = $1 and id = $2 and status = 'pending'
-         returning id`,
-        [teamId, inviteId]
-      );
-      return result.rowCount > 0;
+    async revokeTeamInvite({ teamId, inviteId, revokedBy }) {
+      return withRequiredUserContext(revokedBy, async (client) => {
+        const result = await client.query(
+          `update team_invites set status = 'revoked'
+           where team_id = $1 and id = $2 and status = 'pending'
+           returning id`,
+          [teamId, inviteId]
+        );
+        return result.rowCount > 0;
+      });
     },
 
     async getTeamInviteByToken(token) {
@@ -527,20 +535,24 @@ export function createPostgresTeamDb(pool) {
     },
 
     async listNotifications(userId) {
-      const result = await pool.query(
-        `select id, user_id, type, message, link, is_read, created_at
-         from notifications
-         where user_id = $1
-         order by created_at desc
-         limit 50`,
-        [userId]
-      );
-      return result.rows.map(mapNotification);
+      return withRequiredUserContext(userId, async (client) => {
+        const result = await client.query(
+          `select id, user_id, type, message, link, is_read, created_at
+           from notifications
+           where user_id = $1
+           order by created_at desc
+           limit 50`,
+          [userId]
+        );
+        return result.rows.map(mapNotification);
+      });
     },
 
     async markAllNotificationsRead(userId) {
-      const result = await pool.query("update notifications set is_read = true where user_id = $1 and is_read = false", [userId]);
-      return result.rowCount;
+      return withRequiredUserContext(userId, async (client) => {
+        const result = await client.query("update notifications set is_read = true where user_id = $1 and is_read = false", [userId]);
+        return result.rowCount;
+      });
     },
 
     async createNotification(notification) {

@@ -42,7 +42,11 @@ export function createTeamInvitesRouter({ express, db, mailer, appBaseUrl = proc
   });
 
   router.get("/", requireAdmin, async (request, response) => {
-    const invites = await db.listTeamInvites(request.team.id);
+    const inviteBaseUrl = resolveInviteBaseUrl(request, appBaseUrl);
+    const invites = (await db.listTeamInvites(request.team.id, request.userId)).map((invite) => ({
+      ...invite,
+      acceptUrl: invite.token ? buildInviteUrl(inviteBaseUrl, invite.token) : null
+    }));
     response.json({ invites });
   });
 

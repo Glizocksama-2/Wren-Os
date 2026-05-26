@@ -25,7 +25,7 @@ describe("team invite routes", () => {
         expiresAt: "2026-05-21T12:00:00.000Z",
         invitedByName: "Sam"
       }),
-      listTeamInvites: vi.fn().mockResolvedValue([{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending" }]),
+      listTeamInvites: vi.fn().mockResolvedValue([{ id: "invite-1", email: "brian@example.com", token: VALID_INVITE_TOKEN, role: "member", status: "pending" }]),
       revokeTeamInvite: vi.fn().mockResolvedValue(true)
     };
     const app = createInviteApp({ db, mailer });
@@ -40,7 +40,16 @@ describe("team invite routes", () => {
 
     expect(created.body.invite.acceptUrl).toBe(`https://northwatch.test/invite/${VALID_INVITE_TOKEN}`);
     expect(created.body.invite.emailDelivery).toEqual({ delivered: true, logged: false, reason: "sent" });
-    expect(pending.body.invites).toEqual([{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending" }]);
+    expect(pending.body.invites).toEqual([
+      {
+        id: "invite-1",
+        email: "brian@example.com",
+        token: VALID_INVITE_TOKEN,
+        role: "member",
+        status: "pending",
+        acceptUrl: `https://northwatch.test/invite/${VALID_INVITE_TOKEN}`
+      }
+    ]);
     expect(mailer.sendTeamInvite).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "brian@example.com",
@@ -48,6 +57,7 @@ describe("team invite routes", () => {
         teamName: "Birunda Farms"
       })
     );
+    expect(db.listTeamInvites).toHaveBeenCalledWith("team-1", "user-1");
   });
 
   it("builds a production invite link from the request origin when no app base URL is configured", async () => {

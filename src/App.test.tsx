@@ -801,6 +801,48 @@ describe("Northwatch command deck", () => {
     expect(screen.getByText("Team: North Unit")).toBeInTheDocument();
   });
 
+  it("falls back to the personal OS when the saved team workspace was deleted", async () => {
+    window.localStorage.setItem(
+      "northwatch.active-team-workspace.v1",
+      JSON.stringify({ type: "team", teamId: "deleted-team", slug: "old-war-room", name: "Old War Room", role: "owner" })
+    );
+    window.localStorage.setItem(
+      getCommandDeckStorageKey("user-1:team:deleted-team"),
+      JSON.stringify({
+        ...freshCommandDeck,
+        settings: { ...freshCommandDeck.settings, commandCenterName: "Old War Room" },
+        tasks: [
+          {
+            id: "task-stale",
+            title: "Stale deleted team task",
+            priority: "critical",
+            kanbanPriority: "urgent",
+            dueDate: null,
+            status: "pending",
+            createdAt: "2026-05-25T08:00:00.000Z",
+            updatedAt: "2026-05-25T08:00:00.000Z"
+          }
+        ]
+      })
+    );
+
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const requestUrl = new URL(String(url), "http://127.0.0.1:5173");
+      if (requestUrl.pathname === "/api/teams/mine") return jsonResponse({ teams: [] });
+      if (requestUrl.pathname === "/api/documents") return jsonResponse({ data: [] });
+      return jsonResponse({ agents: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App authUser={{ id: "user-1", email: "sam@example.com", displayName: "Sam", createdAt: "2026-05-19T12:00:00.000Z", lastLogin: null, isActive: true }} />);
+
+    await waitFor(() => expect(screen.getByText("Personal vault")).toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: /old war room war room/i })).not.toBeInTheDocument();
+    clickNav("To Do");
+    expect(screen.queryByText("Stale deleted team task")).not.toBeInTheDocument();
+    expect(screen.getByText("You're all caught up.")).toBeInTheDocument();
+  });
+
   it("shows per-user Telegram setup instructions in Settings", async () => {
     render(<App />);
 

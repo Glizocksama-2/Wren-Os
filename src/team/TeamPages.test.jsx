@@ -165,7 +165,7 @@ describe("Northwatch team UI", () => {
             members: [{ userId: "owner-1", displayName: "Owner", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }]
           })
         )
-        .mockResolvedValueOnce(jsonResponse({ invites: [{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending" }] }))
+        .mockResolvedValueOnce(jsonResponse({ invites: [{ id: "invite-1", email: "brian@example.com", role: "member", status: "pending", acceptUrl: "https://northwatch.app/invite/invite-token" }] }))
     );
 
     render(<TeamSettingsPage slug="birunda-farms" />);
@@ -173,6 +173,7 @@ describe("Northwatch team UI", () => {
     expect(await screen.findByRole("heading", { name: /team settings/i })).toBeInTheDocument();
     expect(screen.getByText("Owner")).toBeInTheDocument();
     expect(screen.getByText("brian@example.com")).toBeInTheDocument();
+    expect(screen.getByLabelText("Invite link for brian@example.com")).toHaveValue("https://northwatch.app/invite/invite-token");
     expect(screen.getByRole("button", { name: /delete team/i })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Confirm team name"), { target: { value: "Birunda Farms" } });
     expect(screen.getByRole("button", { name: /delete team/i })).not.toBeDisabled();
@@ -338,6 +339,33 @@ describe("Northwatch team UI", () => {
     expect(screen.getByText(/The invite link still works/i)).toBeInTheDocument();
   });
 
+  it("shows an invite request failure notification when the API rejects an invite", async () => {
+    const teamResponse = {
+      team: { id: "team-1", name: "Gorosei", slug: "gorosei", role: "owner", memberLimit: 10 },
+      members: [{ userId: "user-1", displayName: "Sam", role: "owner", joinedAt: "2026-05-19T12:00:00.000Z" }],
+      activity: []
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(teamResponse))
+        .mockResolvedValueOnce(jsonResponse({ invites: [] }))
+        .mockResolvedValueOnce(jsonResponse({ error: "Invite email is required." }, 400))
+    );
+
+    render(<TeamSettingsPage slug="gorosei" />);
+
+    expect(await screen.findByRole("heading", { name: /team settings/i })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "brian@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /send invite/i }));
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveClass("team-invite-notification-error");
+    expect(screen.getByText("Invite request failed")).toBeInTheDocument();
+    expect(screen.getByText("Invite email is required.")).toBeInTheDocument();
+  });
+
   it("previews invites publicly and redirects unauthenticated users to credential auth links", async () => {
     vi.stubGlobal(
       "fetch",
@@ -388,6 +416,7 @@ function jsonResponse(body, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers({ "content-type": "application/json" }),
     json: async () => body
   };
 }

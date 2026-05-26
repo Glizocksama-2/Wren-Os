@@ -31,6 +31,7 @@ describe("team member routes", () => {
     const removeOwner = await request(app).delete("/api/teams/birunda-farms/members/owner-1").set("Cookie", "northwatch_session=token").expect(409);
 
     expect(members.body.members).toHaveLength(2);
+    expect(db.listTeamMembers).toHaveBeenCalledWith("team-1", "user-1");
     expect(db.updateTeamMemberRole).toHaveBeenCalledWith({ teamId: "team-1", actorUserId: "user-1", targetUserId: "user-2", role: "admin" });
     expect(removeOwner.body.error).toBe("The team owner cannot be removed.");
   });

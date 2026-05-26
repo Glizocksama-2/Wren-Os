@@ -398,6 +398,7 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
   );
   const [activeTeamWorkspace, setActiveTeamWorkspace] = useState<TeamWorkspaceSelection>(initialWorkspaceRef.current ?? { type: "personal" });
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
   const [teamInviteNotice, setTeamInviteNotice] = useState<TeamInviteDeliveryNotice | null>(null);
@@ -687,11 +688,13 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     if (!authUserId) {
       setTeams([]);
       setTeamMembers([]);
+      setTeamsLoaded(true);
       return [];
     }
 
     const nextTeams = await listMyTeams() as TeamWorkspace[];
     setTeams(nextTeams);
+    setTeamsLoaded(true);
     return nextTeams;
   }, [authUserId]);
 
@@ -700,15 +703,23 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     if (!authUserId) {
       setTeams([]);
       setTeamMembers([]);
+      setTeamsLoaded(true);
       return;
     }
 
+    setTeamsLoaded(false);
     listMyTeams()
       .then((nextTeams: TeamWorkspace[]) => {
-        if (isMounted) setTeams(nextTeams);
+        if (isMounted) {
+          setTeams(nextTeams);
+          setTeamsLoaded(true);
+        }
       })
       .catch(() => {
-        if (isMounted) setTeams([]);
+        if (isMounted) {
+          setTeams([]);
+          setTeamsLoaded(true);
+        }
       });
 
     return () => {
@@ -772,6 +783,21 @@ function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
     setActiveTeamWorkspace(workspace);
     dispatch({ type: "deck/import", deck: nextDeck });
   }, [activeTeamWorkspace, authUserId]);
+
+  useEffect(() => {
+    if (!teamsLoaded || activeTeamWorkspace.type !== "team") return;
+    const activeTeamStillAvailable = teams.some((team) => team.id === activeTeamWorkspace.teamId);
+    if (activeTeamStillAvailable) return;
+
+    const personalWorkspace = { type: "personal" } satisfies TeamWorkspaceSelection;
+    saveActiveTeamWorkspace(personalWorkspace);
+    setActiveTeamWorkspace(personalWorkspace);
+    setWorkspaceMode({ kind: "personal" });
+    setTeamMembers([]);
+    teamDeckDocumentIdsRef.current = {};
+    dispatch({ type: "deck/import", deck: loadCommandDeck(window.localStorage, authUserId) });
+    setNotice("That team workspace is no longer available. Returned to personal vault.");
+  }, [activeTeamWorkspace, authUserId, teams, teamsLoaded]);
 
   const openTeamWorkspace = async (team: TeamWorkspace) => {
     const workspace = {

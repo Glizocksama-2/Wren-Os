@@ -96,8 +96,8 @@ describe("team routes", () => {
     await request(app).delete("/api/teams/birunda-farms").set("Cookie", "northwatch_session=token").expect(403);
     await request(app).delete("/api/teams/birunda-farms").set("Cookie", "northwatch_session=token").expect(204);
 
-    expect(db.updateTeam).toHaveBeenCalledWith("team-1", { name: "Birunda Ops", slug: "birunda-ops", memberLimit: 12 });
-    expect(db.deleteTeam).toHaveBeenCalledWith("team-1");
+    expect(db.updateTeam).toHaveBeenCalledWith("team-1", { name: "Birunda Ops", slug: "birunda-ops", memberLimit: 12 }, "user-1");
+    expect(db.deleteTeam).toHaveBeenCalledWith("team-1", "user-1");
   });
 });
 

@@ -346,9 +346,17 @@ export function TeamSettingsPage({ slug }) {
           await reload();
         }} />
         <InvitePanel team={details.team} invites={invites} notice={inviteNotice} onInvite={async (input) => {
-          const invite = await sendInvite(slug, input);
-          setInviteNotice(createInviteNotice(invite));
-          await reload();
+          try {
+            const invite = await sendInvite(slug, input);
+            setInviteNotice(createInviteNotice(invite));
+            await reload();
+          } catch (inviteError) {
+            setInviteNotice({
+              tone: "error",
+              title: "Invite request failed",
+              message: getErrorMessage(inviteError)
+            });
+          }
         }} onRevoke={async (inviteId) => {
           await revokeInvite(slug, inviteId);
           setInviteNotice(null);
@@ -449,6 +457,14 @@ export function InvitePanel({ team = {}, invites = [], loadError = "", notice = 
               <strong>{invite.email}</strong>
               <small>{invite.role} - expires {formatDate(invite.expiresAt)}</small>
             </div>
+            {invite.acceptUrl && (
+              <input
+                aria-label={`Invite link for ${invite.email}`}
+                className="invite-link-input"
+                value={invite.acceptUrl}
+                readOnly
+              />
+            )}
             {invite.acceptUrl && (
               <button type="button" aria-label={`Copy invite for ${invite.email}`} onClick={() => copyText(invite.acceptUrl)}>
                 <Copy size={15} />
@@ -749,4 +765,8 @@ function copyText(value) {
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(value);
   }
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error ?? "Request failed.");
 }
