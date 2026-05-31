@@ -21,6 +21,7 @@ export function AuthChoicePage() {
             <UserRound size={16} /> Sign up
           </a>
         </div>
+        <a className="auth-switch-link" href="/about">About Northwatch</a>
       </section>
     </main>
   );
@@ -74,7 +75,10 @@ export function LoginPage() {
           </button>
         </form>
         {message && <p className="auth-error">{message}</p>}
-        <a className="auth-switch-link" href={buildAuthPath("/register")}>Don't have an account? Register</a>
+        <div className="auth-link-row">
+          <a className="auth-switch-link" href={buildAuthPath("/register")}>Don't have an account? Register</a>
+          <a className="auth-switch-link" href="/about">About</a>
+        </div>
       </section>
     </main>
   );
@@ -139,7 +143,10 @@ export function RegisterPage() {
           </button>
         </form>
         {message && <p className="auth-error">{message}</p>}
-        <a className="auth-switch-link" href={buildAuthPath("/login")}>Already have an account? Log in</a>
+        <div className="auth-link-row">
+          <a className="auth-switch-link" href={buildAuthPath("/login")}>Already have an account? Log in</a>
+          <a className="auth-switch-link" href="/about">About</a>
+        </div>
       </section>
     </main>
   );

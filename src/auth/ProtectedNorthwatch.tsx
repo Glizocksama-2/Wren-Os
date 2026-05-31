@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import App from "../App";
 import { AuthProvider, useAuth } from "./AuthContext";
+import { AboutPage } from "./AboutPage";
 import { AuthChoicePage, LoginPage, RegisterPage } from "./AuthPages";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { InviteAcceptPage, TeamCreatePage, TeamDashboardPage, TeamSettingsPage } from "../team/TeamPages.jsx";
@@ -25,6 +26,7 @@ function AuthRouter() {
 
   const inviteToken = getInviteToken(path);
   if (inviteToken) return <InviteAcceptPage token={inviteToken} isAuthenticated={isAuthenticated} />;
+  if (path === "/about") return <AboutPage isAuthenticated={isAuthenticated} />;
   if (!isAuthenticated && path === "/register") return <RegisterPage />;
   if (!isAuthenticated && path === "/login") return <LoginPage />;
   if (!isAuthenticated) return <AuthChoicePage />;

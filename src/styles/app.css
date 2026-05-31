@@ -2504,6 +2504,250 @@ p {
   background: rgb(var(--accent-rgb) / 0.18);
 }
 
+.auth-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.about-page {
+  min-height: 100vh;
+  padding: 28px;
+  background:
+    linear-gradient(135deg, rgb(1 4 7 / 0.92), rgb(5 13 17 / 0.97)),
+    var(--bg);
+  color: var(--text);
+}
+
+.about-nav {
+  display: flex;
+  width: min(1180px, 100%);
+  margin: 0 auto 22px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.about-nav a,
+.about-actions a {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgb(var(--accent-rgb) / 0.35);
+  border-radius: var(--radius);
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 0 14px;
+}
+
+.about-nav a:last-child,
+.about-actions a:first-child {
+  background: rgb(var(--accent-rgb) / 0.14);
+}
+
+.about-hero {
+  display: grid;
+  width: min(1180px, 100%);
+  min-height: 520px;
+  margin: 0 auto;
+  align-items: end;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #05080a;
+  position: relative;
+  isolation: isolate;
+}
+
+.about-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(90deg, rgb(3 5 6 / 0.96) 0%, rgb(3 5 6 / 0.86) 42%, rgb(3 5 6 / 0.24) 100%);
+}
+
+.about-logo-board {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.about-hero-copy {
+  display: grid;
+  width: min(680px, 100%);
+  gap: 18px;
+  padding: clamp(28px, 6vw, 64px);
+}
+
+.about-hero-copy h1 {
+  margin: 0;
+  max-width: 13ch;
+  font-size: clamp(36px, 7vw, 72px);
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.about-hero-copy p,
+.about-section p,
+.about-principle-card p,
+.about-system p,
+.about-system li {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.about-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.about-section,
+.about-principles,
+.about-system {
+  width: min(1180px, 100%);
+  margin: 24px auto 0;
+}
+
+.about-section {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1.3fr);
+  gap: 24px;
+  align-items: start;
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 24px;
+}
+
+.about-section h2,
+.about-system h2,
+.about-principle-card h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.about-section h2,
+.about-system h2 {
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.about-principles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.about-principle-card,
+.about-system-panel,
+.about-trust-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgb(8 19 26 / 0.78);
+  padding: 18px;
+}
+
+.about-principle-card {
+  display: grid;
+  gap: 12px;
+}
+
+.about-principle-card > span,
+.about-trust-panel > svg {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgb(var(--accent-rgb) / 0.28);
+  border-radius: var(--radius);
+  color: var(--accent);
+  background: rgb(var(--accent-rgb) / 0.1);
+}
+
+.about-principle-card h2 {
+  font-size: 18px;
+}
+
+.about-system {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+  gap: 12px;
+}
+
+.about-system-panel,
+.about-trust-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.about-system ul {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 900px) {
+  .about-hero {
+    min-height: 600px;
+  }
+
+  .about-hero::after {
+    background: linear-gradient(180deg, rgb(3 5 6 / 0.72) 0%, rgb(3 5 6 / 0.94) 58%, rgb(3 5 6 / 0.98) 100%);
+  }
+
+  .about-logo-board {
+    object-position: 66% center;
+  }
+
+  .about-section,
+  .about-system,
+  .about-principles {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .about-page {
+    padding: 16px;
+  }
+
+  .about-nav {
+    align-items: stretch;
+  }
+
+  .about-nav a {
+    flex: 1;
+  }
+
+  .about-hero {
+    min-height: 640px;
+  }
+
+  .about-hero-copy {
+    padding: 24px;
+  }
+
+  .about-hero-copy h1 {
+    max-width: 11ch;
+  }
+
+  .about-actions a {
+    width: 100%;
+  }
+}
+
 .workspace-switcher,
 .notification-bell {
   position: relative;

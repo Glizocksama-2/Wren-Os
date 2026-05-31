@@ -21,6 +21,7 @@ import {
   Github,
   Grid2X2,
   Eye,
+  Info,
   KeyRound,
   ListTodo,
   LockKeyhole,
@@ -1193,6 +1194,9 @@ function LogoMenu({
       </button>
       <button type="button" role="menuitem" onClick={() => onOpenPanel("help")}>
         <Sparkles size={16} /> Help
+      </button>
+      <button type="button" role="menuitem" onClick={() => { window.location.href = "/about"; }}>
+        <Info size={16} /> About
       </button>
       <button type="button" role="menuitem" onClick={() => onOpenPanel("privacy")}>
         <Shield size={16} /> Privacy Policy

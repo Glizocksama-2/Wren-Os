@@ -84,7 +84,31 @@ describe("Northwatch React auth", () => {
     expect(await screen.findByRole("heading", { name: "Choose how to enter Northwatch." })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
     expect(screen.getByRole("link", { name: "Sign up" })).toHaveAttribute("href", "/register");
+    expect(screen.getByRole("link", { name: "About Northwatch" })).toHaveAttribute("href", "/about");
     expect(screen.queryByText(/magic link/i)).not.toBeInTheDocument();
+  });
+
+  it("serves a public about page before login", async () => {
+    mockFetch([{ ok: false, status: 401, json: async () => ({ error: "Authentication required." }) }]);
+    window.history.replaceState(null, "", "/about");
+
+    render(<ProtectedNorthwatch />);
+
+    expect(await screen.findByRole("heading", { name: /a command center for people/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /northwatch logo system board/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /sign in/i }).map((link) => link.getAttribute("href"))).toContain("/login");
+    expect(screen.getByRole("link", { name: /create account/i })).toHaveAttribute("href", "/register");
+  });
+
+  it("lets authenticated users return to the dashboard from the about page", async () => {
+    const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    mockFetch([{ ok: true, status: 200, json: async () => ({ user: authUser, expiresAt }) }]);
+    window.history.replaceState(null, "", "/about");
+
+    render(<ProtectedNorthwatch />);
+
+    expect(await screen.findByRole("link", { name: /back to dashboard/i })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /open dashboard/i })).toHaveAttribute("href", "/");
   });
 
   it("keeps an invite redirect when switching between sign in and sign up", async () => {
@@ -124,8 +148,9 @@ describe("Northwatch React auth", () => {
   });
 
   it("shows a session expired modal when refresh fails mid-session", async () => {
+    const expiresAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
     const fetchMock = mockFetch([
-      { ok: true, status: 200, json: async () => ({ user: authUser, expiresAt: "2026-06-01T08:00:00.000Z" }) },
+      { ok: true, status: 200, json: async () => ({ user: authUser, expiresAt }) },
       { ok: false, status: 401, json: async () => ({ error: "Authentication required." }) }
     ]);
 
