@@ -70,10 +70,17 @@ Repeat for `projects`, `documents`, `content_queue`, `activity_feed`, and `agent
 
 ## 7. Configure Invite Email
 
-Set these server environment variables on Render or the chosen Express host:
+Set these server environment variables on Render, Vercel, or the chosen Express host. Resend is the simplest Vercel path:
 
 ```bash
 NORTHWATCH_APP_URL=https://northwatch.app
+INVITE_EMAIL_FROM="Northwatch <no-reply@northwatch.app>"
+RESEND_API_KEY=server-side-resend-key
+```
+
+SMTP is also supported:
+
+```bash
 INVITE_EMAIL_FROM="Northwatch <no-reply@northwatch.app>"
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
@@ -82,7 +89,7 @@ SMTP_USER=mailer@example.com
 SMTP_PASS=replace-with-provider-password
 ```
 
-If `SMTP_HOST` is empty, the API logs the invite link instead of sending email. That is acceptable for local development only.
+If neither `RESEND_API_KEY` nor `SMTP_HOST` is set, the API logs the invite link instead of sending email. That is acceptable for local development only.
 
 ## 8. Smoke Test
 

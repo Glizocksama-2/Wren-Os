@@ -1,8 +1,11 @@
 import nodemailer from "nodemailer";
 
+const RESEND_EMAILS_URL = "https://api.resend.com/emails";
+
 export function createInviteMailer(env = process.env, logger = console) {
   const from = env.INVITE_EMAIL_FROM ?? env.SMTP_FROM ?? "Northwatch <no-reply@northwatch.app>";
   const hasSmtp = Boolean(env.SMTP_HOST);
+  const resendApiKey = env.RESEND_API_KEY;
   const transporter = hasSmtp
     ? nodemailer.createTransport({
         host: env.SMTP_HOST,
@@ -29,14 +32,53 @@ export function createInviteMailer(env = process.env, logger = console) {
       ].join("");
 
       if (!transporter) {
+        if (resendApiKey) {
+          await sendWithResend({ apiKey: resendApiKey, from, to, subject, text, html });
+          return { delivered: true, logged: false, reason: "sent", provider: "resend" };
+        }
+
         logger.info(`[northwatch] Team invite email for ${to}: ${acceptUrl}`);
         return { delivered: false, logged: true, reason: "not_configured" };
       }
 
       await transporter.sendMail({ from, to, subject, text, html });
-      return { delivered: true, logged: false, reason: "sent" };
+      return { delivered: true, logged: false, reason: "sent", provider: "smtp" };
     }
   };
+}
+
+async function sendWithResend({ apiKey, from, to, subject, text, html }) {
+  const response = await fetch(RESEND_EMAILS_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      from,
+      to,
+      subject,
+      text,
+      html
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Resend email delivery failed: ${response.status} ${await readResponseMessage(response)}`);
+  }
+}
+
+async function readResponseMessage(response) {
+  try {
+    const data = await response.json();
+    return data?.message ?? data?.error ?? response.statusText;
+  } catch {
+    try {
+      return (await response.text()) || response.statusText;
+    } catch {
+      return response.statusText;
+    }
+  }
 }
 
 function escapeHtml(value) {

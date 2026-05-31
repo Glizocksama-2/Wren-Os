@@ -116,7 +116,15 @@ server/db/northwatch_team_feature.sql
 
 Protected API data routes live under `/api/:resource` for `kanban-cards`, `projects`, `content-queue`, `documents`, `activity-feed`, `agent-configs`, and `api-tokens`. The backend ignores any `user_id` sent by the client. Personal queries scope by `req.userId`; team queries require membership and scope by `team_id`.
 
-Optional invite email delivery:
+Optional invite email delivery with Vercel/Resend:
+
+```bash
+NORTHWATCH_APP_URL=https://northwatch.app
+INVITE_EMAIL_FROM="Northwatch <no-reply@northwatch.app>"
+RESEND_API_KEY=server-side-resend-key
+```
+
+Optional invite email delivery with SMTP:
 
 ```bash
 INVITE_EMAIL_FROM="Northwatch <no-reply@northwatch.app>"
@@ -127,7 +135,7 @@ SMTP_USER=mailer@example.com
 SMTP_PASS=provider-password
 ```
 
-When `SMTP_HOST` is not set, the Express API logs invite links for development.
+When neither `RESEND_API_KEY` nor `SMTP_HOST` is set, the Express API logs invite links for development. Never prefix mail provider secrets with `VITE_`.
 
 ## Local-first Data Warning
 
