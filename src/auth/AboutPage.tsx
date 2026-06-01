@@ -35,6 +35,100 @@ const operatingLayers = [
   "Use notifications, invites, role badges, and workspace summaries to keep people aligned."
 ];
 
+const platformLayers = [
+  {
+    number: 1,
+    title: "Frontend foundations",
+    status: "Live",
+    copy: "React, Vite, responsive app shell, command modules, auth pages, team pages, and regression tests.",
+    proof: "src/App.tsx, src/auth, src/components, src/styles"
+  },
+  {
+    number: 2,
+    title: "APIs and backend logic",
+    status: "Live",
+    copy: "Express routes protect user work, teams, invites, notifications, Intel, weather, workout, Telegram, and system AI.",
+    proof: "server/app.js, server/routes"
+  },
+  {
+    number: 3,
+    title: "Database and storage",
+    status: "Live",
+    copy: "PostgreSQL stores accounts, sessions, workspace records, teams, invites, notifications, and rate-limit buckets.",
+    proof: "server/db, supabase/migrations"
+  },
+  {
+    number: 4,
+    title: "Auth and permission",
+    status: "Live",
+    copy: "Credential login, httpOnly cookie sessions, team roles, RLS context, and protected route wrappers keep data separated.",
+    proof: "server/auth, server/middleware, shared/teamPermissions.js"
+  },
+  {
+    number: 5,
+    title: "Hosting and deployment",
+    status: "Live",
+    copy: "Vercel is the canonical frontend and API host, with rewrites that keep React routes and Express routes separated.",
+    proof: "vercel.json, api/[...path].js"
+  },
+  {
+    number: 6,
+    title: "Cloud and compute",
+    status: "Needs Upgrade",
+    copy: "Serverless compute runs the API; pool limits and runbooks define how it behaves under Vercel runtime constraints.",
+    proof: "server/db/postgres.js, docs/platform-layers.md"
+  },
+  {
+    number: 7,
+    title: "CI/CD and version control",
+    status: "Needs Upgrade",
+    copy: "GitHub is the source of truth; CI now verifies tests and production builds before changes are merged.",
+    proof: ".github/workflows/ci.yml"
+  },
+  {
+    number: 8,
+    title: "Security and low level security",
+    status: "Needs Upgrade",
+    copy: "Helmet, production headers, cookie-only auth, secret hygiene, and dependency checks harden the platform.",
+    proof: "server/app.js, vercel.json, docs/platform-layers.md"
+  },
+  {
+    number: 9,
+    title: "Rate limiting",
+    status: "Live",
+    copy: "Postgres-backed API buckets limit auth, team mutations, Intel refresh, and external API-heavy routes.",
+    proof: "server/middleware/rateLimit.js"
+  },
+  {
+    number: 10,
+    title: "Caching and CDN",
+    status: "Live",
+    copy: "Static assets use immutable CDN caching; public Intel reads use s-maxage and stale-while-revalidate headers.",
+    proof: "vercel.json, server/routes/intel.js"
+  },
+  {
+    number: 11,
+    title: "Load balancing and scaling",
+    status: "Needs Upgrade",
+    copy: "Vercel handles edge routing and serverless scale; Northwatch constrains database connections and documents scaling limits.",
+    proof: "vercel.json, server/db/postgres.js"
+  },
+  {
+    number: 12,
+    title: "Error tracking and logs",
+    status: "Needs Upgrade",
+    copy: "Every API response receives a request ID, structured logs are emitted, and Sentry can be enabled through env config.",
+    proof: "server/logger.js, server/middleware/requestContext.js"
+  },
+  {
+    number: 13,
+    title: "Availability and recovery",
+    status: "Needs Upgrade",
+    copy: "Health checks, deep database checks, rollback notes, backup verification, and incident runbooks are documented.",
+    proof: "server/app.js, docs/platform-layers.md"
+  }
+];
+
 export function AboutPage({ isAuthenticated = false }: AboutPageProps) {
   return (
     <main className="about-page">
@@ -80,6 +174,29 @@ export function AboutPage({ isAuthenticated = false }: AboutPageProps) {
             <p>{principle.copy}</p>
           </article>
         ))}
+      </section>
+
+      <section className="about-platform" aria-labelledby="about-platform-title">
+        <div className="about-platform-head">
+          <span className="micro-label">Platform foundation</span>
+          <h2 id="about-platform-title">Northwatch platform layers</h2>
+          <p>
+            The product is organized as a full operating stack, from the React workspace down to recovery, logging, scaling, caching, and security controls.
+          </p>
+        </div>
+        <div className="about-layer-grid">
+          {platformLayers.map((layer) => (
+            <article className="about-layer-card" key={layer.number}>
+              <div className="about-layer-meta">
+                <span>Layer {layer.number}</span>
+                <strong className={`about-layer-status about-layer-status-${layer.status.toLowerCase().replaceAll(" ", "-")}`}>{layer.status}</strong>
+              </div>
+              <h3>{layer.title}</h3>
+              <p>{layer.copy}</p>
+              <small>{layer.proof}</small>
+            </article>
+          ))}
+        </div>
       </section>
 
       <section className="about-system">

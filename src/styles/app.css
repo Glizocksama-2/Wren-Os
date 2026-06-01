@@ -2616,6 +2616,7 @@ p {
 
 .about-section,
 .about-principles,
+.about-platform,
 .about-system {
   width: min(1180px, 100%);
   margin: 24px auto 0;
@@ -2679,6 +2680,110 @@ p {
   font-size: 18px;
 }
 
+.about-platform {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+}
+
+.about-platform-head {
+  display: grid;
+  max-width: 760px;
+  gap: 10px;
+}
+
+.about-platform-head h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.about-platform-head p,
+.about-layer-card p,
+.about-layer-card small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.about-layer-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.about-layer-card {
+  display: grid;
+  min-height: 210px;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid rgb(79 231 255 / 0.15);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(145deg, rgb(var(--accent-rgb) / 0.08), transparent 54%),
+    rgb(4 12 17 / 0.82);
+  padding: 16px;
+}
+
+.about-layer-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.about-layer-meta span,
+.about-layer-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.about-layer-status {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid rgb(255 255 255 / 0.13);
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+.about-layer-status-live {
+  border-color: rgb(38 201 122 / 0.32);
+  background: rgb(38 201 122 / 0.12);
+  color: #7ff1b2;
+}
+
+.about-layer-status-needs-upgrade {
+  border-color: rgb(245 158 11 / 0.35);
+  background: rgb(245 158 11 / 0.13);
+  color: #fbd38d;
+}
+
+.about-layer-status-planned {
+  border-color: rgb(129 140 248 / 0.35);
+  background: rgb(129 140 248 / 0.13);
+  color: #c4c8ff;
+}
+
+.about-layer-card h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.about-layer-card small {
+  align-self: end;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+  padding-top: 10px;
+  font-size: 13px;
+}
+
 .about-system {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
@@ -2713,8 +2818,13 @@ p {
 
   .about-section,
   .about-system,
+  .about-layer-grid,
   .about-principles {
     grid-template-columns: 1fr;
+  }
+
+  .about-layer-card {
+    min-height: 0;
   }
 }
 

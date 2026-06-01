@@ -4,14 +4,21 @@ const { Pool } = pg;
 const TELEGRAM_CONFIG_TITLE = "telegram_bot";
 
 export function createPool(connectionString = process.env.DATABASE_URL) {
+  return new Pool(createPoolConfig(connectionString));
+}
+
+export function createPoolConfig(connectionString = process.env.DATABASE_URL, env = process.env) {
   if (!connectionString) {
     throw new Error("DATABASE_URL is required.");
   }
 
-  return new Pool({
+  return {
     connectionString,
-    ssl: process.env.POSTGRES_SSL === "true" ? { rejectUnauthorized: false } : undefined
-  });
+    ssl: env.POSTGRES_SSL === "true" ? { rejectUnauthorized: false } : undefined,
+    max: readPositiveInteger(env.PG_POOL_MAX, 5),
+    idleTimeoutMillis: readPositiveInteger(env.PG_IDLE_TIMEOUT_MS, 10_000),
+    connectionTimeoutMillis: readPositiveInteger(env.PG_CONNECTION_TIMEOUT_MS, 5_000)
+  };
 }
 
 export function createPostgresAuthDb(pool) {
@@ -704,4 +711,9 @@ function httpError(status, message) {
 
 function toIsoString(value) {
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function readPositiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

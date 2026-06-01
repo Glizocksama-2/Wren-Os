@@ -98,6 +98,11 @@ describe("Northwatch React auth", () => {
     expect(screen.getByRole("img", { name: /northwatch logo system board/i })).toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /sign in/i }).map((link) => link.getAttribute("href"))).toContain("/login");
     expect(screen.getByRole("link", { name: /create account/i })).toHaveAttribute("href", "/register");
+    expect(screen.getByRole("heading", { name: "Northwatch platform layers" })).toBeInTheDocument();
+    expect(screen.getAllByText(/^Layer \d+/)).toHaveLength(13);
+    expect(screen.getByText("Frontend foundations")).toBeInTheDocument();
+    expect(screen.getByText("Availability and recovery")).toBeInTheDocument();
+    expect(screen.getByText("Rate limiting")).toBeInTheDocument();
   });
 
   it("lets authenticated users return to the dashboard from the about page", async () => {

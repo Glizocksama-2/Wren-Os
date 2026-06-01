@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createPostgresTeamDb } from "./postgres.js";
+import { createPoolConfig, createPostgresTeamDb } from "./postgres.js";
 
 function createTeamRow() {
   return {
@@ -52,6 +52,23 @@ function createMockPool({ createdByReferencesExternalUser = true } = {}) {
 }
 
 describe("createPostgresTeamDb", () => {
+  it("builds a serverless-safe pool config from environment overrides", () => {
+    const config = createPoolConfig("postgres://northwatch:test@localhost:5432/northwatch", {
+      POSTGRES_SSL: "true",
+      PG_POOL_MAX: "3",
+      PG_IDLE_TIMEOUT_MS: "7000",
+      PG_CONNECTION_TIMEOUT_MS: "2500"
+    });
+
+    expect(config).toEqual({
+      connectionString: "postgres://northwatch:test@localhost:5432/northwatch",
+      ssl: { rejectUnauthorized: false },
+      max: 3,
+      idleTimeoutMillis: 7000,
+      connectionTimeoutMillis: 2500
+    });
+  });
+
   it("sets both Northwatch and Supabase RLS user context before creating a team", async () => {
     const { pool, queries } = createMockPool();
     const db = createPostgresTeamDb(pool);

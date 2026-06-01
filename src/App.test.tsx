@@ -476,9 +476,12 @@ describe("Northwatch command deck", () => {
     expect(within(logoMenu).getByRole("menuitem", { name: "Account" })).toBeInTheDocument();
     expect(within(logoMenu).getByRole("menuitem", { name: "Customize" })).toBeInTheDocument();
     expect(within(logoMenu).getByRole("menuitem", { name: "Settings" })).toBeInTheDocument();
+    expect(within(logoMenu).getByRole("menuitem", { name: "About" })).toBeInTheDocument();
     expect(within(logoMenu).getByRole("menuitem", { name: "Help" })).toBeInTheDocument();
     expect(within(logoMenu).getByRole("menuitem", { name: "Privacy Policy" })).toBeInTheDocument();
     expect(within(logoMenu).getByRole("menuitem", { name: "Terms and Conditions" })).toBeInTheDocument();
+    const menuLabels = within(logoMenu).getAllByRole("menuitem").map((item) => item.textContent?.trim());
+    expect(menuLabels.indexOf("About")).toBe(menuLabels.indexOf("Settings") + 1);
 
     fireEvent.click(within(logoMenu).getByRole("menuitem", { name: "Customize" }));
     expect(screen.getByRole("heading", { name: "Customize Options" })).toBeInTheDocument();

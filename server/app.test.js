@@ -1,5 +1,5 @@
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 
 describe("northwatch app shell", () => {
@@ -19,6 +19,7 @@ describe("northwatch app shell", () => {
     const response = await request(app).get("/api/teams/gorosei").expect(404).expect("content-type", /json/);
 
     expect(response.body.error).toContain("Northwatch API route not found");
+    expect(response.body.requestId).toMatch(/^req-/);
     expect(response.text).not.toContain("<!DOCTYPE html>");
   });
 
@@ -33,7 +34,73 @@ describe("northwatch app shell", () => {
       .expect("content-type", /json/);
 
     expect(response.body.error).toContain("Malformed JSON");
+    expect(response.body.requestId).toMatch(/^req-/);
     expect(response.text).not.toContain("<!DOCTYPE html>");
+  });
+
+  it("adds a request id to responses and structured completion logs", async () => {
+    const logs = [];
+    const app = createApp({
+      skipDatabase: true,
+      authService: createAuthService(),
+      logger: { info: (entry) => logs.push(entry), warn: vi.fn(), error: vi.fn() },
+      requestIdFactory: () => "req-test-1"
+    });
+
+    const response = await request(app).get("/health").expect(200);
+
+    expect(response.headers["x-request-id"]).toBe("req-test-1");
+    expect(logs).toContainEqual(expect.objectContaining({
+      event: "http_request",
+      requestId: "req-test-1",
+      method: "GET",
+      path: "/health",
+      statusCode: 200
+    }));
+  });
+
+  it("checks database reachability on deep health checks", async () => {
+    const pool = { query: vi.fn(async () => ({ rows: [{ ok: 1 }] })) };
+    const app = createApp({
+      pool,
+      authDb: null,
+      userDataDb: null,
+      teamDb: null,
+      authService: createAuthService()
+    });
+
+    const response = await request(app).get("/health?deep=1").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith("select 1 as ok");
+    expect(response.body.checks.database.status).toBe("ok");
+  });
+
+  it("rate limits configured API groups with retry metadata", async () => {
+    const rateLimitStore = {
+      hit: vi.fn(async () => ({
+        allowed: false,
+        limit: 2,
+        remaining: 0,
+        retryAfterSeconds: 45,
+        resetAt: "2026-06-01T09:01:00.000Z"
+      }))
+    };
+    const app = createApp({ skipDatabase: true, authService: createAuthService(), rateLimitStore });
+
+    const response = await request(app)
+      .post("/auth/login")
+      .send({ email: "operator@northwatch.dev", password: "Watchtower1" })
+      .expect(429)
+      .expect("Retry-After", "45");
+
+    expect(response.body.error).toBe("Too many requests. Please retry shortly.");
+    expect(response.body.requestId).toMatch(/^req-/);
+    expect(response.body.retryAfterSeconds).toBe(45);
+    expect(rateLimitStore.hit).toHaveBeenCalledWith(expect.objectContaining({
+      routeGroup: "auth",
+      limit: expect.any(Number),
+      windowMs: expect.any(Number)
+    }));
   });
 });
 

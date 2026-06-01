@@ -3,9 +3,13 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { createAuthService } from "./auth/authService.js";
+import { createErrorTracker } from "./errorTracking.js";
 import { createInviteMailer } from "./email/inviteMailer.js";
 import { createCopilotService } from "./services/copilot.service.js";
 import { authenticate } from "./middleware/authenticate.js";
+import { createLogger } from "./logger.js";
+import { createRateLimitMiddleware, createPostgresRateLimitStore } from "./middleware/rateLimit.js";
+import { createRequestContextMiddleware } from "./middleware/requestContext.js";
 import { createPool, createPostgresAuthDb, createPostgresTeamDb, createPostgresUserDataDb } from "./db/postgres.js";
 import { createAuthRouter } from "./routes/auth.js";
 import { createIntelRouter } from "./routes/intel.js";
@@ -28,25 +32,49 @@ export function createApp(options = {}) {
   const authService = options.authService ?? createAuthService({ db: authDb, jwtSecret: options.jwtSecret });
   const mailer = options.mailer ?? createInviteMailer();
   const systemAiService = options.systemAiService ?? createCopilotService();
+  const logger = options.logger ?? createLogger();
+  const errorTracker = options.errorTracker ?? createErrorTracker({ logger });
+  const rateLimitStore = options.rateLimitStore ?? (pool ? createPostgresRateLimitStore(pool) : null);
   const configuredAppBaseUrl = options.appBaseUrl ?? process.env.NORTHWATCH_APP_URL ?? "";
   const appBaseUrl = configuredAppBaseUrl || "http://127.0.0.1:5173";
 
   app.set("trust proxy", 1);
-  app.use(helmet());
+  app.use(createRequestContextMiddleware({ logger, requestIdFactory: options.requestIdFactory }));
+  app.use(helmet(createHelmetOptions()));
   app.use(cors({ origin: process.env.CORS_ORIGIN?.split(",").map((item) => item.trim()).filter(Boolean) ?? true, credentials: true }));
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
+  app.use(createRateLimitMiddleware({ store: rateLimitStore, rules: options.rateLimitRules, logger }));
 
   app.get("/", (_request, response) => {
     response.type("html").send(renderRootPage(appBaseUrl));
   });
-  app.get("/health", (_request, response) => {
+  app.get("/health", async (request, response) => {
     const checkedAt = new Date().toISOString();
     const isCopilotConfigured = typeof systemAiService.isConfigured === "function" ? systemAiService.isConfigured() : false;
-    response.json({
-      ok: true,
+    const checks = {
+      api: { status: "ok" },
+      database: { status: pool ? "skipped" : "not_configured" }
+    };
+
+    if (request.query.deep === "1" && pool) {
+      try {
+        await pool.query("select 1 as ok");
+        checks.database = { status: "ok" };
+      } catch (error) {
+        checks.database = {
+          status: "error",
+          detail: error instanceof Error ? error.message : "Database health check failed."
+        };
+      }
+    }
+
+    const ok = checks.database.status !== "error";
+    response.status(ok ? 200 : 503).json({
+      ok,
       service: "northwatch-auth",
       checkedAt,
+      checks,
       agents: [
         { id: "sentinel", status: "alive", checkedAt, detail: "Northwatch API is running." },
         {
@@ -81,17 +109,17 @@ export function createApp(options = {}) {
 
   app.use((request, response, next) => {
     if (request.path.startsWith("/api") || request.path.startsWith("/auth")) {
-      response.status(404).json({ error: `Northwatch API route not found: ${request.path}` });
+      response.status(404).json({ error: `Northwatch API route not found: ${request.path}`, requestId: request.requestId });
       return;
     }
     next();
   });
-  app.use(apiErrorHandler);
+  app.use((error, request, response, next) => apiErrorHandler(error, request, response, next, { errorTracker }));
 
   return app;
 }
 
-export function apiErrorHandler(error, request, response, next) {
+export function apiErrorHandler(error, request, response, next, { errorTracker } = {}) {
   if (response.headersSent) {
     next(error);
     return;
@@ -105,9 +133,33 @@ export function apiErrorHandler(error, request, response, next) {
 
   const isJsonParseError = error instanceof SyntaxError && "body" in error;
   const status = error.status ?? error.statusCode ?? (isJsonParseError ? 400 : 500);
+  const message = getPublicErrorMessage(error, status, isJsonParseError);
+  if (status >= 500 && !isJsonParseError) {
+    errorTracker?.captureException?.(error, {
+      requestId: request.requestId,
+      method: request.method,
+      path: request.path
+    });
+  }
   response.status(status).json({
-    error: isJsonParseError ? "Malformed JSON request body." : error.message ?? "Internal server error."
+    error: message,
+    requestId: request.requestId
   });
+}
+
+function createHelmetOptions() {
+  return {
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    hsts: process.env.NODE_ENV === "production" ? { maxAge: 15552000, includeSubDomains: true, preload: false } : false,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" }
+  };
+}
+
+function getPublicErrorMessage(error, status, isJsonParseError) {
+  if (isJsonParseError) return "Malformed JSON request body.";
+  if (status >= 500 && process.env.NODE_ENV === "production") return "Internal server error.";
+  return error.message ?? "Internal server error.";
 }
 
 function renderRootPage(appBaseUrl) {

@@ -15,6 +15,8 @@ describe("intel routes", () => {
 
     expect(response.body.crypto.items[0].symbol).toBe("BTC");
     expect(response.body.forex.base).toBe("KES");
+    expect(response.headers["cache-control"]).toContain("s-maxage=");
+    expect(response.headers["cache-control"]).toContain("stale-while-revalidate=");
     expect(service.fetchAll).toHaveBeenCalledOnce();
   });
 
@@ -28,6 +30,7 @@ describe("intel routes", () => {
     const response = await request(app).post("/api/intel/refresh/crypto").expect(200);
 
     expect(response.body.items[0].symbol).toBe("BTC");
+    expect(response.headers["cache-control"]).toBe("no-store");
     expect(service.fetchCrypto).toHaveBeenCalledWith({ force: true });
     expect(authService.verifyRequest).toHaveBeenCalledOnce();
   });
