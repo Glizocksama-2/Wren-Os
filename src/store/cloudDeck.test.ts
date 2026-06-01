@@ -45,7 +45,7 @@ describe("Supabase command deck persistence", () => {
     expect(from).toHaveBeenCalledWith("command_decks");
     expect(eq).toHaveBeenCalledWith("user_id", "user-1");
     expect(deck?.tasks[0].title).toBe("Cloud task");
-    expect(deck?.projects.some((project) => project.source === "github")).toBe(true);
+    expect(deck?.projects).toEqual([]);
   });
 
   it("upserts the deck against the authenticated user id", async () => {
@@ -63,7 +63,7 @@ describe("Supabase command deck persistence", () => {
     ];
     expect(payload.user_id).toBe("user-1");
     expect(payload.deck.version).toBe(freshCommandDeck.version);
-    expect(payload.deck.projects.some((project: { source: string }) => project.source === "github")).toBe(true);
+    expect(payload.deck.projects).toEqual([]);
     expect(options).toEqual({ onConflict: "user_id" });
     expect(savedAt).toBe("2026-05-12T10:00:00.000Z");
   });

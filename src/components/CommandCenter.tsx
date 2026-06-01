@@ -39,6 +39,22 @@ const moduleOptions: Array<{ key: ModuleKey; label: string }> = [
   { key: "api", label: "API" }
 ];
 
+const MODULES_STORAGE_KEY = "northwatch.command-modules.v1";
+const DEFAULT_VISIBLE_MODULES: Record<ModuleKey, boolean> = {
+  focus: true,
+  health: true,
+  progress: true,
+  agents: true,
+  automations: true,
+  risks: true,
+  content: true,
+  knowledge: true,
+  codex: true,
+  api: true
+};
+const FLAT_SPARKLINE_DATA = [5, 5, 5, 5, 5, 5, 5, 5, 5];
+const DAY_MS = 86_400_000;
+
 export function CommandCenter({
   state,
   dispatch,
@@ -57,26 +73,30 @@ export function CommandCenter({
   onDecideAction: (id: string, decision: "approved" | "denied") => void;
 }) {
   const [customizeOpen, setCustomizeOpen] = useState(false);
-  const [visibleModules, setVisibleModules] = useState<Record<ModuleKey, boolean>>({
-    focus: true,
-    health: true,
-    progress: true,
-    agents: true,
-    automations: true,
-    risks: true,
-    content: true,
-    knowledge: true,
-    codex: true,
-    api: true
-  });
+  const [visibleModules, setVisibleModules] = useState<Record<ModuleKey, boolean>>(() => loadVisibleModules());
   const metrics = getCommandCenterMetrics(state);
   const summaries = getProjectSummaries(state);
   const stageCounts = getStageCounts(state);
   const dailyPlan = getDailyPlan(state);
   const focusTasks = dailyPlan.topOutcomes;
-  const risks = [...dailyPlan.overdueTasks, ...dailyPlan.blockedTasks].slice(0, 5);
+  const risksById = new Map(dailyPlan.overdueTasks.map((task) => [task.id, task]));
+  dailyPlan.blockedTasks.forEach((task) => risksById.set(task.id, task));
+  const risks = [...risksById.values()].slice(0, 5);
+  const nextScheduledContent = Array.isArray(state.contentItems)
+    ? [...state.contentItems]
+        .filter((item) => item.stage === "scheduled" && item.scheduledFor)
+        .sort((left, right) => new Date(left.scheduledFor ?? 0).getTime() - new Date(right.scheduledFor ?? 0).getTime())[0] ?? null
+    : null;
+  const contentFooterText = nextScheduledContent
+    ? `Next: ${nextScheduledContent.title} — ${formatShortDate(nextScheduledContent.scheduledFor)}`
+    : "No content scheduled. Add to pipeline.";
+  const recentDocuments = [...state.documents].sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()).slice(0, 3);
   const toggleModule = (key: ModuleKey) => {
-    setVisibleModules((modules) => ({ ...modules, [key]: !modules[key] }));
+    setVisibleModules((modules) => {
+      const next = { ...modules, [key]: !modules[key] };
+      saveVisibleModules(next);
+      return next;
+    });
   };
 
   return (
@@ -91,7 +111,11 @@ export function CommandCenter({
             className="utility-button"
             type="button"
             onClick={() => {
-              setVisibleModules((modules) => ({ ...modules, focus: true, progress: true }));
+              setVisibleModules((modules) => {
+                const next = { ...modules, focus: true, progress: true };
+                saveVisibleModules(next);
+                return next;
+              });
               onNotice("Today's focus is pinned.");
             }}
           >
@@ -174,7 +198,7 @@ export function CommandCenter({
                     <strong>{project.name}</strong>
                   </div>
                   <Badge tone={project.health}>{project.health.replace("_", " ")}</Badge>
-                  <Sparkline color={project.accent} />
+                  <Sparkline color={project.accent} data={getProjectCompletionHistory(state, project.id)} />
                   <div className="health-metrics">
                     <strong>{project.progress}%</strong>
                     <span>Progress</span>
@@ -258,6 +282,7 @@ export function CommandCenter({
                 </div>
               ))}
             </div>
+            {state.agentActions.length === 0 && <div className="empty-state">No pending agent actions. All clear.</div>}
           </Panel>
         )}
 
@@ -275,6 +300,7 @@ export function CommandCenter({
                 </div>
               ))}
             </div>
+            {state.automations.length === 0 && <div className="empty-state">No automation runs logged yet.</div>}
           </Panel>
         )}
 
@@ -308,14 +334,14 @@ export function CommandCenter({
                 </div>
               ))}
             </div>
-            <div className="panel-footline">Next up: Northwatch launch snippets scheduled this week</div>
+            <div className="panel-footline">{contentFooterText}</div>
           </Panel>
         )}
 
         {visibleModules.knowledge && (
           <Panel title="Knowledge Snippets" className="knowledge-panel">
             <div className="doc-snippets">
-              {state.documents.slice(0, 3).map((doc) => (
+              {recentDocuments.map((doc) => (
                 <div className="doc-snippet" key={doc.id}>
                   <strong>{doc.title}</strong>
                   <Badge tone="neutral">{doc.kind}</Badge>
@@ -347,6 +373,17 @@ export function CommandCenter({
               <Badge tone={state.codexBridge.status === "connected" ? "green" : "coral"}>
                 {state.codexBridge.lastHandoff ? "handoff ready" : "ready"}
               </Badge>
+              <button
+                className="link-button"
+                type="button"
+                aria-label="Reconnect Codex bridge"
+                onClick={() => {
+                  dispatch({ type: "codex/connect" });
+                  onNotice("Codex bridge reconnecting.");
+                }}
+              >
+                Reconnect
+              </button>
             </div>
           </Panel>
         )}
@@ -368,4 +405,48 @@ export function CommandCenter({
       </div>
     </div>
   );
+}
+
+function loadVisibleModules(): Record<ModuleKey, boolean> {
+  try {
+    const stored = window.localStorage.getItem(MODULES_STORAGE_KEY);
+    if (!stored) return DEFAULT_VISIBLE_MODULES;
+    const parsed = JSON.parse(stored) as Partial<Record<ModuleKey, boolean>>;
+    return { ...DEFAULT_VISIBLE_MODULES, ...parsed };
+  } catch {
+    return DEFAULT_VISIBLE_MODULES;
+  }
+}
+
+function saveVisibleModules(modules: Record<ModuleKey, boolean>) {
+  window.localStorage.setItem(MODULES_STORAGE_KEY, JSON.stringify(modules));
+}
+
+function getProjectCompletionHistory(state: WorkspaceState, projectId: string): number[] {
+  const project = state.projects.find((item) => item.id === projectId);
+  const completedTasks = state.tasks.filter((task) => task.projectId === projectId && task.status === "done");
+  if (!project || completedTasks.length === 0) return FLAT_SPARKLINE_DATA;
+
+  const now = new Date();
+  const projectAgeDays = Math.max(0, Math.ceil((startOfDay(now).getTime() - startOfDay(new Date(project.createdAt)).getTime()) / DAY_MS));
+  const bucketSizeDays = projectAgeDays > 63 ? 7 : 1;
+  const bucketMs = bucketSizeDays * DAY_MS;
+  const latestBucketStart = startOfDay(now).getTime();
+  const firstBucketStart = latestBucketStart - bucketMs * 8;
+  const buckets = Array.from({ length: 9 }, (_value, index) => {
+    const bucketStart = firstBucketStart + bucketMs * index;
+    const bucketEnd = bucketStart + bucketMs;
+    return completedTasks.filter((task) => {
+      const updatedAt = new Date(task.updatedAt).getTime();
+      return updatedAt >= bucketStart && updatedAt < bucketEnd;
+    }).length;
+  });
+
+  return buckets.some((value) => value > 0) ? buckets : FLAT_SPARKLINE_DATA;
+}
+
+function startOfDay(date: Date): Date {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
 }

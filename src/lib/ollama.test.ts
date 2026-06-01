@@ -32,6 +32,7 @@ describe("Ollama connector", () => {
             id: "task-1",
             title: "Ship the Ollama agent",
             priority: "critical",
+            kanbanPriority: "urgent",
             dueDate: null,
             status: "todo",
             createdAt: "2026-05-14T08:00:00.000Z",

@@ -6,13 +6,14 @@ const TEAM_MEMBERSHIPS_TABLE = "team_memberships";
 const TEAM_DECK_TABLE = "team_command_decks";
 const TEAM_INVITES_TABLE = "team_invites";
 
-export type TeamRole = "owner" | "member";
+export type TeamRole = "owner" | "admin" | "member" | "viewer";
 
 export type TeamWorkspace = {
   id: string;
   name: string;
+  slug?: string;
   role: TeamRole;
-  createdAt: string;
+  createdAt?: string;
 };
 
 export type TeamInvite = {

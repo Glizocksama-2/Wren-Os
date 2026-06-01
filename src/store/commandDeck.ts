@@ -1,4 +1,4 @@
-import { githubProjectSeed, githubScanSummary } from "../data/githubProjects";
+import { githubScanSummary } from "../data/githubProjects";
 
 export type DeckView =
   | "dashboard"
@@ -25,13 +25,15 @@ export type IntelKind = "stock" | "crypto" | "fund" | "company" | "trend" | "new
 export type IntelSignal = "watching" | "researching" | "high-priority" | "on-hold";
 export type RoutineCadence = "daily" | "weekly";
 export type RoutineDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+export type KanbanPriority = "urgent" | "normal" | "later";
 
 export interface CommandTask {
   id: string;
   title: string;
   priority: Priority;
+  kanbanPriority: KanbanPriority;
   dueDate: string | null;
-  status: "todo" | "done";
+  status: "todo" | "pending" | "in_progress" | "done";
   createdAt: string;
   updatedAt: string;
 }
@@ -114,6 +116,21 @@ export interface JournalEntry {
   date: string;
   mood: string;
   body: string;
+  weather: JournalWeatherSnapshot | null;
+}
+
+export interface JournalWeatherSnapshot {
+  provider: string;
+  location: string;
+  description: string;
+  temperatureC: number | null;
+  feelsLikeC: number | null;
+  humidity: number | null;
+  windKph: number | null;
+  latitude: number;
+  longitude: number;
+  forecastAt: string;
+  capturedAt: string;
 }
 
 export interface FinanceEntry {
@@ -131,6 +148,16 @@ export interface IntelNote {
   createdAt: string;
 }
 
+export interface AutonomousIntelFinding {
+  title: string;
+  symbol: string;
+  kind: IntelKind;
+  signal: IntelSignal;
+  thesis: string;
+  sourceUrl: string;
+  note: string;
+}
+
 export interface IntelItem {
   id: string;
   title: string;
@@ -142,6 +169,13 @@ export interface IntelItem {
   notes: IntelNote[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface IntelAutopilotState {
+  enabled: boolean;
+  lastRunAt: string | null;
+  lastSummary: string;
+  lastFindingCount: number;
 }
 
 export interface DeckSettings {
@@ -185,20 +219,22 @@ export interface CommandDeckState {
   journal: JournalEntry[];
   finances: FinanceEntry[];
   intel: IntelItem[];
+  intelAutopilot: IntelAutopilotState;
   settings: DeckSettings;
 }
 
 export type CommandDeckAction =
   | { type: "task/add"; title: string; priority: Priority; dueDate: string | null }
   | { type: "task/update"; id: string; title: string; priority: Priority; dueDate: string | null }
+  | { type: "task/kanban-priority"; id: string; priority: KanbanPriority }
   | { type: "task/toggle"; id: string }
   | { type: "task/delete"; id: string }
   | { type: "routine/add"; title: string; cadence: RoutineCadence; days: RoutineDay[] }
   | { type: "routine/update"; id: string; title: string; cadence: RoutineCadence; days: RoutineDay[] }
   | { type: "routine/toggle"; id: string; date?: string }
   | { type: "routine/delete"; id: string }
-  | { type: "project/add"; name: string; objective: string; nextAction: string; dueDate: string | null }
-  | { type: "project/update"; id: string; name: string; objective: string; nextAction: string; dueDate: string | null; progress: number }
+  | { type: "project/add"; name: string; objective: string; nextAction: string; dueDate: string | null; repositoryUrl?: string; defaultBranch?: string }
+  | { type: "project/update"; id: string; name: string; objective: string; nextAction: string; dueDate: string | null; progress: number; repositoryUrl?: string; defaultBranch?: string }
   | { type: "project/complete"; id: string }
   | { type: "project/delete"; id: string }
   | { type: "github/import"; projects: GitHubProjectSeed[]; owner: string; scannedAt: string }
@@ -213,8 +249,8 @@ export type CommandDeckAction =
   | { type: "book/update"; id: string; title: string; author: string; currentChapter: number; totalChapters: number; currentPage: number; totalPages: number }
   | { type: "book/progress"; id: string; currentChapter: number; totalChapters: number; currentPage: number; totalPages: number }
   | { type: "book/delete"; id: string }
-  | { type: "journal/add"; mood: string; body: string }
-  | { type: "journal/update"; id: string; mood: string; body: string }
+  | { type: "journal/add"; mood: string; body: string; weather?: JournalWeatherSnapshot | null }
+  | { type: "journal/update"; id: string; mood: string; body: string; weather?: JournalWeatherSnapshot | null }
   | { type: "journal/delete"; id: string }
   | { type: "finance/add"; label: string; financeType: FinanceType; amount: number; date: string }
   | { type: "finance/update"; id: string; label: string; financeType: FinanceType; amount: number; date: string }
@@ -224,13 +260,17 @@ export type CommandDeckAction =
   | { type: "intel/update"; id: string; title: string; symbol: string; kind: IntelKind; signal: IntelSignal; thesis: string; sourceUrl: string }
   | { type: "intel/note"; id: string; body: string }
   | { type: "intel/delete"; id: string }
+  | { type: "intel/autopilot/toggle"; enabled: boolean }
+  | { type: "intel/autoscan"; findings: AutonomousIntelFinding[]; summary: string; scannedAt: string }
   | { type: "settings/update"; payload: Partial<DeckSettings> }
-  | { type: "deck/import"; deck: Partial<CommandDeckState> }
+  | { type: "deck/import"; deck: Partial<CommandDeckState>; preserveLegacyGitHubProjects?: boolean }
+  | { type: "deck/merge-import"; deck: Partial<CommandDeckState>; preserveLegacyGitHubProjects?: boolean }
   | { type: "deck/reset" };
 
-export const COMMAND_DECK_STORAGE_KEY = "wren-os.command-deck.v1";
+export const COMMAND_DECK_STORAGE_KEY = "northwatch_v1";
+const LEGACY_COMMAND_DECK_KEY = "wren-os.command-deck.v1";
 const LEGACY_WORKSPACE_KEY = "wren-os.workspace.v1";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const nowIso = () => new Date().toISOString();
 const todayInput = () => new Date().toISOString().slice(0, 10);
@@ -241,6 +281,10 @@ const logoStyles: LogoStyle[] = ["sentinel", "monolith", "radar", "spire"];
 const accents: Accent[] = ["amber", "cyan", "green", "red", "pink"];
 const backgroundModes: BackgroundMode[] = ["black", "white"];
 const routineDays: RoutineDay[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+interface NormalizeCommandDeckOptions {
+  preserveLegacyGitHubProjects?: boolean;
+}
 
 export const freshCommandDeck: CommandDeckState = {
   version: SCHEMA_VERSION,
@@ -256,6 +300,12 @@ export const freshCommandDeck: CommandDeckState = {
   journal: [],
   finances: [],
   intel: [],
+  intelAutopilot: {
+    enabled: true,
+    lastRunAt: null,
+    lastSummary: "Autonomous scan is armed.",
+    lastFindingCount: 0
+  },
   settings: {
     callsign: "Operator",
     avatarUrl: "",
@@ -292,10 +342,11 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
             id: makeId("task"),
             title: action.title,
             priority: action.priority,
-            dueDate: action.dueDate,
-            status: "todo",
-            createdAt: timestamp,
-            updatedAt: timestamp
+                kanbanPriority: priorityToKanbanPriority(action.priority),
+                dueDate: action.dueDate,
+                status: "pending",
+                createdAt: timestamp,
+                updatedAt: timestamp
           },
           ...state.tasks
         ]
@@ -305,7 +356,7 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
       return touch({
         ...state,
         tasks: state.tasks.map((task) =>
-          task.id === action.id ? { ...task, status: task.status === "done" ? "todo" : "done", updatedAt: timestamp } : task
+          task.id === action.id ? { ...task, status: task.status === "done" ? "pending" : "done", updatedAt: timestamp } : task
         )
       }, timestamp);
 
@@ -314,7 +365,24 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
         ...state,
         tasks: state.tasks.map((task) =>
           task.id === action.id
-            ? { ...task, title: action.title, priority: action.priority, dueDate: action.dueDate, updatedAt: timestamp }
+            ? {
+                ...task,
+                title: action.title,
+                priority: action.priority,
+                kanbanPriority: task.kanbanPriority ?? priorityToKanbanPriority(action.priority),
+                dueDate: action.dueDate,
+                updatedAt: timestamp
+              }
+            : task
+        )
+      }, timestamp);
+
+    case "task/kanban-priority":
+      return touch({
+        ...state,
+        tasks: state.tasks.map((task) =>
+          task.id === action.id
+            ? { ...task, kanbanPriority: action.priority, priority: kanbanPriorityToPriority(action.priority), updatedAt: timestamp }
             : task
         )
       }, timestamp);
@@ -383,23 +451,24 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "routine/delete":
       return touch({ ...state, routines: state.routines.filter((routine) => routine.id !== action.id) }, timestamp);
 
-    case "project/add":
+    case "project/add": {
+      const repoLink = normalizeGitHubRepositoryLink(action.repositoryUrl, action.defaultBranch);
       return touch({
         ...state,
         projects: [
           {
             id: makeId("project"),
-            name: action.name,
+            name: action.name || repoLink?.name || "Untitled project",
             objective: action.objective,
             nextAction: action.nextAction,
             status: "pending",
             dueDate: action.dueDate,
             progress: 0,
-            source: "manual",
-            repositoryUrl: null,
+            source: repoLink ? "github" : "manual",
+            repositoryUrl: repoLink?.url ?? null,
             language: null,
             visibility: null,
-            defaultBranch: null,
+            defaultBranch: repoLink?.defaultBranch ?? null,
             lastPushedAt: null,
             openIssues: 0,
             openPullRequests: 0,
@@ -409,6 +478,7 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
           ...state.projects
         ]
       }, timestamp);
+    }
 
     case "project/complete":
       return touch({
@@ -421,19 +491,22 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "project/update":
       return touch({
         ...state,
-        projects: state.projects.map((project) =>
-          project.id === action.id
-            ? {
-                ...project,
-                name: action.name,
-                objective: action.objective,
-                nextAction: action.nextAction,
-                dueDate: action.dueDate,
-                progress: clampProgress(action.progress),
-                updatedAt: timestamp
-              }
-            : project
-        )
+        projects: state.projects.map((project) => {
+          if (project.id !== action.id) return project;
+          const repoLink = normalizeGitHubRepositoryLink(action.repositoryUrl, action.defaultBranch);
+          return {
+            ...project,
+            name: action.name || repoLink?.name || project.name,
+            objective: action.objective,
+            nextAction: action.nextAction,
+            dueDate: action.dueDate,
+            progress: clampProgress(action.progress),
+            source: repoLink ? "github" : "manual",
+            repositoryUrl: repoLink?.url ?? null,
+            defaultBranch: repoLink?.defaultBranch ?? null,
+            updatedAt: timestamp
+          };
+        })
       }, timestamp);
 
     case "project/delete":
@@ -563,13 +636,13 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "journal/add":
       return touch({
         ...state,
-        journal: [{ id: makeId("journal"), date: todayInput(), mood: action.mood, body: action.body }, ...state.journal]
+        journal: [{ id: makeId("journal"), date: todayInput(), mood: action.mood, body: action.body, weather: action.weather ?? null }, ...state.journal]
       }, timestamp);
 
     case "journal/update":
       return touch({
         ...state,
-        journal: state.journal.map((entry) => (entry.id === action.id ? { ...entry, mood: action.mood, body: action.body } : entry))
+        journal: state.journal.map((entry) => (entry.id === action.id ? { ...entry, mood: action.mood, body: action.body, weather: action.weather ?? null } : entry))
       }, timestamp);
 
     case "journal/delete":
@@ -668,11 +741,31 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
     case "intel/delete":
       return touch({ ...state, intel: state.intel.filter((item) => item.id !== action.id) }, timestamp);
 
+    case "intel/autopilot/toggle":
+      return touch({ ...state, intelAutopilot: { ...state.intelAutopilot, enabled: action.enabled } }, timestamp);
+
+    case "intel/autoscan":
+      return touch({
+        ...state,
+        intel: mergeAutonomousIntelFindings(state.intel, action.findings, action.scannedAt || timestamp),
+        intelAutopilot: {
+          ...state.intelAutopilot,
+          lastRunAt: action.scannedAt || timestamp,
+          lastSummary: action.summary,
+          lastFindingCount: action.findings.length
+        }
+      }, timestamp);
+
     case "settings/update":
       return touch({ ...state, settings: { ...state.settings, ...action.payload } }, timestamp);
 
     case "deck/import":
-      return normalizeCommandDeck(action.deck);
+      return normalizeCommandDeck(action.deck, { preserveLegacyGitHubProjects: Boolean(action.preserveLegacyGitHubProjects) });
+
+    case "deck/merge-import":
+      return mergeImportedCommandDeck(state, action.deck, timestamp, {
+        preserveLegacyGitHubProjects: Boolean(action.preserveLegacyGitHubProjects)
+      });
 
     case "deck/reset":
       return createFreshDeck();
@@ -682,10 +775,50 @@ export function reduceCommandDeck(state: CommandDeckState, action: CommandDeckAc
   }
 }
 
-export function loadCommandDeck(storage: Storage = window.localStorage): CommandDeckState {
+export function getCommandDeckStorageKey(userId?: string | null): string {
+  if (!userId) return COMMAND_DECK_STORAGE_KEY;
+  return `${COMMAND_DECK_STORAGE_KEY}:${userId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+}
+
+export function loadCommandDeck(storage: Storage = window.localStorage, userId?: string | null): CommandDeckState {
+  const storageKey = getCommandDeckStorageKey(userId);
+  if (userId) {
+    const browserDeck = loadBrowserDeckFallback(storage);
+    const rawUserDeck = storage.getItem(storageKey);
+    if (!rawUserDeck) {
+      if (browserDeck) {
+        saveCommandDeck(browserDeck, storage, userId);
+        return browserDeck;
+      }
+
+      return createFreshDeck();
+    }
+
+    try {
+      const userDeck = normalizeCommandDeck(JSON.parse(rawUserDeck) as Partial<CommandDeckState>);
+      if (browserDeck && !hasMeaningfulDeckData(userDeck)) {
+        saveCommandDeck(browserDeck, storage, userId);
+        return browserDeck;
+      }
+
+      return userDeck;
+    } catch {
+      if (browserDeck) {
+        saveCommandDeck(browserDeck, storage, userId);
+        return browserDeck;
+      }
+
+      return createFreshDeck();
+    }
+  }
+
+  return loadBrowserDeckFallback(storage) ?? createFreshDeck();
+}
+
+function loadBrowserDeckFallback(storage: Storage): CommandDeckState | null {
   const migratedLegacyDeck = migrateLegacyWorkspace(storage.getItem(LEGACY_WORKSPACE_KEY));
-  const raw = storage.getItem(COMMAND_DECK_STORAGE_KEY);
-  if (!raw) return migratedLegacyDeck ?? createFreshDeck();
+  const raw = storage.getItem(COMMAND_DECK_STORAGE_KEY) ?? storage.getItem(LEGACY_COMMAND_DECK_KEY);
+  if (!raw) return migratedLegacyDeck;
 
   try {
     const parsed = JSON.parse(raw) as Partial<CommandDeckState>;
@@ -694,18 +827,18 @@ export function loadCommandDeck(storage: Storage = window.localStorage): Command
       return migratedLegacyDeck;
     }
 
-    return normalized;
+    return hasMeaningfulDeckData(normalized) ? normalized : migratedLegacyDeck;
   } catch {
-    return migratedLegacyDeck ?? createFreshDeck();
+    return migratedLegacyDeck;
   }
 }
 
-export function saveCommandDeck(state: CommandDeckState, storage: Storage = window.localStorage): void {
-  storage.setItem(COMMAND_DECK_STORAGE_KEY, JSON.stringify(state));
+export function saveCommandDeck(state: CommandDeckState, storage: Storage = window.localStorage, userId?: string | null): void {
+  storage.setItem(getCommandDeckStorageKey(userId), JSON.stringify(state));
 }
 
 export function getDeckMetrics(state: CommandDeckState) {
-  const openTasks = state.tasks.filter((task) => task.status === "todo");
+  const openTasks = state.tasks.filter((task) => task.status !== "done");
   const doneTasks = state.tasks.filter((task) => task.status === "done");
   const today = todayInput();
   const todayDay = getRoutineDay(today);
@@ -745,27 +878,26 @@ export function getDeckMetrics(state: CommandDeckState) {
   };
 }
 
-export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandDeckState {
+export function normalizeCommandDeck(value: Partial<CommandDeckState>, options: NormalizeCommandDeckOptions = {}): CommandDeckState {
   const fresh = createFreshDeck();
   const incomingSettings: Partial<DeckSettings> = value.settings ?? {};
   const incomingVersion = typeof value.version === "number" ? value.version : 0;
+  const projects = getSafeNormalizedProjects(value, options);
   return {
     ...fresh,
     ...value,
     version: SCHEMA_VERSION,
-    tasks: Array.isArray(value.tasks) ? value.tasks : [],
+    tasks: Array.isArray(value.tasks) ? value.tasks.map(normalizeTask) : [],
     routines: Array.isArray(value.routines) ? value.routines.map(normalizeRoutine) : [],
-    githubScan: value.githubScan ?? githubScanSummary,
-    projects: mergeGitHubProjects(
-      Array.isArray(value.projects) ? value.projects.map(normalizeProject) : [],
-      githubProjectSeed
-    ),
+    githubScan: normalizeGithubScan(value.githubScan, projects, options),
+    projects,
     calendar: Array.isArray(value.calendar) ? value.calendar : [],
     workouts: Array.isArray(value.workouts) ? value.workouts : [],
     books: Array.isArray(value.books) ? value.books.map(normalizeBook) : [],
-    journal: Array.isArray(value.journal) ? value.journal : [],
+    journal: Array.isArray(value.journal) ? value.journal.map(normalizeJournalEntry) : [],
     finances: Array.isArray(value.finances) ? value.finances : [],
     intel: Array.isArray(value.intel) ? value.intel.map(normalizeIntelItem) : [],
+    intelAutopilot: normalizeIntelAutopilot(value.intelAutopilot),
     settings: {
       ...fresh.settings,
       ...incomingSettings,
@@ -783,6 +915,53 @@ export function normalizeCommandDeck(value: Partial<CommandDeckState>): CommandD
   };
 }
 
+export function mergeImportedCommandDeck(
+  currentDeck: CommandDeckState,
+  importedValue: Partial<CommandDeckState>,
+  updatedAt: string = nowIso(),
+  options: NormalizeCommandDeckOptions = {}
+): CommandDeckState {
+  const importedDeck = normalizeCommandDeck(importedValue, options);
+  const mergedProjects = mergeDeckItems(importedDeck.projects, currentDeck.projects);
+
+  return {
+    ...currentDeck,
+    createdAt: getOlderTimestamp(currentDeck.createdAt, importedDeck.createdAt),
+    updatedAt,
+    githubScan: normalizeGithubScan(
+      currentDeck.githubScan.projectCount > 0 ? currentDeck.githubScan : importedDeck.githubScan,
+      mergedProjects,
+      options
+    ),
+    tasks: mergeDeckItems(importedDeck.tasks, currentDeck.tasks),
+    routines: mergeDeckItems(importedDeck.routines, currentDeck.routines),
+    projects: mergedProjects,
+    calendar: mergeDeckItems(importedDeck.calendar, currentDeck.calendar),
+    workouts: mergeDeckItems(importedDeck.workouts, currentDeck.workouts),
+    books: mergeDeckItems(importedDeck.books, currentDeck.books),
+    journal: mergeDeckItems(importedDeck.journal, currentDeck.journal),
+    finances: mergeDeckItems(importedDeck.finances, currentDeck.finances),
+    intel: mergeDeckItems(importedDeck.intel, currentDeck.intel),
+    intelAutopilot: currentDeck.intel.length > 0 ? currentDeck.intelAutopilot : importedDeck.intelAutopilot,
+    settings: hasCustomizedSettings(currentDeck) ? currentDeck.settings : importedDeck.settings
+  };
+}
+
+function mergeDeckItems<T extends { id: string }>(importedItems: T[], currentItems: T[]): T[] {
+  const byId = new Map<string, T>();
+  importedItems.forEach((item) => byId.set(item.id, item));
+  currentItems.forEach((item) => byId.set(item.id, item));
+  return [...byId.values()];
+}
+
+function getOlderTimestamp(left: string, right: string): string {
+  const leftTime = new Date(left).getTime();
+  const rightTime = new Date(right).getTime();
+  if (Number.isNaN(leftTime)) return right;
+  if (Number.isNaN(rightTime)) return left;
+  return leftTime <= rightTime ? left : right;
+}
+
 function createFreshDeck(): CommandDeckState {
   const timestamp = nowIso();
   return {
@@ -792,13 +971,14 @@ function createFreshDeck(): CommandDeckState {
     githubScan: githubScanSummary,
     tasks: [],
     routines: [],
-    projects: mergeGitHubProjects([], githubProjectSeed),
+    projects: [],
     calendar: [],
     workouts: [],
     books: [],
     journal: [],
     finances: [],
-    intel: []
+    intel: [],
+    intelAutopilot: { ...freshCommandDeck.intelAutopilot }
   };
 }
 
@@ -853,12 +1033,14 @@ function migrateLegacyWorkspace(raw: string | null): CommandDeckState | null {
 
 function migrateLegacyTask(task: Record<string, unknown>, fallbackTimestamp: string): CommandTask {
   const updatedAt = getString(task.updatedAt) ?? fallbackTimestamp;
+  const priority = normalizePriority(task.priority);
   return {
     id: getString(task.id) ?? makeId("legacy-task"),
     title: getString(task.title) ?? "Untitled legacy task",
-    priority: normalizePriority(task.priority),
+    priority,
+    kanbanPriority: priorityToKanbanPriority(priority),
     dueDate: getNullableString(task.dueDate),
-    status: task.status === "done" ? "done" : "todo",
+    status: normalizeTaskStatus(task.status),
     createdAt: getString(task.createdAt) ?? updatedAt,
     updatedAt
   };
@@ -871,6 +1053,7 @@ function migrateLegacyAgentAction(action: Record<string, unknown>, fallbackTimes
     id: `legacy-agent-${getString(action.id) ?? makeId("action")}`,
     title: `Review agent action: ${title}`,
     priority: action.status === "pending" ? "high" : "medium",
+    kanbanPriority: action.status === "pending" ? "urgent" : "normal",
     dueDate: null,
     status: action.status === "approved" ? "done" : "todo",
     createdAt: getString(action.createdAt) ?? updatedAt,
@@ -884,6 +1067,7 @@ function migrateLegacyContentTask(item: Record<string, unknown>, fallbackTimesta
     id: `legacy-content-${getString(item.id) ?? makeId("content")}`,
     title: `Advance content: ${getString(item.title) ?? "Untitled content"}`,
     priority: "medium",
+    kanbanPriority: "normal",
     dueDate: getNullableString(item.scheduledFor),
     status: "todo",
     createdAt: updatedAt,
@@ -927,7 +1111,8 @@ function migrateLegacyDocument(document: Record<string, unknown>, fallbackTimest
     id: `legacy-doc-${getString(document.id) ?? makeId("doc")}`,
     date: updatedAt.slice(0, 10),
     mood: `Knowledge: ${title}`,
-    body: body ? `${title}\n\n${body}` : title
+    body: body ? `${title}\n\n${body}` : title,
+    weather: null
   };
 }
 
@@ -938,12 +1123,84 @@ function migrateLegacyContentJournal(item: Record<string, unknown>, fallbackTime
     id: `legacy-content-journal-${getString(item.id) ?? makeId("content-note")}`,
     date: updatedAt.slice(0, 10),
     mood: `Content: ${getString(item.stage) ?? "tracked"}`,
-    body: `${title}${getString(item.platform) ? `\nPlatform: ${getString(item.platform)}` : ""}`
+    body: `${title}${getString(item.platform) ? `\nPlatform: ${getString(item.platform)}` : ""}`,
+    weather: null
+  };
+}
+
+function normalizeJournalEntry(entry: Partial<JournalEntry>): JournalEntry {
+  return {
+    id: getString(entry.id) ?? makeId("journal"),
+    date: getString(entry.date) ?? todayInput(),
+    mood: getString(entry.mood) ?? "Logged",
+    body: getString(entry.body) ?? "",
+    weather: normalizeJournalWeather(entry.weather)
+  };
+}
+
+function normalizeJournalWeather(value: unknown): JournalWeatherSnapshot | null {
+  if (!isRecord(value)) return null;
+  const latitude = getFiniteNumber(value.latitude);
+  const longitude = getFiniteNumber(value.longitude);
+  const forecastAt = getString(value.forecastAt);
+  const capturedAt = getString(value.capturedAt);
+
+  if (latitude === null || longitude === null || !forecastAt || !capturedAt) return null;
+
+  return {
+    provider: getString(value.provider) ?? "rapidapi-open-weather13",
+    location: getString(value.location) ?? "Selected location",
+    description: getString(value.description) ?? "Weather data available",
+    temperatureC: getFiniteNumber(value.temperatureC),
+    feelsLikeC: getFiniteNumber(value.feelsLikeC),
+    humidity: getFiniteNumber(value.humidity),
+    windKph: getFiniteNumber(value.windKph),
+    latitude,
+    longitude,
+    forecastAt,
+    capturedAt
+  };
+}
+
+function normalizeTask(task: Partial<CommandTask>): CommandTask {
+  const updatedAt = getString(task.updatedAt) ?? nowIso();
+  const priority = normalizePriority(task.priority);
+  return {
+    id: getString(task.id) ?? makeId("task"),
+    title: getString(task.title) ?? "Untitled task",
+    priority,
+    kanbanPriority: normalizeKanbanPriority(task.kanbanPriority, priority),
+    dueDate: getNullableString(task.dueDate),
+    status: task.status === "done" ? "done" : "todo",
+    createdAt: getString(task.createdAt) ?? updatedAt,
+    updatedAt
   };
 }
 
 function normalizePriority(value: unknown): Priority {
   return value === "low" || value === "medium" || value === "high" || value === "critical" ? value : "medium";
+}
+
+function normalizeKanbanPriority(value: unknown, fallbackPriority: Priority): KanbanPriority {
+  if (value === "urgent" || value === "normal" || value === "later") return value;
+  return priorityToKanbanPriority(fallbackPriority);
+}
+
+function normalizeTaskStatus(value: unknown): CommandTask["status"] {
+  if (value === "done" || value === "in_progress" || value === "pending") return value;
+  return "pending";
+}
+
+function priorityToKanbanPriority(priority: Priority): KanbanPriority {
+  if (priority === "critical" || priority === "high") return "urgent";
+  if (priority === "low") return "later";
+  return "normal";
+}
+
+function kanbanPriorityToPriority(priority: KanbanPriority): Priority {
+  if (priority === "urgent") return "critical";
+  if (priority === "later") return "low";
+  return "medium";
 }
 
 function normalizeAccent(value: unknown): Accent {
@@ -966,7 +1223,7 @@ function hasUserDeckData(state: CommandDeckState): boolean {
   return (
     state.tasks.length > 0 ||
     state.routines.length > 0 ||
-    state.projects.some((project) => project.source !== "github") ||
+    state.projects.length > 0 ||
     state.calendar.length > 0 ||
     state.workouts.length > 0 ||
     state.books.length > 0 ||
@@ -974,6 +1231,17 @@ function hasUserDeckData(state: CommandDeckState): boolean {
     state.finances.length > 0 ||
     state.intel.length > 0
   );
+}
+
+export function hasMeaningfulDeckData(state: CommandDeckState): boolean {
+  return hasUserDeckData(state) || hasCustomizedSettings(state);
+}
+
+function hasCustomizedSettings(state: CommandDeckState): boolean {
+  return Object.entries(freshCommandDeck.settings).some(([key, defaultValue]) => {
+    const settingKey = key as keyof DeckSettings;
+    return state.settings[settingKey] !== defaultValue;
+  });
 }
 
 function getLegacyProjectNextAction(projectId: string, legacyTasks: Record<string, unknown>[]): string {
@@ -993,6 +1261,15 @@ function getString(value: unknown): string | null {
 
 function getNullableString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+function getFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1021,6 +1298,92 @@ function normalizeIntelItem(item: Partial<IntelItem>): IntelItem {
     createdAt: item.createdAt ?? timestamp,
     updatedAt: item.updatedAt ?? timestamp
   };
+}
+
+function normalizeIntelAutopilot(value: Partial<IntelAutopilotState> | undefined): IntelAutopilotState {
+  return {
+    enabled: value?.enabled !== false,
+    lastRunAt: getNullableString(value?.lastRunAt),
+    lastSummary: getString(value?.lastSummary) ?? freshCommandDeck.intelAutopilot.lastSummary,
+    lastFindingCount: Number.isFinite(value?.lastFindingCount) ? Math.max(0, Math.round(value?.lastFindingCount ?? 0)) : 0
+  };
+}
+
+function mergeAutonomousIntelFindings(current: IntelItem[], findings: AutonomousIntelFinding[], timestamp: string): IntelItem[] {
+  return findings.reduce((items, finding) => {
+    const normalized = normalizeAutonomousIntelFinding(finding);
+    if (!normalized) return items;
+
+    const existingIndex = items.findIndex((item) => getIntelIdentity(item.title, item.symbol) === getIntelIdentity(normalized.title, normalized.symbol));
+    if (existingIndex === -1) {
+      const nextItem: IntelItem = {
+        id: makeId("intel-auto"),
+        title: normalized.title,
+        symbol: normalized.symbol,
+        kind: normalized.kind,
+        signal: normalized.signal,
+        thesis: normalized.thesis,
+        sourceUrl: normalized.sourceUrl || null,
+        notes: normalized.note ? [{ id: makeId("intel-note"), body: normalized.note, createdAt: timestamp }] : [],
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+
+      return [nextItem, ...items];
+    }
+
+    const existing = items[existingIndex];
+    const noteAlreadyExists = normalized.note && existing.notes.some((note) => note.body === normalized.note);
+    const notes = normalized.note && !noteAlreadyExists
+      ? [{ id: makeId("intel-note"), body: normalized.note, createdAt: timestamp }, ...existing.notes]
+      : existing.notes;
+    const nextItems = items.slice();
+    nextItems[existingIndex] = {
+      ...existing,
+      kind: normalized.kind,
+      signal: getStrongerIntelSignal(existing.signal, normalized.signal),
+      thesis: normalized.thesis || existing.thesis,
+      sourceUrl: normalized.sourceUrl || existing.sourceUrl,
+      notes,
+      updatedAt: timestamp
+    };
+    return nextItems;
+  }, current.map(normalizeIntelItem));
+}
+
+function normalizeAutonomousIntelFinding(finding: AutonomousIntelFinding): AutonomousIntelFinding | null {
+  const title = finding.title.trim();
+  if (!title) return null;
+
+  return {
+    title,
+    symbol: finding.symbol.trim().toUpperCase(),
+    kind: intelKinds.includes(finding.kind) ? finding.kind : "trend",
+    signal: intelSignals.includes(finding.signal) ? finding.signal : "researching",
+    thesis: finding.thesis.trim(),
+    sourceUrl: finding.sourceUrl.trim(),
+    note: finding.note.trim()
+  };
+}
+
+function getIntelIdentity(title: string, symbol: string): string {
+  if (title.trim().toLowerCase().startsWith("repo:")) {
+    return title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  }
+
+  const normalizedSymbol = symbol.trim().toUpperCase();
+  return normalizedSymbol || title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
+function getStrongerIntelSignal(current: IntelSignal, incoming: IntelSignal): IntelSignal {
+  const priority: Record<IntelSignal, number> = {
+    "on-hold": 0,
+    watching: 1,
+    researching: 2,
+    "high-priority": 3
+  };
+
+  return priority[incoming] > priority[current] ? incoming : current;
 }
 
 function normalizeRoutine(routine: Partial<RoutineEntry>): RoutineEntry {
@@ -1173,7 +1536,36 @@ function mergeGitHubProjects(currentProjects: CommandProject[], seeds: GitHubPro
   });
 }
 
+function getSafeNormalizedProjects(value: Partial<CommandDeckState>, options: NormalizeCommandDeckOptions): CommandProject[] {
+  const projects = Array.isArray(value.projects) ? value.projects.map(normalizeProject) : [];
+  if (!options.preserveLegacyGitHubProjects && isLegacySeededGitHubScan(value.githubScan)) {
+    return projects.filter((project) => project.source !== "github");
+  }
+
+  return projects;
+}
+
+function normalizeGithubScan(
+  scan: CommandDeckState["githubScan"] | undefined,
+  projects: CommandProject[],
+  options: NormalizeCommandDeckOptions = {}
+): CommandDeckState["githubScan"] {
+  if (!scan || (!options.preserveLegacyGitHubProjects && isLegacySeededGitHubScan(scan))) {
+    return {
+      ...githubScanSummary,
+      projectCount: projects.filter((project) => project.source === "github").length
+    };
+  }
+
+  return {
+    owner: scan.owner ?? "",
+    scannedAt: scan.scannedAt ?? "",
+    projectCount: projects.filter((project) => project.source === "github").length
+  };
+}
+
 function normalizeProject(project: Partial<CommandProject>): CommandProject {
+  const repoLink = normalizeGitHubRepositoryLink(project.repositoryUrl, project.defaultBranch);
   return {
     id: project.id ?? makeId("project"),
     name: project.name ?? "Untitled project",
@@ -1182,17 +1574,44 @@ function normalizeProject(project: Partial<CommandProject>): CommandProject {
     status: project.status ?? "pending",
     dueDate: project.dueDate ?? null,
     progress: clampProgress(project.progress ?? 0),
-    source: project.source ?? "manual",
-    repositoryUrl: project.repositoryUrl ?? null,
+    source: repoLink ? "github" : project.source ?? "manual",
+    repositoryUrl: repoLink?.url ?? null,
     language: project.language ?? null,
     visibility: project.visibility ?? null,
-    defaultBranch: project.defaultBranch ?? null,
+    defaultBranch: repoLink?.defaultBranch ?? project.defaultBranch ?? null,
     lastPushedAt: project.lastPushedAt ?? null,
     openIssues: project.openIssues ?? 0,
     openPullRequests: project.openPullRequests ?? 0,
     createdAt: project.createdAt ?? nowIso(),
     updatedAt: project.updatedAt ?? nowIso()
   };
+}
+
+function normalizeGitHubRepositoryLink(repositoryUrl?: string | null, defaultBranch?: string | null): { name: string; url: string; defaultBranch: string | null } | null {
+  const raw = repositoryUrl?.trim();
+  if (!raw) return null;
+
+  const prefixed = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(prefixed);
+    if (url.hostname.toLowerCase() !== "github.com") return null;
+    const [owner, repoWithSuffix] = url.pathname.split("/").filter(Boolean);
+    if (!owner || !repoWithSuffix) return null;
+
+    const repo = repoWithSuffix.replace(/\.git$/i, "");
+    if (!repo || owner.includes("..") || repo.includes("..")) return null;
+    return {
+      name: repo,
+      url: `https://github.com/${owner}/${repo}`,
+      defaultBranch: defaultBranch?.trim() || null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isLegacySeededGitHubScan(scan: CommandDeckState["githubScan"] | undefined): boolean {
+  return scan?.owner === "Glizocksama-2";
 }
 
 function getGitHubProjectId(name: string): string {

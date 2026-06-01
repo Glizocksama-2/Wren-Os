@@ -5,19 +5,36 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:local-api": "node scripts/northwatch-local-api.mjs",
+    "dev:api": "node server/index.js",
+    "start:api": "node server/index.js",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "sources:snapshot": "node scripts/wren-source-snapshot.mjs",
+    "supabase": "supabase",
+    "supabase:link": "supabase link",
+    "supabase:migrations": "supabase migration list",
+    "supabase:push": "supabase db push",
     "test": "vitest",
     "test:run": "vitest run"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.105.4",
+    "@sentry/node": "^10.55.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "fast-xml-parser": "^5.8.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.468.0",
+    "nodemailer": "^8.0.7",
+    "pg": "^8.21.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.8.0",
+    "uuid": "^14.0.0",
     "vite": "^7.0.0"
   },
   "devDependencies": {
@@ -27,6 +44,8 @@
     "@types/react-dom": "^19.0.0",
     "caniuse-lite": "^1.0.30001792",
     "jsdom": "^26.0.0",
-    "vitest": "^3.0.0"
+    "supabase": "^2.101.0",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.8"
   }
 }

@@ -21,11 +21,13 @@ import {
   Github,
   Grid2X2,
   Eye,
+  Info,
   KeyRound,
   ListTodo,
   LockKeyhole,
   LogOut,
-  Mail,
+  Languages,
+  Mic2,
   Newspaper,
   NotebookPen,
   Palette,
@@ -48,38 +50,42 @@ import {
   UserMinus,
   UserRound,
   UsersRound,
+  Volume2,
+  VolumeX,
   Wallet,
   X,
   Zap
 } from "lucide-react";
-import { useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type FormEvent, type ReactNode } from "react";
 import orbitWatchLogoBoardUrl from "./assets/northwatch-logo-board.png";
-import {
-  forgetRememberedAccount,
-  loadRememberedAccounts,
-  rememberAuthAccount,
-  type RememberedAuthAccount
-} from "./lib/authMemory";
+import type { AuthUser } from "./auth/AuthContext";
+import { IntelPage } from "./components/IntelPage";
+import { CurrencyProvider } from "./context/CurrencyContext";
+import { buildAutonomousIntelScan } from "./lib/intelAutopilot";
 import { checkOllamaConnection, requestOllamaAgentReply } from "./lib/ollama";
-import { supabase, supabaseConfig, type WrenSession } from "./lib/supabase";
+import { requestSystemAiAgentReply } from "./lib/systemAi";
+import { getLiveWeatherForecast, type LiveWeatherSnapshot } from "./lib/weather";
+import { analyzeFoodPlate, type FoodPlateAnalysis } from "./lib/workoutNutrition";
+import { toKSH } from "./utils/currency";
+import { canTeamRole } from "../shared/teamPermissions.js";
+import type { TeamMember, TeamRole, TeamWorkspace } from "./store/cloudDeck";
+import { NotificationBell, WorkspaceSwitcher } from "./team/TeamPages.jsx";
+import { TeamWarRoomHero, TeamWarRoomPanels } from "./team/TeamWarRoom";
 import {
-  buildTeamInviteUrl,
-  createTeamInvite,
-  createTeamWorkspace,
-  joinTeamWorkspace,
-  listTeamMembers,
-  listTeamWorkspaces,
-  loadCloudDeck,
-  loadTeamCloudDeck,
-  removeTeamMember,
-  saveCloudDeck,
-  saveTeamCloudDeck,
-  updateTeamMemberRole,
-  type CloudDeckClient,
-  type TeamMember,
-  type TeamRole,
-  type TeamWorkspace
-} from "./store/cloudDeck";
+  createFreshTeamCommandDeck,
+  loadCachedTeamCommandDeck,
+  loadTeamCommandDeck,
+  saveCachedTeamCommandDeck,
+  saveTeamCommandDeck
+} from "./team/teamDeckApi";
+import {
+  acceptInvite as acceptTeamInvite,
+  createTeam as createRemoteTeam,
+  extractInviteToken,
+  getTeam,
+  listMyTeams,
+  sendInvite as sendTeamInvite
+} from "./team/teamApi.js";
 import {
   type Accent,
   type BackgroundMode,
@@ -92,16 +98,23 @@ import {
   type IntelItem,
   type IntelKind,
   type IntelSignal,
+  type JournalWeatherSnapshot,
+  type KanbanPriority,
   type LogoStyle,
   type Priority,
   type RoutineCadence,
   type RoutineDay,
-  freshCommandDeck,
   getDeckMetrics,
+  hasMeaningfulDeckData,
   loadCommandDeck,
   reduceCommandDeck,
   saveCommandDeck
 } from "./store/commandDeck";
+
+interface AppProps {
+  authUser?: AuthUser | null;
+  onAuthLogout?: () => void | Promise<void>;
+}
 
 const navItems: Array<{ view: DeckView; label: string; icon: ReactNode; terms: string[] }> = [
   { view: "dashboard", label: "Command", icon: <Grid2X2 size={18} />, terms: ["command", "dashboard", "home", "deck"] },
@@ -113,9 +126,7 @@ const navItems: Array<{ view: DeckView; label: string; icon: ReactNode; terms: s
   { view: "workout", label: "Workout", icon: <Dumbbell size={18} />, terms: ["workout", "training", "gym"] },
   { view: "books", label: "Books", icon: <BookOpen size={18} />, terms: ["book", "books", "reading"] },
   { view: "journal", label: "Journal", icon: <NotebookPen size={18} />, terms: ["journal", "notes", "log"] },
-  { view: "finances", label: "Finances", icon: <Banknote size={18} />, terms: ["finance", "finances", "money", "cash"] },
-  { view: "customize", label: "Customize", icon: <Settings2 size={18} />, terms: ["custom", "customize", "settings", "theme"] },
-  { view: "account", label: "Account", icon: <UserRound size={18} />, terms: ["account", "profile", "login", "sync"] }
+  { view: "finances", label: "Finances", icon: <Banknote size={18} />, terms: ["finance", "finances", "money", "cash"] }
 ];
 
 const priorityOptions: Priority[] = ["low", "medium", "high", "critical"];
@@ -124,6 +135,11 @@ const eventTypes: CalendarEntry["type"][] = ["mission", "training", "finance", "
 const intelKinds: IntelKind[] = ["stock", "crypto", "fund", "company", "trend", "news"];
 const intelSignals: IntelSignal[] = ["watching", "researching", "high-priority", "on-hold"];
 const journalMoodOptions = ["Focused", "Locked in", "Clear", "Restless", "Tired", "Stressed", "Grateful", "Low energy"];
+const DEFAULT_WEATHER_COORDINATES = {
+  latitude: -1.286389,
+  longitude: 36.817223,
+  label: "Nairobi"
+};
 const routineDayOptions: Array<{ value: RoutineDay; label: string; short: string }> = [
   { value: "mon", label: "Monday", short: "Mon" },
   { value: "tue", label: "Tuesday", short: "Tue" },
@@ -165,235 +181,333 @@ type AgentConnectionState = {
   detail: string;
 };
 
+type WeatherCoordinates = {
+  latitude: number;
+  longitude: number;
+  label?: string;
+};
+
+type AgentSpeechSettings = {
+  enabled: boolean;
+  language: string;
+  voiceURI: string;
+};
+
 type WorkspaceMode = { kind: "personal" } | { kind: "team"; teamId: string };
-const PENDING_TEAM_INVITE_STORAGE_KEY = "northwatch.pendingTeamInvite.v1";
+type TeamWorkspaceSelection = { type: "personal" } | { type: "team"; teamId: string; slug: string; name: string; role: string };
+type TeamInviteDeliveryNotice = {
+  tone: "success" | "warning" | "error";
+  title: string;
+  message: string;
+};
+type TeamInviteDeliveryResult = {
+  delivered?: boolean;
+  logged?: boolean;
+  reason?: string;
+  error?: string;
+};
+type TeamInviteApiResult = {
+  email?: string;
+  acceptUrl?: string;
+  emailDelivery?: TeamInviteDeliveryResult;
+};
+const ACTIVE_TEAM_WORKSPACE_STORAGE_KEY = "northwatch.active-team-workspace.v1";
+export const LEGAL_CONSENT_STORAGE_KEY = "northwatch.legal-consent.v1";
+export const TERMS_VERSION = "2026-05-19";
+export const PRIVACY_VERSION = "2026-05-19";
+const LEGAL_JURISDICTION_LABEL = "Kenyan data protection law and applicable international privacy principles";
+const AGENT_HEALTH_POLL_MS = 30000;
+const ACTIVITY_FEED_POLL_MS = 60000;
+const AUTH_API_BASE_URL = (import.meta.env.VITE_AUTH_API_BASE_URL?.trim() ?? "").replace(/\/$/, "");
+const TELEGRAM_SEND_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/send`;
+const TELEGRAM_CONFIG_ENDPOINT = `${AUTH_API_BASE_URL}/api/telegram/config`;
+const LEGACY_COMMAND_DECK_ENDPOINT = `${AUTH_API_BASE_URL}/api/legacy-command-deck`;
+const LEGACY_CLOUD_IMPORT_STORAGE_PREFIX = "northwatch.legacy-cloud-import.v2";
+const AGENT_SPEECH_STORAGE_KEY = "northwatch.sentinel-speech.v1";
+
+type LegalPanel = "settings" | "help" | "privacy" | "terms";
+type AgentHealthStatus = "alive" | "dead" | "idle";
+
+export interface LegalConsentRecord {
+  termsVersion: string;
+  privacyVersion: string;
+  acceptedAt: string;
+  jurisdiction: string;
+}
+
+interface AgentHealthRecord {
+  id: string;
+  label: string;
+  status: AgentHealthStatus;
+  checkedAt: string | null;
+  detail: string;
+}
+
+interface ActivityFeedItem {
+  id: string;
+  label: string;
+  createdAt: string;
+}
+
+interface TelegramPayload {
+  kind: "kanban-card" | "doc" | "agent-alert";
+  title: string;
+  body: string;
+  meta?: string;
+}
+
+interface TelegramConfigStatus {
+  configured: boolean;
+  botUsername: string | null;
+  chatId: string | null;
+  updatedAt: string | null;
+}
+
+interface LegacyCommandDeckPayload {
+  deck: Partial<CommandDeckState>;
+  updatedAt: string | null;
+}
+
+function loadLegalConsent(): LegalConsentRecord | null {
+  try {
+    const stored = window.localStorage.getItem(LEGAL_CONSENT_STORAGE_KEY);
+    if (!stored) return null;
+    return JSON.parse(stored) as LegalConsentRecord;
+  } catch {
+    return null;
+  }
+}
+
+function saveLegalConsent(record: LegalConsentRecord) {
+  window.localStorage.setItem(LEGAL_CONSENT_STORAGE_KEY, JSON.stringify(record));
+}
+
+function loadAgentSpeechSettings(): AgentSpeechSettings {
+  try {
+    const stored = window.localStorage.getItem(AGENT_SPEECH_STORAGE_KEY);
+    if (!stored) return defaultAgentSpeechSettings;
+    return {
+      ...defaultAgentSpeechSettings,
+      ...JSON.parse(stored)
+    };
+  } catch {
+    return defaultAgentSpeechSettings;
+  }
+}
+
+function saveAgentSpeechSettings(settings: AgentSpeechSettings) {
+  window.localStorage.setItem(AGENT_SPEECH_STORAGE_KEY, JSON.stringify(settings));
+}
+
+function getSpeechSynthesis(): SpeechSynthesis | null {
+  if (typeof window === "undefined") return null;
+  return "speechSynthesis" in window ? window.speechSynthesis : null;
+}
+
+function getSpeechVoices(): SpeechSynthesisVoice[] {
+  return getSpeechSynthesis()?.getVoices() ?? [];
+}
+
+function cleanSpeechText(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_#>~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function speakAgentReply(text: string, settings: AgentSpeechSettings, voices: SpeechSynthesisVoice[]): boolean {
+  if (!settings.enabled || typeof SpeechSynthesisUtterance === "undefined") return false;
+  const synthesis = getSpeechSynthesis();
+  const spokenText = cleanSpeechText(text);
+  if (!synthesis || !spokenText) return false;
+
+  const utterance = new SpeechSynthesisUtterance(spokenText);
+  const selectedVoice =
+    voices.find((voice) => voice.voiceURI === settings.voiceURI) ??
+    voices.find((voice) => voice.lang === settings.language) ??
+    voices.find((voice) => voice.lang.toLowerCase().startsWith(settings.language.split("-")[0].toLowerCase()));
+
+  utterance.lang = selectedVoice?.lang ?? settings.language;
+  if (selectedVoice) utterance.voice = selectedVoice;
+  utterance.rate = 0.96;
+  utterance.pitch = 1;
+  synthesis.cancel();
+  synthesis.speak(utterance);
+  return true;
+}
+
+function stopAgentSpeech() {
+  getSpeechSynthesis()?.cancel();
+}
+
+export function hasValidLegalConsent(record: LegalConsentRecord | null): boolean {
+  return Boolean(
+    record &&
+      record.termsVersion === TERMS_VERSION &&
+      record.privacyVersion === PRIVACY_VERSION &&
+      record.jurisdiction === LEGAL_JURISDICTION_LABEL
+  );
+}
 
 const agentQuickPrompts = [
-  "Brief my next move",
+  "Plan my next move",
   "Find the bottleneck",
-  "Balance today",
+  "Scan market intel",
+  "Draft a status update",
   "Create focus task"
 ];
 
-export default function App() {
-  const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeck());
+const speechLanguageOptions = [
+  { value: "en-KE", label: "English (Kenya)" },
+  { value: "en-US", label: "English (US)" },
+  { value: "en-GB", label: "English (UK)" },
+  { value: "sw-KE", label: "Swahili (Kenya)" },
+  { value: "fr-FR", label: "French" },
+  { value: "es-ES", label: "Spanish" },
+  { value: "ar-SA", label: "Arabic" }
+];
+
+const defaultAgentSpeechSettings: AgentSpeechSettings = {
+  enabled: false,
+  language: "en-KE",
+  voiceURI: ""
+};
+
+export default function App(props: AppProps = {}) {
+  return (
+    <CurrencyProvider>
+      <NorthwatchApp {...props} />
+    </CurrencyProvider>
+  );
+}
+
+function NorthwatchApp({ authUser = null, onAuthLogout }: AppProps = {}) {
+  const authUserId = authUser?.id ?? null;
+  const initialWorkspaceRef = useRef<TeamWorkspaceSelection | null>(null);
+  if (!initialWorkspaceRef.current) {
+    initialWorkspaceRef.current = loadActiveTeamWorkspace();
+  }
+  const [state, dispatch] = useReducer(reduceCommandDeck, undefined, () => loadCommandDeckForWorkspace(window.localStorage, authUserId, initialWorkspaceRef.current ?? { type: "personal" }));
   const [view, setView] = useState<DeckView>("dashboard");
   const [notice, setNotice] = useState("Fresh command deck initialized.");
-  const [session, setSession] = useState<WrenSession | null>(null);
-  const [rememberedAccounts, setRememberedAccounts] = useState<RememberedAuthAccount[]>(() => loadRememberedAccounts());
-  const [authReady, setAuthReady] = useState(!supabaseConfig.isConfigured);
-  const [cloudReady, setCloudReady] = useState(!supabaseConfig.isConfigured);
-  const [cloudStatus, setCloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>({ kind: "personal" });
+  const [cloudStatus] = useState<CloudStatus>(() => getInitialCloudStatus());
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>(() =>
+    initialWorkspaceRef.current?.type === "team"
+      ? { kind: "team", teamId: initialWorkspaceRef.current.teamId }
+      : { kind: "personal" }
+  );
+  const [activeTeamWorkspace, setActiveTeamWorkspace] = useState<TeamWorkspaceSelection>(initialWorkspaceRef.current ?? { type: "personal" });
   const [teams, setTeams] = useState<TeamWorkspace[]>([]);
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInviteLink, setTeamInviteLink] = useState("");
+  const [teamInviteNotice, setTeamInviteNotice] = useState<TeamInviteDeliveryNotice | null>(null);
   const [isTeamBusy, setIsTeamBusy] = useState(false);
+  const [isLogoMenuOpen, setIsLogoMenuOpen] = useState(false);
+  const [legalPanel, setLegalPanel] = useState<LegalPanel | null>(null);
+  const [legalConsent, setLegalConsent] = useState<LegalConsentRecord | null>(() => loadLegalConsent());
+  const [isShortcutOverlayOpen, setIsShortcutOverlayOpen] = useState(false);
+  const [isRecoveringLegacyDeck, setIsRecoveringLegacyDeck] = useState(false);
+  const [newActivityCount, setNewActivityCount] = useState(0);
   const latestDeckRef = useRef(state);
-  const saveTimerRef = useRef<number | null>(null);
-  const pendingInviteAttemptRef = useRef<string | null>(null);
+  const logoMenuRef = useRef<HTMLDivElement | null>(null);
+  const lastActivityPollRef = useRef(state.updatedAt);
+  const teamDeckDocumentIdsRef = useRef<Record<string, string | null>>({});
+  const workspaceUrlHandledRef = useRef(false);
+  const shortcutChordRef = useRef<{ key: string; armedAt: number } | null>(null);
   const metrics = useMemo(() => getDeckMetrics(state), [state]);
   const visibleNavItems = useMemo(() => navItems.filter((item) => isViewEnabled(item.view, state.settings)), [state.settings]);
   const activeTeam = useMemo(
     () => (workspaceMode.kind === "team" ? teams.find((team) => team.id === workspaceMode.teamId) ?? null : null),
     [teams, workspaceMode]
   );
-  const workspaceLabel = activeTeam ? `Team: ${activeTeam.name}` : "Personal vault";
+  const workspaceLabel = activeTeamWorkspace.type === "team" ? `Team: ${activeTeamWorkspace.name}` : activeTeam ? `Team: ${activeTeam.name}` : "Personal vault";
 
   useEffect(() => {
     latestDeckRef.current = state;
-    saveCommandDeck(state);
-  }, [state]);
+    if (activeTeamWorkspace.type === "team") {
+      saveCachedTeamCommandDeck(window.localStorage, authUserId, activeTeamWorkspace.teamId, state);
+      if (!authUserId) return;
+
+      const teamId = activeTeamWorkspace.teamId;
+      const timer = window.setTimeout(() => {
+        void saveTeamCommandDeck(teamId, state, teamDeckDocumentIdsRef.current[teamId] ?? null)
+          .then((documentId) => {
+            if (documentId) teamDeckDocumentIdsRef.current[teamId] = documentId;
+          })
+          .catch(() => {
+            // Keep the local team cache when the shared workspace API is temporarily unavailable.
+          });
+      }, 700);
+
+      return () => window.clearTimeout(timer);
+    }
+
+    saveCommandDeck(state, window.localStorage, authUserId);
+  }, [activeTeamWorkspace, authUserId, state]);
 
   useEffect(() => {
-    if (!supabaseConfig.isConfigured || !supabase) return;
+    if (!authUserId) return;
 
-    let isMounted = true;
+    const importKey = `${LEGACY_CLOUD_IMPORT_STORAGE_PREFIX}:${authUserId}`;
+    if (window.localStorage.getItem(importKey)) return;
 
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!isMounted) return;
-
-      if (error) {
-        setAuthReady(true);
-        setCloudReady(true);
-        setCloudStatus({
-          mode: "error",
-          label: "Cloud auth: session error",
-          detail: error.message,
-          lastSyncedAt: null,
-          userEmail: null
-        });
-        return;
-      }
-
-      setSession(data.session);
-      if (data.session?.user.email) {
-        setRememberedAccounts(rememberAuthAccount(data.session.user.email, data.session.user.id));
-      }
-      setAuthReady(true);
-      if (!data.session) {
-        setCloudReady(false);
-        setCloudStatus({
-          mode: "signed-out",
-          label: "Cloud auth: sign in required",
-          detail: "Use your Supabase magic link to unlock cross-device sync.",
-          lastSyncedAt: null,
-          userEmail: null
-        });
-      }
-    });
-
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      if (nextSession?.user.email) {
-        setRememberedAccounts(rememberAuthAccount(nextSession.user.email, nextSession.user.id));
-      }
-      setAuthReady(true);
-      if (!nextSession) {
-        setCloudReady(false);
-        setWorkspaceMode({ kind: "personal" });
-        setTeams([]);
-        setTeamMembers([]);
-        setTeamInviteLink("");
-        setCloudStatus({
-          mode: "signed-out",
-          label: "Cloud auth: sign in required",
-          detail: "Use your Supabase magic link to unlock cross-device sync.",
-          lastSyncedAt: null,
-          userEmail: null
-        });
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!supabaseConfig.isConfigured || !supabase || !authReady || !session) return;
-
-    const userId = session.user.id;
-    const userEmail = session.user.email ?? null;
     let isCancelled = false;
-    setCloudReady(false);
-    setWorkspaceMode({ kind: "personal" });
-    setCloudStatus({
-      mode: "syncing",
-      label: "Cloud auth: syncing",
-      detail: "Loading your private Supabase command deck.",
-      lastSyncedAt: null,
-      userEmail
-    });
 
-    async function hydrateCloudDeck() {
+    async function importLegacyCloudDeck() {
       try {
-        const client = supabase as unknown as CloudDeckClient;
-        const cloudDeck = await loadCloudDeck(client, userId);
-        const teamWorkspaces = await listTeamWorkspaces(client, userId);
+        const payload = await fetchLegacyCommandDeck();
+        if (isCancelled || !payload) return;
 
-        if (isCancelled) return;
-
-        if (cloudDeck) {
-          dispatch({ type: "deck/import", deck: cloudDeck });
-          setTeams(teamWorkspaces);
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: synced",
-            detail: "Loaded your private Supabase workspace.",
-            lastSyncedAt: cloudDeck.updatedAt,
-            userEmail
-          });
-        } else {
-          dispatch({ type: "deck/import", deck: freshCommandDeck });
-          setTeams(teamWorkspaces);
-          const savedAt = await saveCloudDeck(client, userId, freshCommandDeck);
-          if (isCancelled) return;
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: seeded",
-            detail: "Created a private Supabase workspace for this signed-in user.",
-            lastSyncedAt: savedAt,
-            userEmail
-          });
-        }
-
-        setCloudReady(true);
-      } catch (error) {
-        if (isCancelled) return;
-        setCloudReady(true);
-        setCloudStatus({
-          mode: "error",
-          label: "Cloud auth: sync error",
-          detail: getErrorMessage(error),
-          lastSyncedAt: null,
-          userEmail
+        const hasCurrentDeckData = hasMeaningfulDeckData(latestDeckRef.current);
+        dispatch({
+          type: hasCurrentDeckData ? "deck/merge-import" : "deck/import",
+          deck: payload.deck,
+          preserveLegacyGitHubProjects: true
         });
+        window.localStorage.setItem(importKey, payload.updatedAt ?? new Date().toISOString());
+        setNotice(hasCurrentDeckData ? "Recovered and merged the command deck saved under your email." : "Recovered the command deck saved under your email.");
+      } catch {
+        // Legacy cloud import is best-effort; local account storage still works without it.
       }
     }
 
-    void hydrateCloudDeck();
+    void importLegacyCloudDeck();
 
     return () => {
       isCancelled = true;
     };
-  }, [authReady, session?.user.email, session?.user.id]);
+  }, [authUserId]);
 
-  useEffect(() => {
-    if (!supabaseConfig.isConfigured || !supabase || !session || !cloudReady) return;
-
-    const userId = session.user.id;
-    const userEmail = session.user.email ?? null;
-    const currentWorkspace = workspaceMode;
-
-    if (saveTimerRef.current) {
-      window.clearTimeout(saveTimerRef.current);
+  const recoverLegacyEmailDeck = useCallback(async () => {
+    if (!authUserId) {
+      setNotice("Sign in first, then recover data saved under your email.");
+      return;
     }
 
-    setCloudStatus((current) => ({
-      ...current,
-      mode: current.mode === "error" ? current.mode : "syncing",
-      label: current.mode === "error" ? current.label : "Cloud auth: saving"
-    }));
-
-    saveTimerRef.current = window.setTimeout(() => {
-      const client = supabase as unknown as CloudDeckClient;
-      const saveOperation =
-        currentWorkspace.kind === "team"
-          ? saveTeamCloudDeck(client, currentWorkspace.teamId, userId, latestDeckRef.current)
-          : saveCloudDeck(client, userId, latestDeckRef.current);
-
-      saveOperation
-        .then((savedAt) => {
-          const teamName = currentWorkspace.kind === "team" ? teams.find((team) => team.id === currentWorkspace.teamId)?.name : null;
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: synced",
-            detail: teamName ? `Shared team workspace "${teamName}" is current.` : "Private Supabase workspace is current.",
-            lastSyncedAt: savedAt,
-            userEmail
-          });
-        })
-        .catch((error) => {
-          setCloudStatus({
-            mode: "error",
-            label: "Cloud auth: save error",
-            detail: getErrorMessage(error),
-            lastSyncedAt: null,
-            userEmail
-          });
-        });
-    }, 700);
-
-    return () => {
-      if (saveTimerRef.current) {
-        window.clearTimeout(saveTimerRef.current);
+    setIsRecoveringLegacyDeck(true);
+    try {
+      const payload = await fetchLegacyCommandDeck();
+      if (!payload) {
+        setNotice("No previous email data was found for this account yet.");
+        return;
       }
-    };
-  }, [state, session?.user.email, session?.user.id, cloudReady, workspaceMode, teams]);
+
+      const hasCurrentDeckData = hasMeaningfulDeckData(latestDeckRef.current);
+      dispatch({
+        type: hasCurrentDeckData ? "deck/merge-import" : "deck/import",
+        deck: payload.deck,
+        preserveLegacyGitHubProjects: true
+      });
+      window.localStorage.setItem(`${LEGACY_CLOUD_IMPORT_STORAGE_PREFIX}:${authUserId}`, payload.updatedAt ?? new Date().toISOString());
+      setNotice(hasCurrentDeckData ? "Recovered and merged the command deck saved under your email." : "Recovered the command deck saved under your email.");
+    } catch (error) {
+      setNotice(`Email data recovery failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsRecoveringLegacyDeck(false);
+    }
+  }, [authUserId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -402,299 +516,538 @@ export default function App() {
   }, [notice]);
 
   useEffect(() => {
+    const label = getDocumentTitleForView(view);
+    document.title = `${label} · Northwatch`;
+  }, [view]);
+
+  useEffect(() => {
+    const handleNewItem = () => {
+      const targetView = view === "dashboard" || view === "account" || view === "customize" ? "todo" : view;
+      if (targetView !== view) {
+        setView(targetView);
+      }
+      window.setTimeout(() => focusNewItemField(targetView), 0);
+      setNotice(`Ready to add ${getNewItemLabel(targetView)}.`);
+    };
+
+    window.addEventListener("northwatch:new-item", handleNewItem);
+    return () => window.removeEventListener("northwatch:new-item", handleNewItem);
+  }, [view]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.tagName === "SELECT";
+      if (isTyping) return;
+
+      if (event.key === "?") {
+        event.preventDefault();
+        setIsShortcutOverlayOpen((current) => !current);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        setIsShortcutOverlayOpen(false);
+        shortcutChordRef.current = null;
+        return;
+      }
+
+      const normalized = event.key.toLowerCase();
+      const chord = shortcutChordRef.current;
+      if (chord?.key === "g" && Date.now() - chord.armedAt < 1200) {
+        const targetView = getShortcutView(normalized);
+        shortcutChordRef.current = null;
+        if (targetView) {
+          event.preventDefault();
+          setView(targetView);
+          setNotice(`Opened ${getDocumentTitleForView(targetView)}.`);
+        }
+        return;
+      }
+
+      if (normalized === "g") {
+        shortcutChordRef.current = { key: "g", armedAt: Date.now() };
+        return;
+      }
+
+      if (normalized === "n") {
+        event.preventDefault();
+        window.dispatchEvent(new Event("northwatch:new-item"));
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const pollActivityFeed = async () => {
+      try {
+        await fetch(`/api/activity?since=${encodeURIComponent(lastActivityPollRef.current)}`, { cache: "no-store" });
+      } catch {
+        // Static/local builds may not have an activity API; the local state snapshot still drives the banner.
+      }
+
+      const nextFeed = buildLocalActivityFeed(latestDeckRef.current);
+      const freshEvents = nextFeed.filter((event) => new Date(event.createdAt).getTime() > new Date(lastActivityPollRef.current).getTime());
+      if (freshEvents.length > 0) {
+        setNewActivityCount((current) => current + freshEvents.length);
+        lastActivityPollRef.current = freshEvents[0].createdAt;
+      }
+    };
+
+    const timer = window.setInterval(pollActivityFeed, ACTIVITY_FEED_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!isLogoMenuOpen) return;
+
+    const closeFromOutside = (event: MouseEvent) => {
+      if (!logoMenuRef.current?.contains(event.target as Node)) {
+        setIsLogoMenuOpen(false);
+      }
+    };
+
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsLogoMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", closeFromOutside);
+    document.addEventListener("keydown", closeFromEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [isLogoMenuOpen]);
+
+  useEffect(() => {
     if (isViewEnabled(view, state.settings)) return;
-    setView("customize");
-    setNotice("Module hidden. Re-enable it from Customize.");
+    setView("dashboard");
+    setNotice("Module hidden. Returned to Command.");
   }, [state.settings, view]);
 
   const navigateFromSearch = (query: string) => {
     const normalized = query.toLowerCase().trim();
+    if (["account", "profile", "user", "identity"].some((term) => normalized.includes(term))) {
+      setView("account");
+      setNotice("Opened Account.");
+      return;
+    }
+    if (["customize", "customise", "theme", "logo", "appearance"].some((term) => normalized.includes(term))) {
+      setView("customize");
+      setNotice("Opened Customize.");
+      return;
+    }
+    if (["privacy", "policy"].some((term) => normalized.includes(term))) {
+      setLegalPanel("privacy");
+      setNotice("Opened Privacy Policy.");
+      return;
+    }
+    if (["terms", "conditions", "service"].some((term) => normalized.includes(term))) {
+      setLegalPanel("terms");
+      setNotice("Opened Terms and Conditions.");
+      return;
+    }
+    if (["settings", "help"].some((term) => normalized.includes(term))) {
+      setLegalPanel(normalized.includes("help") ? "help" : "settings");
+      setNotice(normalized.includes("help") ? "Opened Help." : "Opened Settings.");
+      return;
+    }
     const target = visibleNavItems.find((item) => item.terms.some((term) => normalized.includes(term)));
     if (!target) {
-      setNotice("No visible module matched. Check Customize if something is hidden.");
+      setNotice("No visible module matched.");
       return;
     }
     setView(target.view);
     setNotice(`Opened ${target.label}.`);
   };
 
-  const requestMagicLink = async (email: string) => {
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const pendingInvite = readTeamInviteFromLocation();
-    if (pendingInvite) {
-      window.localStorage.setItem(PENDING_TEAM_INVITE_STORAGE_KEY, pendingInvite);
-    }
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: window.location.origin
-      }
-    });
-
-    if (error) throw error;
-    setRememberedAccounts(rememberAuthAccount(email, null));
-  };
-
-  const forgetAuthAccount = (email: string) => {
-    setRememberedAccounts(forgetRememberedAccount(email));
-  };
-
   const signOut = async () => {
-    if (!supabase) return;
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      setNotice(error.message);
-      return;
+    try {
+      if (onAuthLogout) {
+        await onAuthLogout();
+      } else {
+        const response = await fetch(`${AUTH_API_BASE_URL}/auth/logout`, {
+          method: "POST",
+          credentials: "include"
+        });
+        if (!response.ok && response.status !== 401) {
+          throw new Error(await readApiError(response, `Logout failed with HTTP ${response.status}.`));
+        }
+      }
+      setNotice("Signed out.");
+    } catch (error) {
+      setNotice(`Sign out failed: ${getErrorMessage(error)}`);
     }
-    setNotice("Signed out of cloud auth.");
   };
 
-  const refreshTeamMembers = async (teamId: string) => {
-    if (!supabaseConfig.isConfigured || !supabase || !session) {
+  const loadTeams = useCallback(async () => {
+    if (!authUserId) {
+      setTeams([]);
       setTeamMembers([]);
+      setTeamsLoaded(true);
+      return [];
+    }
+
+    const nextTeams = await listMyTeams() as TeamWorkspace[];
+    setTeams(nextTeams);
+    setTeamsLoaded(true);
+    return nextTeams;
+  }, [authUserId]);
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!authUserId) {
+      setTeams([]);
+      setTeamMembers([]);
+      setTeamsLoaded(true);
       return;
     }
 
-    try {
-      const client = supabase as unknown as CloudDeckClient;
-      const members = await listTeamMembers(client, teamId);
-      setTeamMembers(members);
-    } catch (error) {
-      setTeamMembers([]);
-      setNotice(getErrorMessage(error));
+    setTeamsLoaded(false);
+    listMyTeams()
+      .then((nextTeams: TeamWorkspace[]) => {
+        if (isMounted) {
+          setTeams(nextTeams);
+          setTeamsLoaded(true);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setTeams([]);
+          setTeamsLoaded(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authUserId]);
+
+  const activateWorkspaceSelection = useCallback(async (workspace: TeamWorkspaceSelection) => {
+    const isSameWorkspace =
+      activeTeamWorkspace.type === workspace.type &&
+      (workspace.type === "personal" || (activeTeamWorkspace.type === "team" && activeTeamWorkspace.teamId === workspace.teamId));
+
+    if (isSameWorkspace) return;
+
+    const currentDeck = latestDeckRef.current;
+    if (activeTeamWorkspace.type === "team") {
+      saveCachedTeamCommandDeck(window.localStorage, authUserId, activeTeamWorkspace.teamId, currentDeck);
+      if (authUserId) {
+        await saveTeamCommandDeck(activeTeamWorkspace.teamId, currentDeck, teamDeckDocumentIdsRef.current[activeTeamWorkspace.teamId] ?? null)
+          .then((documentId) => {
+            if (documentId) teamDeckDocumentIdsRef.current[activeTeamWorkspace.teamId] = documentId;
+          })
+          .catch(() => undefined);
+      }
+    } else {
+      saveCommandDeck(currentDeck, window.localStorage, authUserId);
     }
+
+    let nextDeck: CommandDeckState;
+    if (workspace.type === "team") {
+      const cachedDeck = loadCachedTeamCommandDeck(window.localStorage, authUserId, workspace.teamId);
+      try {
+        const remoteDeck = authUserId ? await loadTeamCommandDeck(workspace.teamId) : { deck: null, documentId: null };
+        teamDeckDocumentIdsRef.current[workspace.teamId] = remoteDeck.documentId;
+        nextDeck = remoteDeck.deck ?? cachedDeck ?? createFreshTeamCommandDeck(workspace.name);
+      } catch (error) {
+        if (!cachedDeck) throw error;
+        nextDeck = cachedDeck;
+        setNotice(`Loaded ${workspace.name} from local cache. Shared sync will retry on your next edit.`);
+      }
+
+      setTeams((currentTeams) =>
+        currentTeams.some((team) => team.id === workspace.teamId)
+          ? currentTeams
+          : [...currentTeams, { id: workspace.teamId, name: workspace.name, slug: workspace.slug, role: workspace.role as TeamRole }]
+      );
+      setWorkspaceMode({ kind: "team", teamId: workspace.teamId });
+      if (workspace.slug) {
+        getTeam(workspace.slug)
+          .then((details) => setTeamMembers(details.members ?? []))
+          .catch(() => setTeamMembers([]));
+      }
+    } else {
+      nextDeck = loadCommandDeck(window.localStorage, authUserId);
+      setWorkspaceMode({ kind: "personal" });
+      setTeamMembers([]);
+      teamDeckDocumentIdsRef.current = {};
+    }
+
+    saveActiveTeamWorkspace(workspace);
+    setActiveTeamWorkspace(workspace);
+    dispatch({ type: "deck/import", deck: nextDeck });
+  }, [activeTeamWorkspace, authUserId]);
+
+  useEffect(() => {
+    if (!teamsLoaded || activeTeamWorkspace.type !== "team") return;
+    const activeTeamStillAvailable = teams.some((team) => team.id === activeTeamWorkspace.teamId);
+    if (activeTeamStillAvailable) return;
+
+    const personalWorkspace = { type: "personal" } satisfies TeamWorkspaceSelection;
+    saveActiveTeamWorkspace(personalWorkspace);
+    setActiveTeamWorkspace(personalWorkspace);
+    setWorkspaceMode({ kind: "personal" });
+    setTeamMembers([]);
+    teamDeckDocumentIdsRef.current = {};
+    dispatch({ type: "deck/import", deck: loadCommandDeck(window.localStorage, authUserId) });
+    setNotice("That team workspace is no longer available. Returned to personal vault.");
+  }, [activeTeamWorkspace, authUserId, teams, teamsLoaded]);
+
+  const openTeamWorkspace = async (team: TeamWorkspace) => {
+    const workspace = {
+      type: "team",
+      teamId: team.id,
+      slug: team.slug ?? team.id,
+      name: team.name,
+      role: team.role
+    } satisfies TeamWorkspaceSelection;
+    await activateWorkspaceSelection(workspace);
   };
 
   const switchWorkspace = async (nextWorkspace: WorkspaceMode) => {
-    if (!supabaseConfig.isConfigured || !supabase || !session) return;
-
     const isSameWorkspace =
       workspaceMode.kind === nextWorkspace.kind &&
       (workspaceMode.kind === "personal" || (nextWorkspace.kind === "team" && workspaceMode.teamId === nextWorkspace.teamId));
     if (isSameWorkspace) return;
+    setTeamInviteLink("");
+    if (nextWorkspace.kind === "personal") {
+      await activateWorkspaceSelection({ type: "personal" });
+      setNotice("Switched to personal workspace.");
+      return;
+    }
 
-    const client = supabase as unknown as CloudDeckClient;
-    const userId = session.user.id;
-    const userEmail = session.user.email ?? null;
-    const teamName = nextWorkspace.kind === "team" ? teams.find((team) => team.id === nextWorkspace.teamId)?.name ?? "team" : null;
+    const selectedTeam = teams.find((team) => team.id === nextWorkspace.teamId);
+    if (!selectedTeam) {
+      setNotice("Team workspace not found yet. Refreshing memberships.");
+      await loadTeams();
+      return;
+    }
 
     setIsTeamBusy(true);
-    setCloudReady(false);
-    setCloudStatus({
-      mode: "syncing",
-      label: "Cloud auth: switching",
-      detail: teamName ? `Loading shared workspace for ${teamName}.` : "Loading your private workspace.",
-      lastSyncedAt: null,
-      userEmail
-    });
-
     try {
-      if (nextWorkspace.kind === "team") {
-        const teamDeck = await loadTeamCloudDeck(client, nextWorkspace.teamId);
-        if (teamDeck) {
-          dispatch({ type: "deck/import", deck: teamDeck });
-          setWorkspaceMode(nextWorkspace);
-          setTeamInviteLink("");
-          await refreshTeamMembers(nextWorkspace.teamId);
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: synced",
-            detail: `Loaded shared team workspace "${teamName ?? nextWorkspace.teamId}".`,
-            lastSyncedAt: teamDeck.updatedAt,
-            userEmail
-          });
-        } else {
-          dispatch({ type: "deck/import", deck: freshCommandDeck });
-          const savedAt = await saveTeamCloudDeck(client, nextWorkspace.teamId, userId, freshCommandDeck);
-          setWorkspaceMode(nextWorkspace);
-          setTeamInviteLink("");
-          await refreshTeamMembers(nextWorkspace.teamId);
-          setCloudStatus({
-            mode: "synced",
-            label: "Cloud auth: seeded",
-            detail: `Created a fresh shared workspace for ${teamName ?? "this team"}.`,
-            lastSyncedAt: savedAt,
-            userEmail
-          });
-        }
-      } else {
-        const personalDeck = await loadCloudDeck(client, userId);
-        const safeDeck = personalDeck ?? freshCommandDeck;
-        dispatch({ type: "deck/import", deck: safeDeck });
-        const savedAt = personalDeck ? personalDeck.updatedAt : await saveCloudDeck(client, userId, safeDeck);
-        setWorkspaceMode(nextWorkspace);
-        setTeamMembers([]);
-        setTeamInviteLink("");
-        setCloudStatus({
-          mode: "synced",
-          label: personalDeck ? "Cloud auth: synced" : "Cloud auth: seeded",
-          detail: personalDeck ? "Loaded your private Supabase workspace." : "Created a private Supabase workspace for this signed-in user.",
-          lastSyncedAt: savedAt,
-          userEmail
-        });
-      }
-      setCloudReady(true);
+      await openTeamWorkspace(selectedTeam);
+      setNotice(`Switched to ${selectedTeam.name} workspace.`);
     } catch (error) {
-      setCloudReady(true);
-      setCloudStatus({
-        mode: "error",
-        label: "Cloud auth: workspace error",
-        detail: getErrorMessage(error),
-        lastSyncedAt: null,
-        userEmail
-      });
+      setNotice(`Team switch failed: ${getErrorMessage(error)}`);
     } finally {
       setIsTeamBusy(false);
     }
   };
 
   const createTeam = async (name: string) => {
-    if (!supabaseConfig.isConfigured || !supabase || !session) {
-      setNotice("Team mode requires Supabase sign-in.");
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setNotice("Enter a team name first.");
       return;
     }
 
-    const client = supabase as unknown as CloudDeckClient;
     setIsTeamBusy(true);
     try {
-      const team = await createTeamWorkspace(client, session.user.id, name, undefined, session.user.email);
-      setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
-      setNotice(`Team created: ${team.name}.`);
-      await switchWorkspace({ kind: "team", teamId: team.id });
+      const team = await createRemoteTeam({ name: trimmedName }) as TeamWorkspace;
+      await loadTeams();
+      await openTeamWorkspace(team);
+      setNotice(`Created ${team.name}.`);
     } catch (error) {
-      setNotice(getErrorMessage(error));
+      setNotice(`Create team failed: ${getErrorMessage(error)}`);
+    } finally {
       setIsTeamBusy(false);
     }
   };
 
   const joinTeam = async (teamCode: string) => {
-    if (!supabaseConfig.isConfigured || !supabase || !session) {
-      setNotice("Team mode requires Supabase sign-in.");
+    const token = extractInviteToken(teamCode);
+    if (!token) {
+      setNotice("Paste a team invite link first.");
       return;
     }
 
-    const client = supabase as unknown as CloudDeckClient;
     setIsTeamBusy(true);
     try {
-      const team = await joinTeamWorkspace(client, session.user.id, teamCode, session.user.email);
-      clearPendingTeamInvite();
-      setTeams((current) => [team, ...current.filter((item) => item.id !== team.id)]);
-      setNotice(`Joined team: ${team.name}.`);
-      await switchWorkspace({ kind: "team", teamId: team.id });
+      const accepted = await acceptTeamInvite(token);
+      await loadTeams();
+      const team = {
+        id: accepted.team.id,
+        name: accepted.team.name,
+        slug: accepted.team.slug,
+        role: accepted.membership?.role ?? "member",
+        createdAt: new Date().toISOString()
+      } as TeamWorkspace;
+      await openTeamWorkspace(team);
+      setNotice(`Joined ${accepted.team.name}.`);
     } catch (error) {
-      setNotice(getErrorMessage(error));
+      setNotice(`Join team failed: ${getErrorMessage(error)}`);
+    } finally {
       setIsTeamBusy(false);
     }
   };
 
-  const createInviteLink = async () => {
-    if (!supabaseConfig.isConfigured || !supabase || !session || !activeTeam) {
-      setNotice("Open a signed-in team workspace before creating an invite.");
+  const createInviteLink = async (email: string, role: TeamRole = "member") => {
+    setTeamInviteLink("");
+    setTeamInviteNotice(null);
+    const cleanedEmail = email.trim().toLowerCase();
+    if (!activeTeam) {
+      setTeamInviteNotice({
+        tone: "warning",
+        title: "Team workspace required",
+        message: "Switch to a team workspace before adding a teammate."
+      });
+      setNotice("Switch to a team workspace before adding a teammate.");
+      return;
+    }
+    if (activeTeam.role !== "owner" && activeTeam.role !== "admin") {
+      setTeamInviteNotice({
+        tone: "warning",
+        title: "Invite access required",
+        message: "Only team owners and admins can add teammates."
+      });
+      setNotice("Only team owners and admins can add teammates.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+      setTeamInviteNotice({
+        tone: "warning",
+        title: "Check teammate email",
+        message: "Enter a valid teammate email first."
+      });
+      setNotice("Enter a valid teammate email first.");
       return;
     }
 
-    const client = supabase as unknown as CloudDeckClient;
     setIsTeamBusy(true);
     try {
-      const invite = await createTeamInvite(client, activeTeam.id, session.user.id, window.location.origin);
-      setTeamInviteLink(invite.url);
-      try {
-        await navigator.clipboard?.writeText(invite.url);
-        setNotice("Invite link created and copied.");
-      } catch {
-        setNotice("Invite link created. Copy it from the field.");
-      }
+      const invite = await sendTeamInvite(activeTeam.slug ?? activeTeam.id, { email: cleanedEmail, role });
+      setTeamInviteLink(invite.acceptUrl ?? "");
+      const inviteNotice = createTeamInviteDeliveryNotice(invite, cleanedEmail);
+      setTeamInviteNotice(inviteNotice);
+      setNotice(`${inviteNotice.title}: ${inviteNotice.message}`);
     } catch (error) {
-      setNotice(getErrorMessage(error));
+      const message = getErrorMessage(error);
+      setTeamInviteNotice({
+        tone: "error",
+        title: "Invite request failed",
+        message
+      });
+      setNotice(`Create teammate invite failed: ${message}`);
     } finally {
       setIsTeamBusy(false);
     }
   };
 
   const updateMemberRole = async (memberUserId: string, role: TeamRole) => {
-    if (!supabaseConfig.isConfigured || !supabase || !session || !activeTeam) {
-      setNotice("Open an owner team workspace before changing roles.");
-      return;
-    }
-
-    const client = supabase as unknown as CloudDeckClient;
-    setIsTeamBusy(true);
-    try {
-      await updateTeamMemberRole(client, activeTeam.id, memberUserId, role);
-      const nextTeams = await listTeamWorkspaces(client, session.user.id);
-      setTeams(nextTeams);
-      await refreshTeamMembers(activeTeam.id);
-      setNotice(role === "owner" ? "Member promoted to owner." : "Member role set to member.");
-    } catch (error) {
-      setNotice(getErrorMessage(error));
-    } finally {
-      setIsTeamBusy(false);
-    }
+    setNotice(`${memberUserId} role changes are handled in team settings.`);
   };
 
   const removeMember = async (memberUserId: string) => {
-    if (!supabaseConfig.isConfigured || !supabase || !session || !activeTeam) {
-      setNotice("Open an owner team workspace before removing members.");
-      return;
-    }
+    setTeamMembers((current) => current.filter((member) => member.userId !== memberUserId));
+    setNotice("Member removed from this local account view.");
+  };
 
-    const client = supabase as unknown as CloudDeckClient;
+  const commandCenterName = getCommandCenterName(state.settings);
+  const hasAcceptedLegalTerms = hasValidLegalConsent(legalConsent);
+
+  const openLogoView = (targetView: DeckView) => {
+    setView(targetView);
+    setIsLogoMenuOpen(false);
+    setNotice(targetView === "account" ? "Opened Account." : targetView === "customize" ? "Opened Customize." : "Opened module.");
+  };
+
+  const openLegalPanel = (panel: LegalPanel) => {
+    setLegalPanel(panel);
+    setIsLogoMenuOpen(false);
+  };
+
+  const acceptLegalTerms = () => {
+    const record: LegalConsentRecord = {
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      acceptedAt: new Date().toISOString(),
+      jurisdiction: LEGAL_JURISDICTION_LABEL
+    };
+    saveLegalConsent(record);
+    setLegalConsent(record);
+    setNotice("Terms and Privacy Policy accepted.");
+  };
+
+  const switchExpressWorkspace = (workspace: TeamWorkspaceSelection) => {
     setIsTeamBusy(true);
-    try {
-      await removeTeamMember(client, activeTeam.id, memberUserId);
-      const nextTeams = await listTeamWorkspaces(client, session.user.id);
-      setTeams(nextTeams);
-      setTeamMembers((current) => current.filter((member) => member.userId !== memberUserId));
-      setNotice("Member removed from team.");
-      if (memberUserId === session.user.id) {
-        await switchWorkspace({ kind: "personal" });
-      } else {
-        await refreshTeamMembers(activeTeam.id);
-      }
-    } catch (error) {
-      setNotice(getErrorMessage(error));
-    } finally {
-      setIsTeamBusy(false);
-    }
+    activateWorkspaceSelection(workspace)
+      .then(() => {
+        setNotice(workspace.type === "team" ? `Switched to ${workspace.name} workspace.` : "Switched to personal workspace.");
+      })
+      .catch((error) => {
+        setNotice(`Workspace switch failed: ${getErrorMessage(error)}`);
+      })
+      .finally(() => {
+        setIsTeamBusy(false);
+      });
   };
 
   useEffect(() => {
-    if (!supabaseConfig.isConfigured || !session || !cloudReady) return;
+    if (workspaceUrlHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const requestedWorkspace = params.get("workspace");
+    const requestedTeam = params.get("team");
+    const requestedSection = params.get("section");
 
-    const pendingInvite = readPendingTeamInvite();
-    if (!pendingInvite || pendingInviteAttemptRef.current === pendingInvite) return;
+    if (requestedSection) {
+      const nextView = getViewForUrlSection(requestedSection);
+      if (nextView) setView(nextView);
+    }
 
-    pendingInviteAttemptRef.current = pendingInvite;
-    void joinTeam(pendingInvite);
-  }, [cloudReady, session?.user.id]);
+    if (requestedWorkspace !== "team" || !requestedTeam) {
+      workspaceUrlHandledRef.current = true;
+      return;
+    }
 
-  if (supabaseConfig.isConfigured && !authReady) {
-    return <CloudBootScreen status={cloudStatus} />;
-  }
+    if (teams.length === 0) return;
 
-  if (supabaseConfig.isConfigured && authReady && !session) {
-    return (
-      <AuthGate
-        status={cloudStatus}
-        rememberedAccounts={rememberedAccounts}
-        onRequestMagicLink={requestMagicLink}
-        onForgetRememberedAccount={forgetAuthAccount}
-      />
-    );
-  }
+    const selectedTeam = teams.find((team) => team.slug === requestedTeam || team.id === requestedTeam);
+    workspaceUrlHandledRef.current = true;
+    if (!selectedTeam) {
+      setNotice("Team workspace link is not available for this account.");
+      return;
+    }
 
-  if (supabaseConfig.isConfigured && authReady && session && !cloudReady) {
-    return <CloudBootScreen status={cloudStatus} />;
-  }
-
-  const commandCenterName = getCommandCenterName(state.settings);
+    void activateWorkspaceSelection({
+      type: "team",
+      teamId: selectedTeam.id,
+      slug: selectedTeam.slug ?? selectedTeam.id,
+      name: selectedTeam.name,
+      role: selectedTeam.role
+    }).catch((error) => {
+      setNotice(`Team workspace link failed: ${getErrorMessage(error)}`);
+    });
+  }, [activateWorkspaceSelection, teams]);
 
   return (
-    <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background}>
+    <div className="deck-app" data-accent={state.settings.accent} data-density={state.settings.density} data-background={state.settings.background} data-workspace={activeTeamWorkspace.type}>
       <TechBackdrop metrics={metrics} />
       <aside className="tactical-rail" aria-label="Primary">
-        <div className="rail-brand" aria-label={commandCenterName}>
-          <LogoMark variant={state.settings.logoStyle} />
+        <div className="rail-brand-shell" ref={logoMenuRef}>
+          <button
+            className={`rail-brand ${isLogoMenuOpen ? "active" : ""}`}
+            type="button"
+            aria-label={`Open ${commandCenterName} menu`}
+            aria-haspopup="menu"
+            aria-expanded={isLogoMenuOpen}
+            onClick={() => setIsLogoMenuOpen((current) => !current)}
+          >
+            <LogoMark variant={state.settings.logoStyle} />
+          </button>
+          {isLogoMenuOpen && (
+            <LogoMenu
+              hasAcceptedLegalTerms={hasAcceptedLegalTerms}
+              onOpenView={openLogoView}
+              onOpenPanel={openLegalPanel}
+            />
+          )}
         </div>
         <nav className="rail-nav" aria-label="Primary">
           {visibleNavItems.map((item) => (
@@ -717,9 +1070,39 @@ export default function App() {
       </aside>
 
       <main className="deck-screen">
-        <TopBar settings={state.settings} cloudStatus={cloudStatus} workspaceLabel={workspaceLabel} onCommand={navigateFromSearch} onSignOut={signOut} />
+        <TopBar
+          settings={state.settings}
+          cloudStatus={cloudStatus}
+          workspaceLabel={workspaceLabel}
+          activeWorkspace={activeTeamWorkspace}
+          authUser={authUser}
+          onCommand={navigateFromSearch}
+          onWorkspaceChange={switchExpressWorkspace}
+          onSignOut={signOut}
+          onAuthLogout={onAuthLogout}
+        />
+        {newActivityCount > 0 && (
+          <ActivityFeedBanner
+            count={newActivityCount}
+            onJump={() => {
+              setView("dashboard");
+              setNewActivityCount(0);
+              setNotice("Activity feed acknowledged.");
+            }}
+          />
+        )}
         <section className="deck-content">
-          {view === "dashboard" && <Dashboard state={state} metrics={metrics} dispatch={dispatch} setView={setView} setNotice={setNotice} />}
+          {view === "dashboard" && (
+            <Dashboard
+              state={state}
+              metrics={metrics}
+              activeTeamWorkspace={activeTeamWorkspace}
+              teamMembers={teamMembers}
+              dispatch={dispatch}
+              setView={setView}
+              setNotice={setNotice}
+            />
+          )}
           {view === "todo" && <TodoModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "daily" && <DailyModule state={state} dispatch={dispatch} setNotice={setNotice} />}
           {view === "projects" && <ProjectsModule state={state} dispatch={dispatch} setNotice={setNotice} />}
@@ -734,11 +1117,13 @@ export default function App() {
             <AccountModule
               state={state}
               cloudStatus={cloudStatus}
+              authUser={authUser}
               workspaceMode={workspaceMode}
               teams={teams}
               activeTeam={activeTeam}
               teamMembers={teamMembers}
               teamInviteLink={teamInviteLink}
+              teamInviteNotice={teamInviteNotice}
               isTeamBusy={isTeamBusy}
               dispatch={dispatch}
               onSwitchWorkspace={switchWorkspace}
@@ -747,6 +1132,8 @@ export default function App() {
               onCreateInviteLink={createInviteLink}
               onUpdateMemberRole={updateMemberRole}
               onRemoveMember={removeMember}
+              onRecoverEmailDeck={recoverLegacyEmailDeck}
+              isRecoveringEmailDeck={isRecoveringLegacyDeck}
               onSignOut={signOut}
             />
           )}
@@ -760,9 +1147,524 @@ export default function App() {
         setView={setView}
         setNotice={setNotice}
       />
+      {legalPanel && (
+        <LegalInfoWindow
+          panel={legalPanel}
+          consentRecord={legalConsent}
+          onNotice={setNotice}
+          onClose={() => setLegalPanel(null)}
+        />
+      )}
+      {!hasAcceptedLegalTerms && (
+        <LegalConsentGate
+          onAccept={acceptLegalTerms}
+          onOpenPanel={openLegalPanel}
+        />
+      )}
+      {isShortcutOverlayOpen && <ShortcutOverlay onClose={() => setIsShortcutOverlayOpen(false)} />}
       {notice && <div className="deck-toast">{notice}</div>}
     </div>
   );
+}
+
+function LogoMenu({
+  hasAcceptedLegalTerms,
+  onOpenView,
+  onOpenPanel
+}: {
+  hasAcceptedLegalTerms: boolean;
+  onOpenView: (view: DeckView) => void;
+  onOpenPanel: (panel: LegalPanel) => void;
+}) {
+  return (
+    <div className="logo-menu" role="menu" aria-label="Northwatch menu">
+      <div className="logo-menu-head">
+        <span className="micro-label">Northwatch</span>
+        <strong>Operator menu</strong>
+        <small>{hasAcceptedLegalTerms ? "Legal consent active" : "Legal consent required"}</small>
+      </div>
+      <button type="button" role="menuitem" onClick={() => onOpenView("account")}>
+        <UserRound size={16} /> Account
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenView("customize")}>
+        <Palette size={16} /> Customize
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("settings")}>
+        <Settings2 size={16} /> Settings
+      </button>
+      <button type="button" role="menuitem" onClick={() => { window.location.href = "/about"; }}>
+        <Info size={16} /> About
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("help")}>
+        <Sparkles size={16} /> Help
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("privacy")}>
+        <Shield size={16} /> Privacy Policy
+      </button>
+      <button type="button" role="menuitem" onClick={() => onOpenPanel("terms")}>
+        <LockKeyhole size={16} /> Terms and Conditions
+      </button>
+    </div>
+  );
+}
+
+function LegalConsentGate({
+  onAccept,
+  onOpenPanel
+}: {
+  onAccept: () => void;
+  onOpenPanel: (panel: LegalPanel) => void;
+}) {
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const canContinue = termsAccepted && privacyAccepted;
+
+  return (
+    <div className="legal-consent-gate">
+      <section className="legal-consent-card" role="dialog" aria-modal="true" aria-labelledby="legal-consent-title">
+        <div className="legal-consent-icon"><Shield size={20} /></div>
+        <span className="micro-label">Required agreement</span>
+        <h2 id="legal-consent-title">Review and accept the legal terms</h2>
+        <p>
+          Northwatch needs explicit agreement to the Terms and Conditions and acknowledgement of the Privacy Policy before the
+          command deck opens. The language is drafted around Kenyan data protection duties and international consent principles.
+        </p>
+        <div className="legal-link-row">
+          <button type="button" onClick={() => onOpenPanel("terms")}>
+            <LockKeyhole size={15} /> Read Terms
+          </button>
+          <button type="button" onClick={() => onOpenPanel("privacy")}>
+            <Shield size={15} /> Read Privacy Policy
+          </button>
+        </div>
+        <div className="consent-checks">
+          <label className="legal-check">
+            <input
+              type="checkbox"
+              aria-label="I agree to the Terms and Conditions"
+              checked={termsAccepted}
+              onChange={(event) => setTermsAccepted(event.target.checked)}
+            />
+            <span>
+              <strong>I agree to the Terms and Conditions.</strong>
+              <small>Use Northwatch lawfully, verify AI/intel outputs, and protect account and team access.</small>
+            </span>
+          </label>
+          <label className="legal-check">
+            <input
+              type="checkbox"
+              aria-label="I acknowledge the Privacy Policy"
+              checked={privacyAccepted}
+              onChange={(event) => setPrivacyAccepted(event.target.checked)}
+            />
+            <span>
+              <strong>I acknowledge the Privacy Policy.</strong>
+              <small>Personal data may be stored locally, synced through configured cloud services, and used only for stated purposes.</small>
+            </span>
+          </label>
+        </div>
+        <button className="legal-continue" type="button" disabled={!canContinue} onClick={onAccept}>
+          <CircleCheck size={16} /> Continue to Northwatch
+        </button>
+        <small className="legal-note">Product baseline only. Have qualified counsel review before relying on this in a regulated launch.</small>
+      </section>
+    </div>
+  );
+}
+
+function LegalInfoWindow({
+  panel,
+  consentRecord,
+  onNotice,
+  onClose
+}: {
+  panel: LegalPanel;
+  consentRecord: LegalConsentRecord | null;
+  onNotice: (message: string) => void;
+  onClose: () => void;
+}) {
+  const content = getLegalPanelContent(panel, consentRecord);
+
+  return (
+    <div className="legal-window-backdrop" onMouseDown={onClose}>
+      <section
+        className={`legal-window legal-window-${panel}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`legal-window-${panel}-title`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="legal-window-head">
+          <div>
+            <span className="micro-label">{content.eyebrow}</span>
+            <h2 id={`legal-window-${panel}-title`}>{content.title}</h2>
+            <p>{content.summary}</p>
+          </div>
+          <button type="button" aria-label="Close legal window" onClick={onClose}>
+            <X size={17} />
+          </button>
+        </div>
+        <div className="legal-copy">
+          {content.sections.map((section) => (
+            <article key={section.heading}>
+              <h3>{section.heading}</h3>
+              {section.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+            </article>
+          ))}
+          {panel === "settings" && <TelegramSettingsCard onNotice={onNotice} />}
+        </div>
+        <div className="legal-window-foot">
+          <span>Terms v{TERMS_VERSION}</span>
+          <span>Privacy v{PRIVACY_VERSION}</span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function loadActiveTeamWorkspace(): TeamWorkspaceSelection {
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_TEAM_WORKSPACE_STORAGE_KEY);
+    if (!stored) return { type: "personal" };
+    const parsed = JSON.parse(stored) as Partial<TeamWorkspaceSelection>;
+    if (parsed.type === "team" && typeof parsed.teamId === "string" && typeof parsed.slug === "string" && typeof parsed.name === "string") {
+      return { type: "team", teamId: parsed.teamId, slug: parsed.slug, name: parsed.name, role: typeof parsed.role === "string" ? parsed.role : "member" };
+    }
+  } catch {
+    // Use personal workspace when saved selection cannot be read.
+  }
+  return { type: "personal" };
+}
+
+function saveActiveTeamWorkspace(workspace: TeamWorkspaceSelection) {
+  window.localStorage.setItem(ACTIVE_TEAM_WORKSPACE_STORAGE_KEY, JSON.stringify(workspace));
+}
+
+function loadCommandDeckForWorkspace(storage: Storage, userId: string | null, workspace: TeamWorkspaceSelection): CommandDeckState {
+  if (workspace.type === "team") {
+    return loadCachedTeamCommandDeck(storage, userId, workspace.teamId) ?? createFreshTeamCommandDeck(workspace.name);
+  }
+
+  return loadCommandDeck(storage, userId);
+}
+
+function TelegramSettingsCard({ onNotice }: { onNotice: (message: string) => void }) {
+  const [status, setStatus] = useState<TelegramConfigStatus>({ configured: false, botUsername: null, chatId: null, updatedAt: null });
+  const [botToken, setBotToken] = useState("");
+  const [chatId, setChatId] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadConfig() {
+      setIsLoading(true);
+      try {
+        const nextStatus = await fetchTelegramConfig();
+        if (!cancelled) {
+          setStatus(nextStatus);
+          setError(null);
+        }
+      } catch (loadError) {
+        if (!cancelled) setError(getErrorMessage(loadError));
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    loadConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveBot = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSaving(true);
+    setError(null);
+    try {
+      const nextStatus = await saveTelegramConfig({ botToken, chatId });
+      setStatus(nextStatus);
+      setBotToken("");
+      onNotice("Telegram bot connected for this account.");
+    } catch (saveError) {
+      setError(getErrorMessage(saveError));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteBot = async () => {
+    setIsDeleting(true);
+    setError(null);
+    try {
+      await deleteTelegramConfig();
+      setStatus({ configured: false, botUsername: null, chatId: null, updatedAt: null });
+      setBotToken("");
+      setChatId("");
+      onNotice("Telegram bot removed from this account.");
+    } catch (deleteError) {
+      setError(getErrorMessage(deleteError));
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const sendTest = async () => {
+    setIsTesting(true);
+    setError(null);
+    try {
+      await postToTelegram({
+        kind: "agent-alert",
+        title: "Northwatch Telegram test",
+        body: "Your personal Telegram bot is connected and ready for cards, docs, and agent alerts.",
+        meta: "Settings test"
+      });
+      onNotice("Telegram test sent.");
+    } catch (testError) {
+      setError(getErrorMessage(testError));
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const statusText = isLoading
+    ? "Checking Telegram connection..."
+    : status.configured
+      ? `Connected to ${status.botUsername ? `@${status.botUsername}` : "Telegram"}${status.chatId ? ` - ${status.chatId}` : ""}`
+      : "No personal Telegram bot connected yet.";
+
+  return (
+    <article className="settings-card telegram-settings-card">
+      <div className="telegram-card-head">
+        <div>
+          <h3>Connect your Telegram bot</h3>
+          <p>Each Northwatch user can save their own bot. The token is encrypted on the Express API and never stored in this browser.</p>
+        </div>
+        <span className={`telegram-status-pill ${status.configured ? "connected" : "idle"}`}>
+          <Bot size={14} /> {status.configured ? "Connected" : "Not connected"}
+        </span>
+      </div>
+      <ol className="telegram-steps">
+        <li><strong>Step 1</strong><span>Open Telegram and search for <code>@BotFather</code>.</span></li>
+        <li><strong>Step 2</strong><span>Send <code>/newbot</code>, choose a name, then choose a username ending in <code>bot</code>.</span></li>
+        <li><strong>Step 3</strong><span>Copy the HTTP API token BotFather gives you.</span></li>
+        <li><strong>Step 4</strong><span>Open your new bot in Telegram and send it any message. For a group, add the bot to the group and send a message there.</span></li>
+        <li><strong>Step 5</strong><span>Visit <code>https://api.telegram.org/bot&lt;token&gt;/getUpdates</code> and copy the <code>chat.id</code> value.</span></li>
+        <li><strong>Step 6</strong><span>Paste the token and chat id below, save, then send a test from Northwatch.</span></li>
+      </ol>
+      <a className="telegram-help-link" href="https://t.me/BotFather" target="_blank" rel="noreferrer">
+        <ExternalLink size={14} /> Open BotFather
+      </a>
+      <p className="telegram-config-status">{statusText}</p>
+      {status.updatedAt && <p className="telegram-config-status">Last updated {formatDateTime(status.updatedAt)}.</p>}
+      {error && <p className="telegram-config-error">{error}</p>}
+      <form className="telegram-config-form" onSubmit={saveBot}>
+        <label>
+          <span>Telegram bot token</span>
+          <input
+            aria-label="Telegram bot token"
+            autoComplete="off"
+            placeholder="123456:ABC-DEF..."
+            type="password"
+            value={botToken}
+            onChange={(event) => setBotToken(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Telegram chat id</span>
+          <input
+            aria-label="Telegram chat id"
+            autoComplete="off"
+            placeholder="987654321"
+            value={chatId}
+            onChange={(event) => setChatId(event.target.value)}
+          />
+        </label>
+        <div className="telegram-action-row">
+          <button type="submit" disabled={isSaving || !botToken.trim() || !chatId.trim()}>
+            <KeyRound size={15} /> {isSaving ? "Saving" : "Save bot"}
+          </button>
+          <button type="button" disabled={isTesting || !status.configured} onClick={sendTest}>
+            <Send size={15} /> {isTesting ? "Sending" : "Send test"}
+          </button>
+          <button type="button" disabled={isDeleting || !status.configured} onClick={deleteBot}>
+            <Trash2 size={15} /> {isDeleting ? "Deleting" : "Delete bot"}
+          </button>
+        </div>
+      </form>
+    </article>
+  );
+}
+
+function getLegalPanelContent(panel: LegalPanel, consentRecord: LegalConsentRecord | null): {
+  eyebrow: string;
+  title: string;
+  summary: string;
+  sections: Array<{ heading: string; body: string[] }>;
+} {
+  if (panel === "settings") {
+    return {
+      eyebrow: "System window",
+      title: "Settings",
+      summary: "Quick operational state for the command deck, consent record, and local-first storage posture.",
+      sections: [
+        {
+          heading: "Storage",
+          body: [
+            "Northwatch saves the deck in this browser with a per-user storage key. The Express API scopes protected server data to the signed-in Northwatch user."
+          ]
+        },
+        {
+          heading: "Legal status",
+          body: [
+            consentRecord
+              ? `Terms and Privacy were accepted on ${formatDateTime(consentRecord.acceptedAt)} for ${consentRecord.jurisdiction}.`
+              : "Terms and Privacy acceptance is still required before the deck can be used."
+          ]
+        },
+        {
+          heading: "AI agent",
+          body: [
+            "Sentinel can use the configured local Ollama endpoint when enabled. Generated planning or intel output should be verified before you act on it."
+          ]
+        }
+      ]
+    };
+  }
+
+  if (panel === "help") {
+    return {
+      eyebrow: "Support",
+      title: "Help",
+      summary: "Use the rail for day-to-day modules and the logo menu for account, customization, settings, and legal documents.",
+      sections: [
+        {
+          heading: "Command flow",
+          body: [
+            "Use Command search to jump to modules, the rail for core workflows, and Sentinel for autonomous briefs or intel scans."
+          ]
+        },
+        {
+          heading: "Customization",
+          body: [
+            "Open Customize from the logo menu to change density, accent, background, visible modules, the Northwatch mark, and Ollama settings."
+          ]
+        },
+        {
+          heading: "Account and teams",
+          body: [
+            "Open Account from the logo menu to update profile details, review credential-auth status, and manage privacy controls."
+          ]
+        }
+      ]
+    };
+  }
+
+  if (panel === "privacy") {
+    return {
+      eyebrow: "Legal",
+      title: "Privacy Policy",
+      summary: "This policy explains what Northwatch collects, why it is used, and the controls a user keeps under Kenyan and international privacy principles.",
+      sections: [
+        {
+          heading: "Information collected",
+          body: [
+            "Northwatch may store profile fields such as callsign, avatar URL, age, phone number, organization, command center name, email identity, consent version, and timestamps.",
+            "User content may include tasks, routines, projects, calendar items, workouts, books, journal entries, finance entries, watchlist intel, research notes, and autonomous scan summaries."
+          ]
+        },
+        {
+          heading: "Purpose and lawful basis",
+          body: [
+            "Data is used to operate the command deck, keep local state, support signed-in workspaces, run autonomous intel features, and protect account access.",
+            "Where consent is the basis, consent must be specific, informed, voluntary, and capable of withdrawal. Some processing may instead be necessary to provide the service, protect the workspace, or comply with legal obligations."
+          ]
+        },
+        {
+          heading: "Storage and processors",
+          body: [
+            "The browser keeps a local copy through localStorage. The Express API and PostgreSQL store protected user data when configured. Vercel hosts the web app. Ollama requests are sent to the configured local endpoint when enabled.",
+            "Team sharing should be treated as confidential when it is enabled. Invite links should be protected like access credentials."
+          ]
+        },
+        {
+          heading: "Rights and controls",
+          body: [
+            "Users should be able to access, correct, delete, object to, restrict, or request portability of personal data where applicable. Kenyan users may also raise privacy complaints with the Office of the Data Protection Commissioner where the law applies.",
+            "Reset deck removes the local Northwatch deck. Server-side deletion or account deletion depends on the configured Northwatch API and operational controls."
+          ]
+        },
+        {
+          heading: "Transfers, security, and retention",
+          body: [
+            "Personal data should not be transferred outside Kenya unless appropriate safeguards, valid consent, or another lawful transfer basis applies. International users may also have GDPR-style or similar regional rights.",
+            "Northwatch keeps data only as long as needed for the stated purposes or until the user deletes it, subject to backups, legal obligations, and team workspace administration."
+          ]
+        },
+        {
+          heading: "Children and sensitive data",
+          body: [
+            "Northwatch is not intended for children without appropriate guardian consent. Avoid entering sensitive personal data unless you have a clear lawful basis and suitable safeguards."
+          ]
+        }
+      ]
+    };
+  }
+
+  return {
+    eyebrow: "Legal",
+    title: "Terms and Conditions",
+    summary: "These terms govern use of Northwatch and sit alongside the Privacy Policy.",
+    sections: [
+      {
+        heading: "Use of Northwatch",
+        body: [
+          "Northwatch is a personal and team command deck for tasks, routines, projects, calendar planning, fitness, reading, journal, finances, market intel, and AI-assisted briefings.",
+          "You are responsible for the content you enter, the decisions you make from the deck, and ensuring you have a lawful basis to process any personal data you add."
+        ]
+      },
+      {
+        heading: "AI and autonomous intel",
+        body: [
+          "Sentinel, Copilot system AI, Ollama responses, and autonomous intel scans are assistive outputs. They are not legal, financial, medical, security, or investment advice.",
+          "Verify sources, prices, financial information, and legal obligations before acting. Do not rely on generated output as the sole basis for high-stakes decisions."
+        ]
+      },
+      {
+        heading: "Acceptable use",
+        body: [
+          "Do not use Northwatch to violate Kenyan law, international law, platform rules, data protection duties, intellectual property rights, or another person's privacy.",
+          "Do not use the app for unauthorized access, unlawful surveillance, harassment, credential sharing abuse, or processing data about others without a valid legal basis."
+        ]
+      },
+      {
+        heading: "Account, teams, and security",
+        body: [
+          "You are responsible for protecting your email account, password, browser session, local device, team invite links, and any connected deployment credentials.",
+          "Team workspaces should be used only with people who are authorized to see the shared data. Owners should remove members when access is no longer appropriate."
+        ]
+      },
+      {
+        heading: "Privacy and compliance",
+        body: [
+          "Use of Northwatch includes agreement that data will be handled according to the Privacy Policy. Where consent is required, it can be withdrawn for optional processing, but withdrawal may limit features that require the data.",
+          "The app is drafted to support Kenya's Data Protection Act, the Data Protection Regulations, and international privacy principles such as lawful, fair, transparent, limited, secure, and rights-aware processing where they apply."
+        ]
+      },
+      {
+        heading: "Availability and changes",
+        body: [
+          "The app may change, break, or be unavailable. Local browser storage, cloud settings, third-party infrastructure, and network conditions can affect access.",
+          "When Terms or Privacy versions change, Northwatch may request fresh acceptance before continued use."
+        ]
+      }
+    ]
+  };
 }
 
 function isViewEnabled(view: DeckView, settings: DeckSettings): boolean {
@@ -788,14 +1690,22 @@ function TopBar({
   settings,
   cloudStatus,
   workspaceLabel,
+  activeWorkspace,
+  authUser,
   onCommand,
-  onSignOut
+  onWorkspaceChange,
+  onSignOut,
+  onAuthLogout
 }: {
   settings: DeckSettings;
   cloudStatus: CloudStatus;
   workspaceLabel: string;
+  activeWorkspace: TeamWorkspaceSelection;
+  authUser?: AuthUser | null;
   onCommand: (query: string) => void;
+  onWorkspaceChange: (workspace: TeamWorkspaceSelection) => void;
   onSignOut: () => void;
+  onAuthLogout?: () => void | Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const checkedAt = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" }).format(new Date());
@@ -805,6 +1715,10 @@ function TopBar({
   const profileDetails = [settings.age.trim() ? `Age ${settings.age.trim()}` : "", settings.phoneNumber.trim()]
     .filter(Boolean)
     .join(" / ");
+  const inviteHref =
+    activeWorkspace.type === "team" && canTeamRole(activeWorkspace.role, "invite_member")
+      ? `/team/${encodeURIComponent(activeWorkspace.slug)}/settings#invites`
+      : "";
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -837,12 +1751,31 @@ function TopBar({
           <Shield size={14} />
           {workspaceLabel}
         </span>
+        <WorkspaceSwitcher activeWorkspace={activeWorkspace} onWorkspaceChange={onWorkspaceChange as any} />
+        {inviteHref && (
+          <a className="topbar-invite-link" href={inviteHref}>
+            <UsersRound size={14} /> Invite teammate
+          </a>
+        )}
+        <NotificationBell />
         <span className={`cloud-status-pill ${cloudStatus.mode}`} title={cloudStatus.detail}>
           <Cloud size={14} />
           {cloudStatus.label}
         </span>
-        {cloudStatus.userEmail && (
-          <button className="topbar-icon-button" type="button" aria-label="Sign out of Northwatch" onClick={onSignOut}>
+        {authUser && <AuthUserChip user={authUser} />}
+        {(authUser || cloudStatus.userEmail) && (
+          <button
+            className="topbar-icon-button"
+            type="button"
+            aria-label="Sign out of Northwatch"
+            onClick={() => {
+              if (authUser && onAuthLogout) {
+                void onAuthLogout();
+                return;
+              }
+              onSignOut();
+            }}
+          >
             <LogOut size={15} />
           </button>
         )}
@@ -851,6 +1784,15 @@ function TopBar({
         <strong>72%</strong>
       </div>
     </header>
+  );
+}
+
+function AuthUserChip({ user }: { user: AuthUser }) {
+  return (
+    <span className="auth-user-chip" title={user.email}>
+      <span>{getProfileInitials(user.displayName)}</span>
+      <strong>{user.displayName}</strong>
+    </span>
   );
 }
 
@@ -865,166 +1807,107 @@ function ProfileAvatar({ settings, compact = false, ariaHidden = false }: { sett
   );
 }
 
-function CloudBootScreen({ status }: { status: CloudStatus }) {
+function ActivityFeedBanner({ count, onJump }: { count: number; onJump: () => void }) {
   return (
-    <main className="auth-screen">
-      <section className="auth-panel">
-        <div className="auth-mark">
-          <LockKeyhole size={24} />
-        </div>
-        <span className="micro-label">Northwatch secure boot</span>
-        <h1>Checking private access.</h1>
-        <p>{status.detail}</p>
-      </section>
-    </main>
+    <div className="activity-feed-banner" role="status">
+      <span>{count} new event{count === 1 ? "" : "s"}</span>
+      <button type="button" onClick={onJump}>
+        Jump to feed
+      </button>
+    </div>
   );
 }
 
-export function AuthGate({
-  status,
-  rememberedAccounts,
-  onRequestMagicLink,
-  onForgetRememberedAccount
-}: {
-  status: CloudStatus;
-  rememberedAccounts: RememberedAuthAccount[];
-  onRequestMagicLink: (email: string) => Promise<void>;
-  onForgetRememberedAccount: (email: string) => void;
-}) {
-  const [email, setEmail] = useState(rememberedAccounts[0]?.email ?? "");
-  const [message, setMessage] = useState(status.detail);
-  const [isSending, setIsSending] = useState(false);
-  const firstRememberedEmail = rememberedAccounts[0]?.email ?? "";
-
-  useEffect(() => {
-    if (!email && firstRememberedEmail) {
-      setEmail(firstRememberedEmail);
-    }
-  }, [email, firstRememberedEmail]);
-
-  useEffect(() => {
-    setMessage(status.detail);
-  }, [status.detail]);
-
-  const sendMagicLink = async (targetEmail: string) => {
-    const normalizedEmail = targetEmail.trim();
-    if (!normalizedEmail) return;
-
-    setEmail(normalizedEmail);
-    setIsSending(true);
-    try {
-      await onRequestMagicLink(normalizedEmail);
-      setMessage("Magic link sent. Open it on this device to unlock Northwatch.");
-    } catch (error) {
-      setMessage(getErrorMessage(error));
-    } finally {
-      setIsSending(false);
-    }
-  };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    await sendMagicLink(email);
-  };
+function ShortcutOverlay({ onClose }: { onClose: () => void }) {
+  const shortcuts = [
+    ["G + K", "Kanban / To Do"],
+    ["G + P", "Projects"],
+    ["G + D", "Docs / Journal"],
+    ["G + C", "Content Queue / Intel"],
+    ["N", "New context item"],
+    ["?", "Shortcut map"]
+  ];
 
   return (
-    <main className="auth-screen">
-      <section className="auth-panel">
-        <div className="auth-mark">
-          <LockKeyhole size={24} />
-        </div>
-        <span className="micro-label">Private command deck</span>
-        <h1>Northwatch is locked.</h1>
-        <p>Sign in with Supabase Auth to sync your projects, tasks, journal, books, workouts, and finances across devices.</p>
-        {rememberedAccounts.length > 0 && (
-          <div className="remembered-accounts" aria-label="Remembered accounts">
-            <span>Known accounts on this device</span>
-            {rememberedAccounts.map((account) => (
-              <div className="remembered-account" key={account.email}>
-                <button className="remembered-account-main" type="button" disabled={isSending} onClick={() => sendMagicLink(account.email)}>
-                  <UserRound size={15} />
-                  <span>Continue as</span>
-                  <strong>{account.email}</strong>
-                </button>
-                <button
-                  className="remembered-account-forget"
-                  type="button"
-                  aria-label={`Forget ${account.email}`}
-                  onClick={() => onForgetRememberedAccount(account.email)}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
+    <div className="shortcut-overlay" role="dialog" aria-modal="true" aria-labelledby="shortcut-title" onMouseDown={onClose}>
+      <section className="shortcut-card" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="legal-window-head">
+          <div>
+            <span className="micro-label">Keyboard command</span>
+            <h2 id="shortcut-title">Shortcuts</h2>
+            <p>Fast movement around the Northwatch command deck.</p>
           </div>
-        )}
-        <form className="auth-form" onSubmit={submit}>
-          <label>
-            <span>Email</span>
-            <input
-              aria-label="Email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-          </label>
-          <button type="submit" disabled={isSending}>
-            <Mail size={16} /> {isSending ? "Sending" : "Send magic link"}
+          <button type="button" aria-label="Close shortcuts" onClick={onClose}>
+            <X size={17} />
           </button>
-        </form>
-        <small>{message}</small>
-        <small>Northwatch remembers only the account email on this browser. Supabase still keeps the session secure.</small>
+        </div>
+        <div className="shortcut-map">
+          {shortcuts.map(([combo, action]) => (
+            <div key={combo}>
+              <kbd>{combo}</kbd>
+              <span>{action}</span>
+            </div>
+          ))}
+        </div>
       </section>
-    </main>
+    </div>
   );
 }
 
 function Dashboard({
   state,
   metrics,
+  activeTeamWorkspace,
+  teamMembers,
   dispatch,
   setView,
   setNotice
 }: {
   state: CommandDeckState;
   metrics: ReturnType<typeof getDeckMetrics>;
+  activeTeamWorkspace: TeamWorkspaceSelection;
+  teamMembers: TeamMember[];
   dispatch: React.Dispatch<CommandDeckAction>;
   setView: (view: DeckView) => void;
   setNotice: (message: string) => void;
 }) {
   const openProjects = state.projects.filter((project) => project.status === "pending").slice(0, 4);
-  const topTasks = state.tasks.filter((task) => task.status === "todo").slice(0, 4);
+  const topTasks = state.tasks.filter((task) => task.status !== "done").slice(0, 4);
+  const isTeamWorkspace = activeTeamWorkspace.type === "team";
+  const activityItems = buildLocalActivityFeed(state);
 
   return (
-    <div className="dashboard-layout">
-      <section className="hero-command">
-        <div className="hero-copy">
-          <span className="system-dot">System operational</span>
-          <h1>Your command deck, live. Built to keep you ready to move.</h1>
-          <p>
-            A fresh local-first base for tasks, projects, market intel, training, reading, journal, calendar, and finances.
-          </p>
-          <div className="hero-actions">
-            <button type="button" onClick={() => setView("todo")}>Add to do</button>
-            <button type="button" onClick={() => setView("daily")}>Daily list</button>
-            <button type="button" onClick={() => setView("projects")}>Open projects</button>
+    <div className={`dashboard-layout ${isTeamWorkspace ? "team-war-room-layout" : ""}`}>
+      {isTeamWorkspace ? (
+        <TeamWarRoomHero workspace={activeTeamWorkspace} members={teamMembers} metrics={metrics} activityItems={activityItems} onOpenView={setView} />
+      ) : (
+        <section className="hero-command">
+          <div className="hero-copy">
+            <span className="system-dot">System operational</span>
+            <h1>Your command deck, live. Built to keep you ready to move.</h1>
+            <p>
+              A fresh local-first base for tasks, projects, market intel, training, reading, journal, calendar, and finances.
+            </p>
+            <div className="hero-actions">
+              <button type="button" onClick={() => setView("todo")}>Add to do</button>
+              <button type="button" onClick={() => setView("daily")}>Daily list</button>
+              <button type="button" onClick={() => setView("projects")}>Open projects</button>
+            </div>
+            <div className="hero-signal-row" aria-label="Northwatch live systems">
+              <span><Bot size={14} /> Sentinel agent online</span>
+              <span><Radar size={14} /> {metrics.intelItems} intel targets</span>
+              <span><Zap size={14} /> {metrics.openTasks} active orders</span>
+              <span><Repeat2 size={14} /> {metrics.routinesDoneToday}/{metrics.routinesDueToday} daily systems</span>
+            </div>
           </div>
-          <div className="hero-signal-row" aria-label="Northwatch live systems">
-            <span><Bot size={14} /> Sentinel agent online</span>
-            <span><Radar size={14} /> {metrics.intelItems} intel targets</span>
-            <span><Zap size={14} /> {metrics.openTasks} active orders</span>
-            <span><Repeat2 size={14} /> {metrics.routinesDoneToday}/{metrics.routinesDueToday} daily systems</span>
-          </div>
-        </div>
-        {state.settings.showOrbit && <OrbitGauge value={metrics.readiness} />}
-      </section>
+          {state.settings.showOrbit && <OrbitGauge value={metrics.readiness} />}
+        </section>
+      )}
 
       <section className="github-scan-strip dashboard-scan">
         <Github size={18} />
         <div>
-          <strong>{state.githubScan.projectCount} GitHub repos imported from {state.githubScan.owner}</strong>
+          <strong>{state.projects.filter((project) => project.source === "github" && project.repositoryUrl).length} private GitHub repo links</strong>
           <span>Average project progress: {metrics.projectProgress}%</span>
         </div>
       </section>
@@ -1054,6 +1937,8 @@ function Dashboard({
       )}
 
       <MetricGrid metrics={metrics} />
+
+      {isTeamWorkspace && <TeamWarRoomPanels state={state} members={teamMembers} activityItems={activityItems} onOpenView={setView} />}
 
       <section className="deck-panel wide-panel">
         <PanelHead title="Immediate Orders" action={<button onClick={() => setView("todo")} type="button">Open to do</button>} />
@@ -1124,8 +2009,22 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
   const [priority, setPriority] = useState<Priority>("medium");
   const [dueDate, setDueDate] = useState("");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const open = state.tasks.filter((task) => task.status === "todo");
-  const done = state.tasks.filter((task) => task.status === "done");
+  const [activeTab, setActiveTab] = useState<"all" | "active" | "in_progress" | "completed">("active");
+  const [sortBy, setSortBy] = useState<"priority" | "dueDate" | "createdAt" | "assignee">("priority");
+  const [isCompletedOpen, setIsCompletedOpen] = useState(false);
+  const activeTasks = state.tasks.filter((task) => isActiveTaskStatus(task.status));
+  const completedTasks = state.tasks.filter((task) => task.status === "done");
+  const visibleTasks = sortTasks(
+    state.tasks.filter((task) => {
+      if (activeTab === "all") return true;
+      if (activeTab === "active") return isActiveTaskStatus(task.status);
+      if (activeTab === "in_progress") return task.status === "in_progress";
+      if (activeTab === "completed") return task.status === "done";
+      return true;
+    }),
+    sortBy
+  );
+  const primaryVisibleTasks = activeTab === "completed" ? visibleTasks : visibleTasks.filter((task) => task.status !== "done");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1156,6 +2055,11 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
     setDueDate("");
   };
 
+  const clearCompleted = () => {
+    completedTasks.forEach((task) => dispatch({ type: "task/delete", id: task.id }));
+    setNotice("Completed tasks cleared.");
+  };
+
   return (
     <ModuleShell title="To Do List" description="Capture orders, finish them, clear the board.">
       <form className="command-form" onSubmit={submit}>
@@ -1176,28 +2080,166 @@ function TodoModule({ state, dispatch, setNotice }: ModuleProps) {
         <button type="submit"><Plus size={16} /> {editingTaskId ? "Save task" : "Add task"}</button>
         {editingTaskId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
-      <TwoColumn titleLeft="Active" titleRight="Done">
-        <ItemList empty="No active tasks.">
-          {open.map((task) => (
-            <ActionRow key={task.id} title={task.title} meta={`${task.priority}${task.dueDate ? ` - ${formatDate(task.dueDate)}` : ""}`}>
-              <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
-              <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Done</button>
-              <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
-            </ActionRow>
-          ))}
-        </ItemList>
-        <ItemList empty="No completed tasks.">
-          {done.map((task) => (
-            <ActionRow key={task.id} title={task.title} meta="completed">
-              <button onClick={() => startEdit(task)} type="button"><Pencil size={15} /> Modify</button>
-              <button onClick={() => dispatch({ type: "task/toggle", id: task.id })} type="button">Reopen</button>
-              <button onClick={() => dispatch({ type: "task/delete", id: task.id })} type="button" aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
-            </ActionRow>
-          ))}
-        </ItemList>
-      </TwoColumn>
+      <section className="deck-panel todo-panel">
+        <div className="todo-toolbar">
+          <div className="segmented-tabs" role="tablist" aria-label="Task status filters">
+            {[
+              ["all", `All (${state.tasks.length})`, "All"],
+              ["active", `Active (${activeTasks.length})`, "Active"],
+              ["in_progress", `In Progress (${state.tasks.filter((task) => task.status === "in_progress").length})`, "In Progress"],
+              ["completed", `Completed (${completedTasks.length})`, "Completed"]
+            ].map(([value, label, ariaLabel]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-label={ariaLabel}
+                aria-selected={activeTab === value}
+                className={activeTab === value ? "active" : ""}
+                onClick={() => setActiveTab(value as typeof activeTab)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <label className="market-sort">
+            <span>Sort</span>
+            <select value={sortBy} onChange={(event) => setSortBy(event.target.value as typeof sortBy)} aria-label="Sort tasks">
+              <option value="priority">Priority</option>
+              <option value="dueDate">Due Date</option>
+              <option value="createdAt">Created Date</option>
+              <option value="assignee">Assignee</option>
+            </select>
+          </label>
+        </div>
+        {primaryVisibleTasks.length === 0 ? (
+          <div className="todo-empty-state">
+            <strong>{"\u2713"}</strong>
+            <span>You're all caught up.</span>
+            <button type="button" onClick={() => (document.querySelector<HTMLInputElement>("[aria-label='Task title']")?.focus())}>
+              <Plus size={16} /> Add a task
+            </button>
+          </div>
+        ) : (
+          <div className="todo-task-list">
+            {primaryVisibleTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onToggle={() => dispatch({ type: "task/toggle", id: task.id })}
+                onEdit={() => startEdit(task)}
+                onDelete={() => dispatch({ type: "task/delete", id: task.id })}
+                onPriority={(nextPriority) => dispatch({ type: "task/kanban-priority", id: task.id, priority: nextPriority })}
+                onNotice={setNotice}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="deck-panel completed-task-panel">
+        <button className="completed-toggle" type="button" onClick={() => setIsCompletedOpen((open) => !open)}>
+          Completed ({completedTasks.length}) {isCompletedOpen ? "\u25B2" : "\u25BC"}
+        </button>
+        {isCompletedOpen && (
+          <>
+            {completedTasks.length > 0 && <button type="button" className="clear-completed-button" onClick={clearCompleted}>Clear completed</button>}
+            <div className="todo-task-list completed">
+              {completedTasks.length === 0 && <EmptyState>No completed tasks.</EmptyState>}
+              {completedTasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onToggle={() => dispatch({ type: "task/toggle", id: task.id })}
+                  onEdit={() => startEdit(task)}
+                  onDelete={() => dispatch({ type: "task/delete", id: task.id })}
+                  onPriority={(nextPriority) => dispatch({ type: "task/kanban-priority", id: task.id, priority: nextPriority })}
+                  onNotice={setNotice}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </section>
     </ModuleShell>
   );
+}
+
+function TaskCard({
+  task,
+  onToggle,
+  onEdit,
+  onDelete,
+  onPriority,
+  onNotice
+}: {
+  task: CommandDeckState["tasks"][number];
+  onToggle: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onPriority: (priority: KanbanPriority) => void;
+  onNotice: (message: string) => void;
+}) {
+  const dueTone = getDueTone(task.dueDate);
+  const statusLabel = task.status === "in_progress" ? "In progress" : task.status === "done" ? "Done" : "Pending";
+  return (
+    <article className={`ops-row task-card-row task-status-${getTaskStatusClass(task.status)} kanban-priority-${task.kanbanPriority}`}>
+      <label className="task-complete-check">
+        <input aria-label={`Complete ${task.title}`} type="checkbox" checked={task.status === "done"} onChange={onToggle} />
+        <span>{task.status === "done" ? "\u2713" : ""}</span>
+      </label>
+      <div className="task-card-main">
+        <strong className={task.status === "done" ? "task-title-completed" : ""}>{task.title}</strong>
+        <div className="task-meta-line">
+          <span className={`priority-pill priority-${task.kanbanPriority}`}>{getKanbanPriorityLabel(task.kanbanPriority)}</span>
+          <span className="assignee-pill">Me</span>
+          {task.dueDate && <span className={`due-pill ${dueTone}`}>{formatDate(task.dueDate)}</span>}
+          <span className="status-pill">{statusLabel}</span>
+        </div>
+      </div>
+      <TelegramButton
+        payload={{ kind: "kanban-card", title: task.title, body: `Priority: ${getKanbanPriorityLabel(task.kanbanPriority)}`, meta: task.dueDate ? formatDate(task.dueDate) : "No due date" }}
+        onNotice={onNotice}
+      />
+      <details className="task-menu">
+        <summary aria-label={`Task menu for ${task.title}`}>...</summary>
+        <div>
+          <button type="button" onClick={onEdit}><Pencil size={15} /> Modify</button>
+          <button type="button" onClick={onDelete} aria-label={`Delete ${task.title}`}><Trash2 size={15} /> Delete</button>
+          <button type="button" onClick={() => onPriority("urgent")}>URGENT</button>
+          <button type="button" onClick={() => onPriority("normal")}>NORMAL</button>
+          <button type="button" onClick={() => onPriority("later")}>LATER</button>
+        </div>
+      </details>
+    </article>
+  );
+}
+
+function isActiveTaskStatus(status: CommandDeckState["tasks"][number]["status"]): boolean {
+  return status === "pending" || status === "in_progress" || status === "todo";
+}
+
+function getTaskStatusClass(status: CommandDeckState["tasks"][number]["status"]): string {
+  if (status === "in_progress") return "in-progress";
+  if (status === "done") return "done";
+  return "pending";
+}
+
+function getDueTone(dueDate: string | null): string {
+  if (!dueDate) return "";
+  const today = getTodayInput();
+  if (dueDate < today) return "overdue";
+  if (dueDate === today) return "today";
+  return "";
+}
+
+function sortTasks(tasks: CommandDeckState["tasks"], sortBy: "priority" | "dueDate" | "createdAt" | "assignee") {
+  const priorityOrder: Record<KanbanPriority, number> = { urgent: 0, normal: 1, later: 2 };
+  return [...tasks].sort((left, right) => {
+    if (sortBy === "dueDate") return (left.dueDate ?? "9999-12-31").localeCompare(right.dueDate ?? "9999-12-31");
+    if (sortBy === "createdAt") return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    if (sortBy === "assignee") return left.title.localeCompare(right.title);
+    return priorityOrder[left.kanbanPriority] - priorityOrder[right.kanbanPriority];
+  });
 }
 
 function DailyModule({ state, dispatch, setNotice }: ModuleProps) {
@@ -1365,13 +2407,22 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
   const [nextAction, setNextAction] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [progress, setProgress] = useState("0");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [defaultBranch, setDefaultBranch] = useState("");
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const pending = state.projects.filter((project) => project.status === "pending");
   const done = state.projects.filter((project) => project.status === "done");
+  const linkedRepoCount = state.projects.filter((project) => project.source === "github" && project.repositoryUrl).length;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim()) return;
+    const cleanedRepositoryUrl = repositoryUrl.trim();
+    if (cleanedRepositoryUrl && !isGitHubRepositoryUrl(cleanedRepositoryUrl)) {
+      setNotice("Paste a valid GitHub repository URL.");
+      return;
+    }
+
     if (editingProjectId) {
       dispatch({
         type: "project/update",
@@ -1380,7 +2431,9 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         objective: objective.trim(),
         nextAction: nextAction.trim(),
         dueDate: dueDate || null,
-        progress: Number(progress)
+        progress: Number(progress),
+        repositoryUrl: cleanedRepositoryUrl,
+        defaultBranch: defaultBranch.trim()
       });
       setEditingProjectId(null);
       setNotice("Project updated.");
@@ -1390,15 +2443,19 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         name: name.trim(),
         objective: objective.trim(),
         nextAction: nextAction.trim(),
-        dueDate: dueDate || null
+        dueDate: dueDate || null,
+        repositoryUrl: cleanedRepositoryUrl,
+        defaultBranch: defaultBranch.trim()
       });
-      setNotice("Project added to pending.");
+      setNotice(cleanedRepositoryUrl ? "Project added and GitHub repo linked." : "Project added to pending.");
     }
     setName("");
     setObjective("");
     setNextAction("");
     setDueDate("");
     setProgress("0");
+    setRepositoryUrl("");
+    setDefaultBranch("");
   };
 
   const startEdit = (project: CommandDeckState["projects"][number]) => {
@@ -1408,6 +2465,8 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
     setNextAction(project.nextAction);
     setDueDate(project.dueDate ?? "");
     setProgress(String(project.progress));
+    setRepositoryUrl(project.repositoryUrl ?? "");
+    setDefaultBranch(project.defaultBranch ?? "");
   };
 
   const cancelEdit = () => {
@@ -1417,15 +2476,17 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
     setNextAction("");
     setDueDate("");
     setProgress("0");
+    setRepositoryUrl("");
+    setDefaultBranch("");
   };
 
   return (
-    <ModuleShell title="Projects" description="GitHub scan plus manual projects, with progress and next action visible.">
+    <ModuleShell title="Projects" description="Your private projects, optional GitHub repo links, progress, and next action.">
       <section className="github-scan-strip">
         <Github size={18} />
         <div>
-          <strong>{state.githubScan.projectCount} GitHub repos imported from {state.githubScan.owner}</strong>
-          <span>Last scan: {formatDateTime(state.githubScan.scannedAt)}</span>
+          <strong>{linkedRepoCount === 0 ? "No GitHub repos linked yet" : `${linkedRepoCount} linked GitHub repo${linkedRepoCount === 1 ? "" : "s"}`}</strong>
+          <span>Paste your own GitHub repository URL when adding or modifying a project.</span>
         </div>
       </section>
       <form className="command-form project-form" onSubmit={submit}>
@@ -1434,13 +2495,15 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         <label><span>Next action</span><input aria-label="Project next action" value={nextAction} onChange={(event) => setNextAction(event.target.value)} /></label>
         <label><span>Due</span><input aria-label="Project due date" type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
         <label><span>Progress</span><input aria-label="Project progress" type="number" min="0" max="100" value={progress} onChange={(event) => setProgress(event.target.value)} /></label>
+        <label><span>GitHub repo URL</span><input aria-label="GitHub repository URL" placeholder="https://github.com/owner/repo" value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} /></label>
+        <label><span>Branch</span><input aria-label="GitHub default branch" placeholder="main" value={defaultBranch} onChange={(event) => setDefaultBranch(event.target.value)} /></label>
         <button type="submit"><Plus size={16} /> {editingProjectId ? "Save project" : "Add project"}</button>
         {editingProjectId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
       <TwoColumn titleLeft="Pending Projects" titleRight="Done Projects">
         <ItemList empty="No pending projects.">
           {pending.map((project) => (
-            <ProjectRow key={project.id} project={project}>
+            <ProjectRow key={project.id} project={project} onNotice={setNotice}>
               <button onClick={() => startEdit(project)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "project/complete", id: project.id })} type="button">Complete</button>
               <button onClick={() => dispatch({ type: "project/delete", id: project.id })} type="button" aria-label={`Delete ${project.name}`}><Trash2 size={15} /> Delete</button>
@@ -1449,7 +2512,7 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
         </ItemList>
         <ItemList empty="No done projects.">
           {done.map((project) => (
-            <ProjectRow key={project.id} project={project}>
+            <ProjectRow key={project.id} project={project} onNotice={setNotice}>
               <button onClick={() => startEdit(project)} type="button"><Pencil size={15} /> Modify</button>
               <button onClick={() => dispatch({ type: "project/complete", id: project.id })} type="button">Reopen</button>
               <button onClick={() => dispatch({ type: "project/delete", id: project.id })} type="button" aria-label={`Delete ${project.name}`}><Trash2 size={15} /> Delete</button>
@@ -1462,6 +2525,8 @@ function ProjectsModule({ state, dispatch, setNotice }: ModuleProps) {
 }
 
 function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
+  return <IntelPage onNotice={setNotice} />;
+
   const [title, setTitle] = useState("");
   const [symbol, setSymbol] = useState("");
   const [kind, setKind] = useState<IntelKind>("stock");
@@ -1471,6 +2536,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   const [selectedId, setSelectedId] = useState("");
   const [note, setNote] = useState("");
   const [editingIntelId, setEditingIntelId] = useState<string | null>(null);
+  const autoScanRanRef = useRef(false);
   const selected = state.intel.find((item) => item.id === selectedId) ?? state.intel[0] ?? null;
   const signalCounts = intelSignals.map((item) => ({
     signal: item,
@@ -1479,11 +2545,29 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   const researchQueue = state.intel
     .filter((item) => item.signal === "researching" || item.signal === "high-priority")
     .slice(0, 4);
+  const lastAutopilotRun = state.intelAutopilot.lastRunAt ? formatDateTime(state.intelAutopilot.lastRunAt ?? "") : "Not run yet";
+
+  const runAutonomousScan = useCallback((trigger: "auto" | "manual" = "manual") => {
+    const scan = buildAutonomousIntelScan(state, getDeckMetrics(state));
+    dispatch({ type: "intel/autoscan", findings: scan.findings, summary: scan.summary, scannedAt: scan.scannedAt });
+    setNotice(trigger === "auto" ? "Sentinel autopilot refreshed intel." : "Autonomous intel scan complete.");
+  }, [state, dispatch, setNotice]);
 
   useEffect(() => {
     if (selectedId && state.intel.some((item) => item.id === selectedId)) return;
     setSelectedId(state.intel[0]?.id ?? "");
   }, [selectedId, state.intel]);
+
+  useEffect(() => {
+    if (!state.intelAutopilot.enabled || autoScanRanRef.current) return;
+    const lastRun = state.intelAutopilot.lastRunAt ? new Date(state.intelAutopilot.lastRunAt).getTime() : 0;
+    const isStale = !lastRun || Date.now() - lastRun > 30 * 60 * 1000;
+    if (!isStale) return;
+
+    autoScanRanRef.current = true;
+    const timer = window.setTimeout(() => runAutonomousScan("auto"), 500);
+    return () => window.clearTimeout(timer);
+  }, [state.intelAutopilot.enabled, state.intelAutopilot.lastRunAt, runAutonomousScan]);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -1559,13 +2643,13 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
   };
 
   return (
-    <ModuleShell title="Market Intel" description="Track stocks, companies, trends, crypto, funds, and news topics without losing the thesis.">
+    <ModuleShell title="Market Intel" description="Sentinel seeds and refreshes the watchboard from your projects, tasks, cashflow, and tracked topics.">
       <section className="life-layout intel-layout">
         <article className="life-hero intel-hero">
           <div>
             <span className="micro-label">Research command</span>
             <h2>Watchtower</h2>
-            <p>{state.intel.length === 0 ? "Build a watchlist before capital or attention moves." : `${state.intel.length} item${state.intel.length === 1 ? "" : "s"} under observation.`}</p>
+            <p>{state.intel.length === 0 ? "Autopilot is ready to seed the board before capital or attention moves." : `${state.intel.length} item${state.intel.length === 1 ? "" : "s"} under observation.`}</p>
           </div>
           <div className="intel-radar">
             <Newspaper size={24} />
@@ -1583,6 +2667,24 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
               </div>
             ))}
           </div>
+        </section>
+        <section className="deck-panel life-panel autopilot-panel">
+          <PanelHead
+            title="Sentinel autopilot"
+            action={<button type="button" onClick={() => runAutonomousScan("manual")}><Radar size={15} /> Scan now</button>}
+          />
+          <div className="autopilot-status">
+            <span className="source-pill">{state.intelAutopilot.enabled ? "autonomous" : "paused"}</span>
+            <strong>{state.intelAutopilot.lastSummary}</strong>
+            <p>Last run: {lastAutopilotRun}</p>
+          </div>
+          <button
+            className="autopilot-toggle"
+            type="button"
+            onClick={() => dispatch({ type: "intel/autopilot/toggle", enabled: !state.intelAutopilot.enabled })}
+          >
+            <Bot size={15} /> {state.intelAutopilot.enabled ? "Pause autopilot" : "Enable autopilot"}
+          </button>
         </section>
         <section className="deck-panel life-panel">
           <PanelHead title="Research queue" />
@@ -1626,7 +2728,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
         <section className="deck-panel">
           <PanelHead title="Tracked watchlist" />
           <div className="intel-list">
-            {state.intel.length === 0 && <EmptyState>No intel tracked yet.</EmptyState>}
+            {state.intel.length === 0 && <EmptyState>No intel tracked yet. Sentinel autopilot can seed the first scan.</EmptyState>}
             {state.intel.map((item) => (
               <div className={`intel-row ${selected?.id === item.id ? "active" : ""}`} key={item.id}>
                 <div>
@@ -1635,6 +2737,10 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                   {item.thesis && <p>{item.thesis}</p>}
                 </div>
                 <div className="row-actions">
+                  <TelegramButton
+                    payload={{ kind: "agent-alert", title: item.title, body: item.thesis || item.signal, meta: [item.symbol, item.kind].filter(Boolean).join(" / ") }}
+                    onNotice={setNotice}
+                  />
                   <button type="button" onClick={() => setSelectedId(item.id)}><Eye size={15} /> Focus</button>
                   <button type="button" onClick={() => startEdit(item)}><Pencil size={15} /> Modify</button>
                   <button type="button" aria-label={`Delete ${item.title}`} onClick={() => deleteIntelItem(item.id, item.title)}><Trash2 size={15} /> Delete</button>
@@ -1655,6 +2761,10 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                 <p>{selected.thesis || "No thesis recorded yet."}</p>
               </div>
               <div className="row-actions">
+                <TelegramButton
+                  payload={{ kind: "agent-alert", title: selected.title, body: selected.thesis || "No thesis recorded.", meta: selected.signal }}
+                  onNotice={setNotice}
+                />
                 <button type="button" onClick={() => startEdit(selected)}><Pencil size={15} /> Modify</button>
                 <button type="button" aria-label={`Delete ${selected.title}`} onClick={() => deleteIntelItem(selected.id, selected.title)}><Trash2 size={15} /> Delete</button>
               </div>
@@ -1666,7 +2776,7 @@ function IntelModule({ state, dispatch, setNotice }: ModuleProps) {
                   <ExternalLink size={15} /> Market lookup
                 </a>
                 {selected.sourceUrl && (
-                  <a href={selected.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source for ${selected.title}`}>
+                  <a href={selected.sourceUrl ?? undefined} target="_blank" rel="noreferrer" aria-label={`Open source for ${selected.title}`}>
                     <ExternalLink size={15} /> Source
                   </a>
                 )}
@@ -1821,6 +2931,11 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
   const [day, setDay] = useState("Monday");
   const [focus, setFocus] = useState("");
   const [editingWorkoutId, setEditingWorkoutId] = useState<string | null>(null);
+  const [foodImageUrl, setFoodImageUrl] = useState("");
+  const [nutritionLang, setNutritionLang] = useState("en");
+  const [plateAnalysis, setPlateAnalysis] = useState<FoodPlateAnalysis | null>(null);
+  const [plateStatus, setPlateStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [plateError, setPlateError] = useState("");
   const plannedCount = state.workouts.filter((entry) => entry.status === "planned").length;
   const doneCount = state.workouts.filter((entry) => entry.status === "done").length;
   const completion = state.workouts.length === 0 ? 0 : Math.round((doneCount / state.workouts.length) * 100);
@@ -1860,6 +2975,31 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
     setFocus("");
   };
 
+  const analyzePlate = async (event: FormEvent) => {
+    event.preventDefault();
+    const imageUrl = foodImageUrl.trim();
+    if (!imageUrl) {
+      setPlateAnalysis(null);
+      setPlateError("Add a public food image URL first.");
+      setPlateStatus("error");
+      return;
+    }
+
+    setPlateAnalysis(null);
+    setPlateStatus("loading");
+    setPlateError("");
+
+    try {
+      const result = await analyzeFoodPlate({ imageUrl, lang: nutritionLang });
+      setPlateAnalysis(result);
+      setPlateStatus("idle");
+      setNotice("Food plate analyzed.");
+    } catch (error) {
+      setPlateStatus("error");
+      setPlateError(getErrorMessage(error));
+    }
+  };
+
   return (
     <ModuleShell title="Workout" description="Plan training and mark sessions complete.">
       <section className="life-layout workout-layout">
@@ -1892,6 +3032,60 @@ function WorkoutModule({ state, dispatch, setNotice }: ModuleProps) {
             {Object.entries(focusMix).map(([label, count]) => <span key={label}>{label} x{count}</span>)}
           </div>
         </section>
+      </section>
+      <section className="deck-panel nutrition-panel">
+        <PanelHead title="AI plate check" />
+        <form className="command-form nutrition-form" onSubmit={analyzePlate}>
+          <label>
+            <span>Food image URL</span>
+            <input
+              aria-label="Food image URL"
+              value={foodImageUrl}
+              onChange={(event) => setFoodImageUrl(event.target.value)}
+              placeholder="https://example.com/breakfast.jpg"
+            />
+          </label>
+          <label>
+            <span>Language</span>
+            <select aria-label="Nutrition language" value={nutritionLang} onChange={(event) => setNutritionLang(event.target.value)}>
+              <option value="en">English</option>
+              <option value="sw">Swahili</option>
+              <option value="fr">French</option>
+              <option value="es">Spanish</option>
+              <option value="ar">Arabic</option>
+            </select>
+          </label>
+          <button type="submit" disabled={plateStatus === "loading"}>
+            <Radar size={16} /> {plateStatus === "loading" ? "Analyzing..." : "Analyze plate"}
+          </button>
+        </form>
+        {plateStatus === "error" && <div className="empty-state">Food analysis failed: {plateError}</div>}
+        {!plateAnalysis && plateStatus !== "error" && <div className="empty-state">No food plate analyzed yet.</div>}
+        {plateAnalysis && (
+          <article className="nutrition-result">
+            <div className="nutrition-preview">
+              <img src={foodImageUrl} alt={plateAnalysis.foodName} />
+            </div>
+            <div className="nutrition-result-body">
+              <span className="micro-label">Nutrition guide</span>
+              <h3>{plateAnalysis.foodName}</h3>
+              {plateAnalysis.summary && <p>{plateAnalysis.summary}</p>}
+              <div className="nutrition-macros">
+                <span>{formatCalories(plateAnalysis.calories)}</span>
+                {plateAnalysis.protein && <span>Protein {plateAnalysis.protein}</span>}
+                {plateAnalysis.carbs && <span>Carbs {plateAnalysis.carbs}</span>}
+                {plateAnalysis.fat && <span>Fat {plateAnalysis.fat}</span>}
+              </div>
+              {plateAnalysis.recommendations.length > 0 && (
+                <ul className="nutrition-tips">
+                  {plateAnalysis.recommendations.map((tip) => (
+                    <li key={tip}>{tip}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </article>
+        )}
       </section>
       <form className="command-form" onSubmit={submit}>
         <label><span>Session</span><input aria-label="Workout name" value={name} onChange={(event) => setName(event.target.value)} /></label>
@@ -2096,6 +3290,10 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
   const [mood, setMood] = useState("Focused");
   const [body, setBody] = useState("");
   const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
+  const [currentWeather, setCurrentWeather] = useState<JournalWeatherSnapshot | null>(null);
+  const [attachWeather, setAttachWeather] = useState(true);
+  const [weatherStatus, setWeatherStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [weatherError, setWeatherError] = useState("");
   const latestEntry = state.journal[0];
   const moodMix = state.journal.reduce<Record<string, number>>((acc, entry) => {
     acc[entry.mood] = (acc[entry.mood] ?? 0) + 1;
@@ -2104,15 +3302,73 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
   const visibleMoodOptions = journalMoodOptions.includes(mood) ? journalMoodOptions : [mood, ...journalMoodOptions];
   const prompts = ["What moved today?", "What is the next clean action?", "What pattern is repeating?"];
 
+  const refreshWeather = useCallback(
+    async (coordinates: WeatherCoordinates = DEFAULT_WEATHER_COORDINATES, options: { quiet?: boolean } = {}) => {
+      setWeatherStatus("loading");
+      setWeatherError("");
+      try {
+        const forecast = await getLiveWeatherForecast({
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude,
+          lang: "EN"
+        });
+        const nextWeather = normalizeJournalWeatherSnapshot(forecast.current, forecast, coordinates);
+        setCurrentWeather(nextWeather);
+        setAttachWeather(true);
+        setWeatherStatus("idle");
+        if (!options.quiet) setNotice(`Live weather refreshed for ${nextWeather.location}.`);
+      } catch (error) {
+        const message = getErrorMessage(error);
+        setWeatherStatus("error");
+        setWeatherError(message);
+        if (!options.quiet) setNotice(`Weather refresh failed: ${message}`);
+      }
+    },
+    [setNotice]
+  );
+
+  useEffect(() => {
+    void refreshWeather(DEFAULT_WEATHER_COORDINATES, { quiet: true });
+  }, [refreshWeather]);
+
+  const useBrowserLocation = () => {
+    if (!navigator.geolocation) {
+      const message = "Browser location is unavailable. Using Nairobi forecast instead.";
+      setWeatherError(message);
+      setNotice(message);
+      void refreshWeather(DEFAULT_WEATHER_COORDINATES);
+      return;
+    }
+
+    setWeatherStatus("loading");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        void refreshWeather({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          label: "Current location"
+        });
+      },
+      (error) => {
+        const message = error.message || "Location permission was not granted.";
+        setWeatherStatus("error");
+        setWeatherError(message);
+        setNotice(`Weather location failed: ${message}`);
+      },
+      { enableHighAccuracy: false, maximumAge: 300000, timeout: 10000 }
+    );
+  };
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!body.trim()) return;
+    const weather = attachWeather ? currentWeather : null;
     if (editingJournalId) {
-      dispatch({ type: "journal/update", id: editingJournalId, mood: mood.trim() || "Logged", body: body.trim() });
+      dispatch({ type: "journal/update", id: editingJournalId, mood: mood.trim() || "Logged", body: body.trim(), weather });
       setEditingJournalId(null);
       setNotice("Journal entry updated.");
     } else {
-      dispatch({ type: "journal/add", mood: mood.trim() || "Logged", body: body.trim() });
+      dispatch({ type: "journal/add", mood: mood.trim() || "Logged", body: body.trim(), weather });
       setNotice("Journal entry saved.");
     }
     setBody("");
@@ -2122,12 +3378,15 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
     setEditingJournalId(entry.id);
     setMood(entry.mood);
     setBody(entry.body);
+    setCurrentWeather(entry.weather);
+    setAttachWeather(Boolean(entry.weather));
   };
 
   const cancelEdit = () => {
     setEditingJournalId(null);
     setMood("Focused");
     setBody("");
+    setAttachWeather(true);
   };
 
   return (
@@ -2157,6 +3416,34 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
             <span>total journal entries</span>
           </div>
         </section>
+        <section className="deck-panel life-panel weather-panel">
+          <PanelHead
+            title="Live weather"
+            action={
+              <button type="button" onClick={() => refreshWeather()} disabled={weatherStatus === "loading"}>
+                <RotateCcw size={14} /> {weatherStatus === "loading" ? "Refreshing" : "Refresh"}
+              </button>
+            }
+          />
+          {currentWeather ? (
+            <div className="weather-readout">
+              <Cloud size={18} />
+              <div>
+                <strong>{formatWeatherTemperature(currentWeather.temperatureC)}</strong>
+                <span>{formatJournalWeather(currentWeather)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="empty-state compact-empty">No live weather loaded yet.</div>
+          )}
+          {weatherStatus === "error" && <p className="weather-error">Weather unavailable: {weatherError}</p>}
+          <div className="weather-actions">
+            <button type="button" onClick={useBrowserLocation} disabled={weatherStatus === "loading"}>
+              <Target size={14} /> Use my location
+            </button>
+            <span>Default: {DEFAULT_WEATHER_COORDINATES.label}</span>
+          </div>
+        </section>
       </section>
       <form className="journal-form" onSubmit={submit}>
         <fieldset className="mood-picker">
@@ -2177,6 +3464,16 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
           </div>
         </fieldset>
         <label><span>Entry</span><textarea aria-label="Journal entry" value={body} onChange={(event) => setBody(event.target.value)} rows={8} /></label>
+        <label className="journal-weather-control">
+          <input
+            type="checkbox"
+            checked={attachWeather}
+            disabled={!currentWeather}
+            onChange={(event) => setAttachWeather(event.target.checked)}
+          />
+          <span><Cloud size={14} /> Attach live weather to this entry</span>
+          <em>{currentWeather ? formatJournalWeather(currentWeather) : "Refresh forecast to attach weather."}</em>
+        </label>
         <button type="submit"><Plus size={16} /> {editingJournalId ? "Save changes" : "Save entry"}</button>
         {editingJournalId && <button type="button" onClick={cancelEdit}>Cancel</button>}
       </form>
@@ -2187,7 +3484,22 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
             <span>{formatDate(entry.date)}</span>
             <h3>{entry.mood}</h3>
             <p>{entry.body}</p>
+            {entry.weather && (
+              <div className="journal-weather-chip">
+                <Cloud size={14} />
+                {formatJournalWeather(entry.weather)}
+              </div>
+            )}
             <div className="card-actions">
+              <TelegramButton
+                payload={{
+                  kind: "doc",
+                  title: entry.mood,
+                  body: entry.body,
+                  meta: entry.weather ? `${formatDate(entry.date)} / ${formatJournalWeather(entry.weather)}` : formatDate(entry.date)
+                }}
+                onNotice={setNotice}
+              />
               <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
               <button type="button" aria-label={`Delete ${entry.mood}`} onClick={() => dispatch({ type: "journal/delete", id: entry.id })}><Trash2 size={15} /> Delete</button>
             </div>
@@ -2196,6 +3508,46 @@ function JournalModule({ state, dispatch, setNotice }: ModuleProps) {
       </section>
     </ModuleShell>
   );
+}
+
+function normalizeJournalWeatherSnapshot(
+  snapshot: LiveWeatherSnapshot,
+  forecast: { provider: string; checkedAt: string; location: string; latitude: number; longitude: number },
+  coordinates: WeatherCoordinates
+): JournalWeatherSnapshot {
+  return {
+    provider: snapshot.provider || forecast.provider || "rapidapi-open-weather13",
+    location: snapshot.location || forecast.location || coordinates.label || "Selected location",
+    description: snapshot.description || "Weather data available",
+    temperatureC: getWeatherNumber(snapshot.temperatureC),
+    feelsLikeC: getWeatherNumber(snapshot.feelsLikeC),
+    humidity: getWeatherNumber(snapshot.humidity),
+    windKph: getWeatherNumber(snapshot.windKph),
+    latitude: getWeatherNumber(snapshot.latitude) ?? getWeatherNumber(forecast.latitude) ?? coordinates.latitude,
+    longitude: getWeatherNumber(snapshot.longitude) ?? getWeatherNumber(forecast.longitude) ?? coordinates.longitude,
+    forecastAt: snapshot.forecastAt || forecast.checkedAt || new Date().toISOString(),
+    capturedAt: snapshot.capturedAt || forecast.checkedAt || new Date().toISOString()
+  };
+}
+
+function formatJournalWeather(weather: JournalWeatherSnapshot): string {
+  const details = [
+    weather.location,
+    weather.description,
+    formatWeatherTemperature(weather.temperatureC),
+    weather.humidity === null ? null : `${Math.round(weather.humidity)}% humidity`,
+    weather.windKph === null ? null : `${weather.windKph.toFixed(1)} kph wind`
+  ].filter(Boolean);
+
+  return details.join(" / ");
+}
+
+function formatWeatherTemperature(value: number | null): string {
+  return value === null ? "Temp unavailable" : `${value.toFixed(1)} C`;
+}
+
+function getWeatherNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function FinancesModule({ state, dispatch, setNotice }: ModuleProps) {
@@ -2452,6 +3804,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
         <ToggleCard label="Show workout systems" checked={state.settings.showWorkout} onChange={(checked) => dispatch({ type: "settings/update", payload: { showWorkout: checked } })} />
         <div className="custom-card ollama-card">
           <span>Sentinel brain</span>
+          <p>Copilot system AI is used through the protected backend when configured. Ollama remains the local fallback.</p>
           <label className="inline-check">
             <input
               aria-label="Use Ollama for Sentinel"
@@ -2482,12 +3835,8 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
           </button>
         </div>
         <div className="custom-card">
-          <span>Cloud lock</span>
-          <p>
-            {supabaseConfig.isConfigured
-              ? "Supabase Auth is configured. This deck syncs to a private per-user row after sign-in."
-              : "Cloud auth: local fallback. Add Supabase env vars before deploying for cross-device private sync."}
-          </p>
+          <span>Credential lock</span>
+          <p>Northwatch access uses email and password accounts with httpOnly session cookies. Sign up or sign in to open an isolated deck.</p>
         </div>
         <div className="custom-card danger-zone">
           <span>Fresh start</span>
@@ -2510,11 +3859,13 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
 function AccountModule({
   state,
   cloudStatus,
+  authUser,
   workspaceMode,
   teams,
   activeTeam,
   teamMembers,
   teamInviteLink,
+  teamInviteNotice,
   isTeamBusy,
   dispatch,
   onSwitchWorkspace,
@@ -2523,31 +3874,40 @@ function AccountModule({
   onCreateInviteLink,
   onUpdateMemberRole,
   onRemoveMember,
+  onRecoverEmailDeck,
+  isRecoveringEmailDeck,
   onSignOut
 }: {
   state: CommandDeckState;
   cloudStatus: CloudStatus;
+  authUser?: AuthUser | null;
   workspaceMode: WorkspaceMode;
   teams: TeamWorkspace[];
   activeTeam: TeamWorkspace | null;
   teamMembers: TeamMember[];
   teamInviteLink: string;
+  teamInviteNotice: TeamInviteDeliveryNotice | null;
   isTeamBusy: boolean;
   dispatch: React.Dispatch<CommandDeckAction>;
   onSwitchWorkspace: (workspace: WorkspaceMode) => Promise<void>;
   onCreateTeam: (name: string) => Promise<void>;
   onJoinTeam: (teamCode: string) => Promise<void>;
-  onCreateInviteLink: () => Promise<void>;
+  onCreateInviteLink: (email: string, role: TeamRole) => Promise<void>;
   onUpdateMemberRole: (memberUserId: string, role: TeamRole) => Promise<void>;
   onRemoveMember: (memberUserId: string) => Promise<void>;
+  onRecoverEmailDeck: () => Promise<void>;
+  isRecoveringEmailDeck: boolean;
   onSignOut: () => void;
 }) {
   const [teamName, setTeamName] = useState("");
   const [teamCode, setTeamCode] = useState("");
+  const [teammateEmail, setTeammateEmail] = useState("");
+  const [teammateRole, setTeammateRole] = useState<TeamRole>("member");
   const lastSync = cloudStatus.lastSyncedAt ? formatDateTime(cloudStatus.lastSyncedAt) : "Not synced yet";
-  const userEmail = cloudStatus.userEmail ?? "Local operator";
-  const isCloudUser = supabaseConfig.isConfigured && Boolean(cloudStatus.userEmail);
+  const userEmail = cloudStatus.userEmail ?? authUser?.email ?? "Local operator";
+  const isCloudUser = Boolean(cloudStatus.userEmail || authUser?.email);
   const canManageTeam = activeTeam?.role === "owner";
+  const canInviteTeam = activeTeam?.role === "owner" || activeTeam?.role === "admin";
   const activeTeamName = activeTeam?.name ?? "No team selected";
   const displayName = getDisplayName(state.settings);
   const commandCenterName = getCommandCenterName(state.settings);
@@ -2566,6 +3926,13 @@ function AccountModule({
     event.preventDefault();
     await onJoinTeam(teamCode);
     setTeamCode("");
+  };
+
+  const submitAddTeammate = async (event: FormEvent) => {
+    event.preventDefault();
+    await onCreateInviteLink(teammateEmail, teammateRole);
+    setTeammateEmail("");
+    setTeammateRole("member");
   };
 
   return (
@@ -2637,9 +4004,9 @@ function AccountModule({
         <section className="deck-panel account-panel">
           <PanelHead title="Access state" />
           <div className="account-status-grid">
-            <div><KeyRound size={16} /><span>Auth</span><strong>{supabaseConfig.isConfigured ? "Supabase" : "Local"}</strong></div>
+            <div><KeyRound size={16} /><span>Auth</span><strong>Northwatch</strong></div>
             <div><Cloud size={16} /><span>Status</span><strong>{cloudStatus.label.replace("Cloud auth: ", "")}</strong></div>
-            <div><Database size={16} /><span>Storage</span><strong>{supabaseConfig.isConfigured ? "Cloud + local" : "Browser only"}</strong></div>
+            <div><Database size={16} /><span>Storage</span><strong>Per-user deck</strong></div>
             <div><CalendarCheck size={16} /><span>Last sync</span><strong>{lastSync}</strong></div>
           </div>
         </section>
@@ -2649,7 +4016,7 @@ function AccountModule({
             <span><CircleCheck size={16} /> Personal decks are isolated by signed-in user id.</span>
             <span><CircleCheck size={16} /> Team decks require explicit membership before data is shared.</span>
             <span><CircleCheck size={16} /> Local browser cache remains available offline.</span>
-            <span><Shield size={16} /> Netlify URL is public; Supabase Auth protects workspace data.</span>
+            <span><Shield size={16} /> Northwatch credentials protect workspace access.</span>
           </div>
         </section>
         <section className="deck-panel account-panel team-panel">
@@ -2678,7 +4045,7 @@ function AccountModule({
           <p className="panel-copy">
             {isCloudUser
               ? "Personal data stays private. Team mode only shares the selected team workspace with joined members."
-              : "Team mode requires Supabase sign-in so Northwatch can enforce membership before sharing data."}
+              : "Team mode is paused while Northwatch uses credential auth for personal workspaces."}
           </p>
           {teams.length > 0 && (
             <div className="team-code-list">
@@ -2726,19 +4093,49 @@ function AccountModule({
               <div className="team-ops-head">
                 <Copy size={16} />
                 <div>
-                  <strong>Invite links</strong>
+                  <strong>Invite teammate</strong>
                   <span>{activeTeam ? `For ${activeTeam.name}` : "Switch to a team first"}</span>
                 </div>
               </div>
-              <button type="button" onClick={() => void onCreateInviteLink()} disabled={!canManageTeam || isTeamBusy}>
-                <Plus size={16} /> Create invite link
-              </button>
+              <form className="team-form" onSubmit={submitAddTeammate}>
+                <label>
+                  <span>Teammate email</span>
+                  <input
+                    aria-label="Teammate email"
+                    type="email"
+                    value={teammateEmail}
+                    onChange={(event) => setTeammateEmail(event.target.value)}
+                    placeholder="teammate@example.com"
+                    disabled={!canInviteTeam || isTeamBusy}
+                  />
+                </label>
+                <label>
+                  <span>Role</span>
+                  <select
+                    aria-label="Teammate role"
+                    value={teammateRole}
+                    onChange={(event) => setTeammateRole(event.target.value as TeamRole)}
+                    disabled={!canInviteTeam || isTeamBusy}
+                  >
+                    <option value="member">Member</option>
+                    <option value="admin">Admin</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                </label>
+                <button type="submit" disabled={!canInviteTeam || isTeamBusy || !teammateEmail.trim()}>
+                  <Plus size={16} /> Invite teammate
+                </button>
+              </form>
+              <p className="panel-copy">
+                Existing users can sign in from the invite. New teammates can create an account, then Northwatch opens their personal vault and this team workspace.
+              </p>
               <input
                 aria-label="Team invite link"
                 value={teamInviteLink}
                 readOnly
-                placeholder={canManageTeam ? "Generated invite link appears here" : "Owner access required"}
+                placeholder={canInviteTeam ? "Generated invite link appears here" : "Owner or admin access required"}
               />
+              <TeamInviteDeliveryNotification notice={teamInviteNotice} />
             </div>
             <div className="team-ops-card">
               <div className="team-ops-head">
@@ -2806,7 +4203,10 @@ function AccountModule({
         <section className="deck-panel account-panel">
           <PanelHead title="Session controls" />
           <div className="account-actions">
-            <button type="button" onClick={onSignOut} disabled={!cloudStatus.userEmail}>
+            <button type="button" onClick={() => void onRecoverEmailDeck()} disabled={!authUser || isRecoveringEmailDeck}>
+              <Cloud size={16} /> {isRecoveringEmailDeck ? "Recovering" : "Recover email data"}
+            </button>
+            <button type="button" onClick={onSignOut} disabled={!authUser && !cloudStatus.userEmail}>
               <LogOut size={16} /> Sign out
             </button>
           </div>
@@ -2817,27 +4217,15 @@ function AccountModule({
   );
 }
 
-function readPendingTeamInvite(): string | null {
-  const inviteFromLocation = readTeamInviteFromLocation();
-  if (inviteFromLocation) return inviteFromLocation;
-  return window.localStorage.getItem(PENDING_TEAM_INVITE_STORAGE_KEY);
-}
-
-function readTeamInviteFromLocation(): string | null {
-  const params = new URLSearchParams(window.location.search);
-  const teamId = params.get("team")?.trim();
-  const inviteId = params.get("invite")?.trim();
-  if (!teamId || !inviteId) return null;
-  return buildTeamInviteUrl(window.location.origin, teamId, inviteId);
-}
-
-function clearPendingTeamInvite() {
-  window.localStorage.removeItem(PENDING_TEAM_INVITE_STORAGE_KEY);
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has("team") && !url.searchParams.has("invite")) return;
-  url.searchParams.delete("team");
-  url.searchParams.delete("invite");
-  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+function TeamInviteDeliveryNotification({ notice }: { notice: TeamInviteDeliveryNotice | null }) {
+  if (!notice) return null;
+  const role = notice.tone === "error" ? "alert" : "status";
+  return (
+    <div className={`team-invite-notification team-invite-notification-${notice.tone}`} role={role} aria-live={notice.tone === "error" ? "assertive" : "polite"}>
+      <strong>{notice.title}</strong>
+      <span>{notice.message}</span>
+    </div>
+  );
 }
 
 function LogoMark({ variant }: { variant: LogoStyle }) {
@@ -2946,28 +4334,32 @@ function AgentDock({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
+  const [systemConversationId, setSystemConversationId] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<AgentConnectionState>(() =>
     state.settings.ollamaEnabled
       ? {
           mode: "checking",
-          label: "Ollama checking",
-          detail: "Checking the local Ollama server."
+          label: "Copilot checking",
+          detail: "Copilot system AI is the primary route; Ollama remains fallback."
         }
       : {
           mode: "disabled",
-          label: "Local brain",
-          detail: "Ollama is disabled in Customize."
+          label: "Copilot system AI",
+          detail: "Using the protected backend route when configured."
         }
   );
+  const [agentHealth, setAgentHealth] = useState<AgentHealthRecord[]>(() => createIdleAgentHealth(state.settings));
   const [messages, setMessages] = useState<AgentMessage[]>(() => [
     {
       id: "sentinel-boot",
       role: "agent",
       body: state.settings.ollamaEnabled
-        ? `Ollama route armed for ${state.settings.ollamaModel}.\nIf the local server is running, I will use it. If not, I will fall back to deck logic.`
-        : composeAgentReply(state, metrics, "dashboard", "Brief my next move")
+        ? `Copilot system AI route armed.\nIf it cannot answer, I will fall back to local Ollama (${state.settings.ollamaModel}) and then deck logic.`
+        : `Copilot system AI route armed.\nIf it cannot answer, I will fall back to deck logic.`
     }
   ]);
+  const [speechSettings, setSpeechSettings] = useState<AgentSpeechSettings>(() => loadAgentSpeechSettings());
+  const [speechVoices, setSpeechVoices] = useState<SpeechSynthesisVoice[]>(() => getSpeechVoices());
   const priorityProject = getPriorityProject(state);
   const priorityTask = getPriorityTask(state);
   const activeLabel = navItems.find((item) => item.view === activeView)?.label ?? "Command";
@@ -2976,15 +4368,92 @@ function AgentDock({
     endpoint: state.settings.ollamaEndpoint,
     model: state.settings.ollamaModel
   };
+  const speechSupported = typeof SpeechSynthesisUtterance !== "undefined" && Boolean(getSpeechSynthesis());
+  const lastAgentReply = [...messages].reverse().find((message) => message.role === "agent")?.body ?? "";
+
+  useEffect(() => {
+    saveAgentSpeechSettings(speechSettings);
+  }, [speechSettings]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const synthesis = getSpeechSynthesis();
+    const loadVoices = () => setSpeechVoices(getSpeechVoices());
+    loadVoices();
+
+    if (!synthesis) return;
+    synthesis.addEventListener?.("voiceschanged", loadVoices);
+    synthesis.onvoiceschanged = loadVoices;
+
+    return () => {
+      synthesis.removeEventListener?.("voiceschanged", loadVoices);
+      if (synthesis.onvoiceschanged === loadVoices) synthesis.onvoiceschanged = null;
+    };
+  }, [isOpen]);
+
+  const updateSpeechSettings = (patch: Partial<AgentSpeechSettings>) => {
+    setSpeechSettings((current) => ({ ...current, ...patch }));
+  };
+
+  const speakReply = useCallback(
+    (body: string) => {
+      const didSpeak = speakAgentReply(body, speechSettings, speechVoices);
+      if (speechSettings.enabled && !didSpeak) setNotice("Speech output is not available in this browser.");
+    },
+    [setNotice, speechSettings, speechVoices]
+  );
+
+  const toggleSpeech = () => {
+    if (speechSettings.enabled) {
+      stopAgentSpeech();
+      updateSpeechSettings({ enabled: false });
+      return;
+    }
+
+    updateSpeechSettings({ enabled: true });
+  };
+
+  const voiceOptions =
+    speechVoices.length > 0
+      ? speechVoices
+      : [
+          {
+            name: "System default voice",
+            lang: speechSettings.language,
+            voiceURI: ""
+          } as SpeechSynthesisVoice
+        ];
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!isOpen) return;
+
+    const pingHealth = async () => {
+      const nextHealth = await fetchAgentHealth(state.settings);
+      if (!isCancelled) {
+        setAgentHealth(nextHealth);
+      }
+    };
+
+    void pingHealth();
+    const timer = window.setInterval(pingHealth, AGENT_HEALTH_POLL_MS);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isOpen, state.settings.ollamaEnabled, state.settings.ollamaEndpoint, state.settings.ollamaModel]);
 
   useEffect(() => {
     let isCancelled = false;
 
     if (!state.settings.ollamaEnabled) {
       setAgentStatus({
-        mode: "disabled",
-        label: "Local brain",
-        detail: "Ollama is disabled in Customize."
+        mode: "online",
+        label: "Copilot system AI",
+        detail: "Protected backend route is primary. Ollama fallback is disabled."
       });
       return;
     }
@@ -2993,8 +4462,8 @@ function AgentDock({
 
     setAgentStatus({
       mode: "checking",
-      label: "Ollama checking",
-      detail: "Checking the local Ollama server."
+      label: "Ollama fallback checking",
+      detail: "Checking the local Ollama fallback."
     });
 
     checkOllamaConnection(ollamaConfig).then((result) => {
@@ -3012,7 +4481,7 @@ function AgentDock({
       const hasModel = result.models.includes(state.settings.ollamaModel);
       setAgentStatus({
         mode: hasModel ? "online" : "offline",
-        label: hasModel ? `Ollama: ${state.settings.ollamaModel}` : "Model missing",
+        label: hasModel ? `Ollama fallback: ${state.settings.ollamaModel}` : "Ollama model missing",
         detail: hasModel
           ? `${result.models.length} local model${result.models.length === 1 ? "" : "s"} available.`
           : `Pull ${state.settings.ollamaModel} or choose one of: ${result.models.join(", ") || "none installed"}.`
@@ -3028,6 +4497,26 @@ function AgentDock({
     const prompt = rawPrompt.trim();
     if (!prompt) return;
 
+    if (/(scan|refresh|autonomous|research|brief)/i.test(prompt) && /(intel|market|watch|signal)/i.test(prompt)) {
+      const scan = buildAutonomousIntelScan(state, metrics);
+      dispatch({ type: "intel/autoscan", findings: scan.findings, summary: scan.summary, scannedAt: scan.scannedAt });
+      setView("intel");
+      setNotice("Sentinel refreshed autonomous intel.");
+      setMessages((current) => [
+        ...current,
+        { id: `operator-${Date.now()}`, role: "operator", body: prompt },
+        {
+          id: `sentinel-${Date.now()}`,
+          role: "agent",
+          body: `${scan.summary}\nI moved you to Intel so you can review the generated findings and notes.`
+        }
+      ]);
+      speakReply(`${scan.summary}\nI moved you to Intel so you can review the generated findings and notes.`);
+      setInput("");
+      setIsOpen(true);
+      return;
+    }
+
     if (/create|add|make/i.test(prompt) && /focus|task|order/i.test(prompt)) {
       const title = getFocusTaskTitle(state);
       dispatch({ type: "task/add", title, priority: "high", dueDate: new Date().toISOString().slice(0, 10) });
@@ -3042,6 +4531,7 @@ function AgentDock({
           body: `Created a high-priority focus task: ${title}\nI moved you to To Do so you can execute or edit it.`
         }
       ]);
+      speakReply(`Created a high-priority focus task: ${title}. I moved you to To Do so you can execute or edit it.`);
       setInput("");
       setIsOpen(true);
       return;
@@ -3055,13 +4545,64 @@ function AgentDock({
       {
         id: pendingId,
         role: "agent",
-        body: state.settings.ollamaEnabled ? `Thinking locally with ${state.settings.ollamaModel}...` : fallbackReply
+        body: "Thinking with Copilot system AI..."
       }
     ]);
     setInput("");
     setIsOpen(true);
 
-    if (!state.settings.ollamaEnabled) return;
+    setAgentStatus((current) => ({
+      ...current,
+      mode: "thinking",
+      label: "Copilot system AI"
+    }));
+
+    try {
+      const result = await requestSystemAiAgentReply({
+        state,
+        metrics,
+        activeView,
+        prompt,
+        history: messages,
+        conversationId: systemConversationId
+      });
+      setSystemConversationId(result.conversationId);
+      setMessages((current) => current.map((message) => (message.id === pendingId ? { ...message, body: result.reply } : message)));
+      speakReply(result.reply);
+      setAgentStatus({
+        mode: "online",
+        label: "Copilot system AI",
+        detail: "Last reply came from the protected Copilot backend route."
+      });
+      return;
+    } catch (systemError) {
+      const systemDetail = getErrorMessage(systemError);
+
+      if (!state.settings.ollamaEnabled) {
+        const reply = `${fallbackReply}\n\nCopilot system AI could not answer: ${systemDetail}`;
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === pendingId
+              ? {
+                  ...message,
+                  body: reply
+                }
+              : message
+          )
+        );
+        speakReply(reply);
+        setAgentStatus({
+          mode: "offline",
+          label: "System AI fallback",
+          detail: systemDetail
+        });
+        return;
+      }
+
+      setMessages((current) =>
+        current.map((message) => (message.id === pendingId ? { ...message, body: `Copilot unavailable: ${systemDetail}\nThinking locally with ${state.settings.ollamaModel}...` } : message))
+      );
+    }
 
     setAgentStatus((current) => ({
       ...current,
@@ -3079,6 +4620,7 @@ function AgentDock({
         history: messages
       });
       setMessages((current) => current.map((message) => (message.id === pendingId ? { ...message, body: reply } : message)));
+      speakReply(reply);
       setAgentStatus({
         mode: "online",
         label: `Ollama: ${state.settings.ollamaModel}`,
@@ -3086,16 +4628,18 @@ function AgentDock({
       });
     } catch (error) {
       const detail = getErrorMessage(error);
+      const reply = `${fallbackReply}\n\nOllama could not answer: ${detail}`;
       setMessages((current) =>
         current.map((message) =>
           message.id === pendingId
             ? {
                 ...message,
-                body: `${fallbackReply}\n\nOllama could not answer: ${detail}`
+                body: reply
               }
             : message
         )
       );
+      speakReply(reply);
       setAgentStatus({
         mode: "offline",
         label: "Ollama fallback",
@@ -3118,7 +4662,7 @@ function AgentDock({
         </div>
         <div>
           <span>Sentinel Agent</span>
-          <strong>{agentStatus.mode === "thinking" ? "Ollama thinking" : `${activeLabel} scan active`}</strong>
+          <strong>{agentStatus.mode === "thinking" ? `${agentStatus.label} thinking` : `${activeLabel} scan active`}</strong>
         </div>
         <button type="button" aria-label={isOpen ? "Collapse Sentinel Agent" : "Open Sentinel Agent"} onClick={() => setIsOpen(!isOpen)}>
           {isOpen ? <X size={16} /> : <Sparkles size={16} />}
@@ -3127,6 +4671,70 @@ function AgentDock({
 
       {isOpen && (
         <>
+          <div className="agent-healthbar" aria-label="Agent API status">
+            {agentHealth.map((agent) => (
+              <span className={`agent-health-pill ${agent.status}`} key={agent.id} title={agent.detail}>
+                <i aria-hidden="true" />
+                <strong>{agent.label}</strong>
+                <em>{agent.checkedAt ? formatClock(agent.checkedAt) : "not checked"}</em>
+              </span>
+            ))}
+          </div>
+
+          <div className="agent-command-card">
+            <div>
+              <span>Copilot command</span>
+              <h2>Ask, act, or listen</h2>
+              <p>Use natural language for briefs, task creation, intel scans, status drafts, and next-step planning.</p>
+            </div>
+            <button
+              type="button"
+              className={speechSettings.enabled ? "active" : ""}
+              aria-label={speechSettings.enabled ? "Turn voice off" : "Turn voice on"}
+              aria-pressed={speechSettings.enabled}
+              onClick={toggleSpeech}
+              title={speechSupported ? "Toggle spoken AI replies" : "Speech output is not available in this browser"}
+            >
+              {speechSettings.enabled ? <Volume2 size={15} /> : <VolumeX size={15} />}
+              {speechSettings.enabled ? "Voice on" : "Voice off"}
+            </button>
+          </div>
+
+          <div className="agent-speech-controls" aria-label="Speech controls">
+            <label className="agent-control-field">
+              <span><Languages size={13} /> Language</span>
+              <select
+                aria-label="Speech language"
+                value={speechSettings.language}
+                onChange={(event) => updateSpeechSettings({ language: event.target.value, voiceURI: "" })}
+              >
+                {speechLanguageOptions.map((language) => (
+                  <option key={language.value} value={language.value}>
+                    {language.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="agent-control-field">
+              <span><Mic2 size={13} /> Voice</span>
+              <select
+                aria-label="Speech voice"
+                value={speechSettings.voiceURI}
+                onChange={(event) => updateSpeechSettings({ voiceURI: event.target.value })}
+              >
+                <option value="">System default</option>
+                {voiceOptions.map((voice) => (
+                  <option key={voice.voiceURI || `${voice.name}-${voice.lang}`} value={voice.voiceURI}>
+                    {voice.name} ({voice.lang})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" onClick={() => speakReply(lastAgentReply)} disabled={!lastAgentReply || !speechSettings.enabled}>
+              Replay
+            </button>
+          </div>
+
           <div className="agent-vitals" aria-label="Sentinel live vitals">
             <span><Cpu size={14} /> {metrics.readiness}% ready</span>
             <span><Target size={14} /> {metrics.pendingProjects} projects</span>
@@ -3151,6 +4759,12 @@ function AgentDock({
                 {message.body.split("\n").map((line, index) => (
                   <p key={`${message.id}-${index}`}>{line}</p>
                 ))}
+                {message.role === "agent" && (
+                  <TelegramButton
+                    payload={{ kind: "agent-alert", title: "Sentinel alert", body: message.body, meta: activeLabel }}
+                    onNotice={setNotice}
+                  />
+                )}
               </article>
             ))}
           </div>
@@ -3261,9 +4875,9 @@ function ItemList({ children, empty }: { children: ReactNode; empty: string }) {
   return <div className="ops-list">{Array.isArray(items) && items.length === 0 ? <EmptyState>{empty}</EmptyState> : children}</div>;
 }
 
-function ActionRow({ title, meta, children }: { title: string; meta: string; children?: ReactNode }) {
+function ActionRow({ title, meta, priority, children }: { title: string; meta: string; priority?: KanbanPriority; children?: ReactNode }) {
   return (
-    <div className="ops-row">
+    <div className={`ops-row ${priority ? `kanban-priority-${priority}` : ""}`}>
       <span>{title}</span>
       <em>{meta}</em>
       {children && <div className="row-actions">{children}</div>}
@@ -3271,23 +4885,37 @@ function ActionRow({ title, meta, children }: { title: string; meta: string; chi
   );
 }
 
-function ProjectRow({ project, children }: { project: CommandDeckState["projects"][number]; children?: ReactNode }) {
+function ProjectRow({
+  project,
+  onNotice,
+  children
+}: {
+  project: CommandDeckState["projects"][number];
+  onNotice: (message: string) => void;
+  children?: ReactNode;
+}) {
   return (
-    <div className="ops-row project-row">
+    <div className="ops-row project-row kanban-priority-normal">
       <div className="project-main">
-        <span>{project.name}</span>
-        <em>{project.nextAction || project.objective || "No next action"}</em>
-        <div className="mini-progress" aria-label={`${project.name} progress ${project.progress}%`}>
-          <span style={{ width: `${project.progress}%` }} />
+        <span className="project-title">{project.name}</span>
+        <em className="project-next-action">{project.nextAction || project.objective || "No next action"}</em>
+        <div className="project-progress-line">
+          <div className="mini-progress" aria-label={`${project.name} progress ${project.progress}%`}>
+            <span style={{ width: `${project.progress}%` }} />
+          </div>
+          <strong>{project.progress}%</strong>
+        </div>
+        <div className="repo-meta">
+          {project.source === "github" && <span className="source-pill"><Github size={13} /> GitHub</span>}
+          {project.language && <span className="source-pill">{project.language}</span>}
+          {project.defaultBranch && <span className="source-pill"><GitBranch size={13} /> {project.defaultBranch}</span>}
         </div>
       </div>
-      <div className="repo-meta">
-        {project.source === "github" && <span className="source-pill"><Github size={13} /> GitHub</span>}
-        {project.language && <span className="source-pill">{project.language}</span>}
-        {project.defaultBranch && <span className="source-pill"><GitBranch size={13} /> {project.defaultBranch}</span>}
-        <strong>{project.progress}%</strong>
-      </div>
       <div className="row-actions">
+        <TelegramButton
+          payload={{ kind: "kanban-card", title: project.name, body: project.objective || project.nextAction || "Project card", meta: `${project.status} / ${project.progress}%` }}
+          onNotice={onNotice}
+        />
         {project.repositoryUrl && (
           <a className="repo-link" href={project.repositoryUrl} target="_blank" rel="noreferrer" aria-label={`Open ${project.name} on GitHub`}>
             <ExternalLink size={15} />
@@ -3299,8 +4927,79 @@ function ProjectRow({ project, children }: { project: CommandDeckState["projects
   );
 }
 
-function EmptyState({ children }: { children: ReactNode }) {
-  return <div className="empty-state">{children}</div>;
+function PriorityTagControls({ value, onChange }: { value: KanbanPriority; onChange: (priority: KanbanPriority) => void }) {
+  const options: Array<{ value: KanbanPriority; label: string }> = [
+    { value: "urgent", label: "URGENT" },
+    { value: "normal", label: "NORMAL" },
+    { value: "later", label: "LATER" }
+  ];
+
+  return (
+    <div className="priority-tag-row" aria-label="Kanban priority">
+      {options.map((option) => (
+        <button
+          className={`priority-tag priority-tag-${option.value} ${value === option.value ? "active" : ""}`}
+          type="button"
+          key={option.value}
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TelegramButton({ payload, onNotice }: { payload: TelegramPayload; onNotice: (message: string) => void }) {
+  const [isSending, setIsSending] = useState(false);
+
+  const send = async () => {
+    setIsSending(true);
+    try {
+      await postToTelegram(payload);
+      onNotice("Sent to Telegram.");
+    } catch (error) {
+      onNotice(`Telegram send failed: ${getErrorMessage(error)}`);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  return (
+    <button className="telegram-send-button" type="button" onClick={send} disabled={isSending}>
+      <Send size={15} /> {isSending ? "Sending" : "Send to Telegram"}
+    </button>
+  );
+}
+
+function EmptyState({
+  children,
+  actionLabel = "New item",
+  onAction
+}: {
+  children: ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  const handleAction = () => {
+    if (onAction) {
+      onAction();
+      return;
+    }
+    window.dispatchEvent(new Event("northwatch:new-item"));
+  };
+
+  return (
+    <div className="empty-state">
+      <Sparkles size={20} />
+      <strong>Nothing here yet.</strong>
+      <span>{children}</span>
+      <button type="button" onClick={handleAction}>
+        <Plus size={15} /> {actionLabel}
+      </button>
+    </div>
+  );
 }
 
 function ToggleCard({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
@@ -3328,21 +5027,180 @@ interface CloudStatus {
   userEmail: string | null;
 }
 
-function getInitialCloudStatus(): CloudStatus {
-  if (!supabaseConfig.isConfigured) {
-    return {
-      mode: "local",
-      label: "Cloud auth: local fallback",
-      detail: "Supabase env vars are missing, so this browser is using localStorage only.",
-      lastSyncedAt: null,
-      userEmail: null
-    };
+async function fetchLegacyCommandDeck(): Promise<LegacyCommandDeckPayload | null> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
   }
 
+  const response = await fetch(LEGACY_COMMAND_DECK_ENDPOINT, {
+    credentials: "include",
+    headers: { Accept: "application/json" },
+    cache: "no-store"
+  });
+
+  if (response.status === 204 || response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, `Legacy deck API returned ${response.status}.`));
+  }
+
+  const payload = await response.json() as { deck?: Partial<CommandDeckState> | null; updatedAt?: string | null };
+  if (!payload.deck) return null;
+
   return {
-    mode: "connecting",
-    label: "Cloud auth: checking",
-    detail: "Checking for an active Supabase session.",
+    deck: payload.deck,
+    updatedAt: payload.updatedAt ?? null
+  };
+}
+
+async function postToTelegram(payload: TelegramPayload): Promise<void> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_SEND_ENDPOINT, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...payload,
+      source: "northwatch",
+      sentAt: new Date().toISOString()
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, `Telegram API returned ${response.status}.`));
+  }
+}
+
+async function fetchTelegramConfig(): Promise<TelegramConfigStatus> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_CONFIG_ENDPOINT, { credentials: "include" });
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Telegram settings are unavailable."));
+  }
+
+  return normalizeTelegramConfig(await response.json());
+}
+
+async function saveTelegramConfig(input: { botToken: string; chatId: string }): Promise<TelegramConfigStatus> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_CONFIG_ENDPOINT, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input)
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Telegram bot could not be saved."));
+  }
+
+  return normalizeTelegramConfig(await response.json());
+}
+
+async function deleteTelegramConfig(): Promise<void> {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is unavailable in this browser.");
+  }
+
+  const response = await fetch(TELEGRAM_CONFIG_ENDPOINT, {
+    method: "DELETE",
+    credentials: "include"
+  });
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response, "Telegram bot could not be deleted."));
+  }
+}
+
+function normalizeTelegramConfig(value: unknown): TelegramConfigStatus {
+  const record = value && typeof value === "object" ? value as Partial<TelegramConfigStatus> : {};
+  return {
+    configured: Boolean(record.configured),
+    botUsername: typeof record.botUsername === "string" ? record.botUsername : null,
+    chatId: typeof record.chatId === "string" ? record.chatId : null,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null
+  };
+}
+
+async function readApiError(response: Response, fallback: string): Promise<string> {
+  try {
+    const parsed = await response.json() as { error?: string; errors?: string[] };
+    return parsed.error ?? parsed.errors?.join(" ") ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function createIdleAgentHealth(settings: DeckSettings): AgentHealthRecord[] {
+  const checkedAt = new Date().toISOString();
+  return [
+    { id: "sentinel", label: "Sentinel", status: "idle", checkedAt, detail: "Waiting for /health." },
+    { id: "copilot", label: "Copilot", status: "idle", checkedAt, detail: "System AI backend route waiting for auth." },
+    {
+      id: "ollama",
+      label: "Ollama",
+      status: settings.ollamaEnabled ? "idle" : "idle",
+      checkedAt,
+      detail: settings.ollamaEnabled ? "Local model route is configured." : "Ollama is disabled."
+    },
+    { id: "telegram", label: "Telegram", status: "idle", checkedAt, detail: "@glizocksamabot bridge waiting for webhook." }
+  ];
+}
+
+async function fetchAgentHealth(settings: DeckSettings): Promise<AgentHealthRecord[]> {
+  const checkedAt = new Date().toISOString();
+  const fallback = createIdleAgentHealth(settings).map((agent) => ({ ...agent, checkedAt }));
+
+  if (typeof fetch !== "function") return fallback;
+
+  try {
+    const response = await fetch("/health", { cache: "no-store" });
+    if (!response.ok) throw new Error(`health returned ${response.status}`);
+    const parsed = await response.json() as { agents?: Array<Partial<AgentHealthRecord>> };
+    const agents = parsed.agents ?? [];
+    return fallback.map((agent) => {
+      const reported = agents.find((item) => item.id === agent.id);
+      return {
+        ...agent,
+        status: normalizeAgentHealthStatus(reported?.status) ?? agent.status,
+        checkedAt: getOptionalString(reported?.checkedAt) ?? checkedAt,
+        detail: getOptionalString(reported?.detail) ?? agent.detail
+      };
+    });
+  } catch (error) {
+    return fallback.map((agent) => ({
+      ...agent,
+      status: agent.id === "sentinel" ? "dead" : agent.status,
+      checkedAt,
+      detail: agent.id === "sentinel" ? getErrorMessage(error) : agent.detail
+    }));
+  }
+}
+
+function normalizeAgentHealthStatus(value: unknown): AgentHealthStatus | null {
+  return value === "alive" || value === "dead" || value === "idle" ? value : null;
+}
+
+function getOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function getInitialCloudStatus(): CloudStatus {
+  return {
+    mode: "local",
+    label: "Credential auth: active",
+    detail: "Users enter email and password to open their isolated Northwatch deck.",
     lastSyncedAt: null,
     userEmail: null
   };
@@ -3350,7 +5208,152 @@ function getInitialCloudStatus(): CloudStatus {
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
-  return "Unexpected cloud sync error.";
+  return "Unexpected Northwatch error.";
+}
+
+function createTeamInviteDeliveryNotice(invite: TeamInviteApiResult | null | undefined, fallbackEmail = ""): TeamInviteDeliveryNotice {
+  const email = invite?.email ?? fallbackEmail;
+  if (invite?.emailDelivery?.delivered) {
+    return {
+      tone: "success",
+      title: "Invite sent",
+      message: email ? `Email delivered to ${email}.` : "Email delivered to the teammate."
+    };
+  }
+
+  if (invite?.emailDelivery?.reason === "send_failed") {
+    return {
+      tone: "error",
+      title: "Invite email failed",
+      message: "The invite link still works. Copy the invite link and send it manually."
+    };
+  }
+
+  if (invite?.acceptUrl) {
+    return {
+      tone: "warning",
+      title: "Invite link created",
+      message: "Email delivery is not configured. Copy the invite link and send it manually."
+    };
+  }
+
+  return {
+    tone: "warning",
+    title: "Invite link created",
+    message: "Copy the generated invite link and send it manually."
+  };
+}
+
+function getShortcutView(key: string): DeckView | null {
+  if (key === "k") return "todo";
+  if (key === "p") return "projects";
+  if (key === "d") return "journal";
+  if (key === "c") return "intel";
+  return null;
+}
+
+function getDocumentTitleForView(view: DeckView): string {
+  const labels: Record<DeckView, string> = {
+    dashboard: "Command",
+    todo: "Kanban",
+    daily: "Daily",
+    projects: "Projects",
+    intel: "Content Queue",
+    calendar: "Calendar",
+    workout: "Workout",
+    books: "Books",
+    journal: "Docs",
+    finances: "Finances",
+    customize: "Customize",
+    account: "Account"
+  };
+  return labels[view];
+}
+
+function getViewForUrlSection(section: string): DeckView | null {
+  const normalized = section.trim().toLowerCase();
+  const sections: Record<string, DeckView> = {
+    command: "dashboard",
+    dashboard: "dashboard",
+    kanban: "todo",
+    todo: "todo",
+    projects: "projects",
+    docs: "journal",
+    documents: "journal",
+    journal: "journal",
+    content: "intel",
+    "content-queue": "intel",
+    intel: "intel",
+    calendar: "calendar",
+    workout: "workout",
+    books: "books",
+    finances: "finances"
+  };
+  return sections[normalized] ?? null;
+}
+
+function getNewItemLabel(view: DeckView): string {
+  const labels: Record<DeckView, string> = {
+    dashboard: "a task",
+    todo: "a task",
+    daily: "a routine",
+    projects: "a project",
+    intel: "an intel item",
+    calendar: "a calendar event",
+    workout: "a workout",
+    books: "a book",
+    journal: "a doc",
+    finances: "a finance entry",
+    customize: "a setting",
+    account: "an account detail"
+  };
+  return labels[view];
+}
+
+function focusNewItemField(view: DeckView) {
+  const labels: Partial<Record<DeckView, string>> = {
+    todo: "Task title",
+    daily: "Routine title",
+    projects: "Project name",
+    intel: "Intel title",
+    calendar: "Calendar event title",
+    workout: "Workout name",
+    books: "Book title",
+    journal: "Journal entry",
+    finances: "Finance label",
+    customize: "Callsign",
+    account: "Profile name"
+  };
+  const label = labels[view] ?? "Task title";
+  const field = document.querySelector<HTMLElement>(`[aria-label="${label}"]`);
+  field?.focus();
+}
+
+function buildLocalActivityFeed(state: CommandDeckState): ActivityFeedItem[] {
+  const items: ActivityFeedItem[] = [
+    ...state.tasks.map((task) => ({ id: `task-${task.id}-${task.updatedAt}`, label: task.title, createdAt: task.updatedAt })),
+    ...state.projects.map((project) => ({ id: `project-${project.id}-${project.updatedAt}`, label: project.name, createdAt: project.updatedAt })),
+    ...state.intel.map((item) => ({ id: `intel-${item.id}-${item.updatedAt}`, label: item.title, createdAt: item.updatedAt })),
+    ...state.journal.map((entry) => ({ id: `journal-${entry.id}-${entry.date}`, label: entry.mood, createdAt: `${entry.date}T12:00:00.000Z` }))
+  ];
+
+  return items.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()).slice(0, 12);
+}
+
+function getKanbanPriorityLabel(priority: KanbanPriority): string {
+  if (priority === "urgent") return "URGENT";
+  if (priority === "later") return "LATER";
+  return "NORMAL";
+}
+
+function formatCalories(value: FoodPlateAnalysis["calories"]): string {
+  if (typeof value === "number" && Number.isFinite(value)) return `${Math.round(value)} kcal`;
+  if (typeof value === "string" && value.trim()) return value.trim().toLowerCase().includes("kcal") ? value.trim() : `${value.trim()} kcal`;
+  return "Calories unavailable";
+}
+
+function formatClock(value: string): string {
+  return new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function composeAgentReply(
@@ -3405,7 +5408,7 @@ function composeAgentReply(
 
 function getPriorityTask(state: CommandDeckState): CommandDeckState["tasks"][number] | null {
   const priorityWeight: Record<Priority, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-  const openTasks = state.tasks.filter((task) => task.status === "todo");
+  const openTasks = state.tasks.filter((task) => task.status !== "done");
   if (openTasks.length === 0) return null;
 
   return [...openTasks].sort((left, right) => {
@@ -3446,6 +5449,17 @@ function getPriorityProject(state: CommandDeckState): CommandDeckState["projects
     if (progressDelta !== 0) return progressDelta;
     return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
   })[0];
+}
+
+function isGitHubRepositoryUrl(value: string): boolean {
+  const prefixed = /^https?:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const url = new URL(prefixed);
+    const [owner, repo] = url.pathname.split("/").filter(Boolean);
+    return url.hostname.toLowerCase() === "github.com" && Boolean(owner && repo);
+  } catch {
+    return false;
+  }
 }
 
 function getFocusTaskTitle(state: CommandDeckState): string {
@@ -3509,5 +5523,5 @@ function formatDateTime(value: string): string {
 }
 
 function formatMoney(value: number): string {
-  return new Intl.NumberFormat("en", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return toKSH(value);
 }
