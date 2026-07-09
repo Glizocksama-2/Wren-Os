@@ -3239,9 +3239,6 @@ function FinancesModule({ state, dispatch, setNotice }: ModuleProps) {
           {state.finances.map((entry) => (
             <ActionRow key={entry.id} title={entry.label} meta={`${entry.type} - ${formatMoney(entry.amount)} - ${entry.status}`}>
               <button type="button" onClick={() => startEdit(entry)}><Pencil size={15} /> Modify</button>
-              <button onClick={() => dispatch({ type: "finance/toggle", id: entry.id })} type="button">
-                {entry.status === "cleared" ? "Plan" : "Clear"}
-              </button>
               <button type="button" aria-label={`Delete ${entry.label}`} onClick={() => dispatch({ type: "finance/delete", id: entry.id })}><Trash2 size={15} /> Delete</button>
             </ActionRow>
           ))}
@@ -3325,15 +3322,7 @@ function CustomizeModule({ state, dispatch, setNotice }: ModuleProps) {
         <div className="custom-card">
           <span>Accent</span>
           <div className="swatch-row">
-            {accentOptions.map((option) => (
-              <button
-                className={`swatch swatch-${option.value} ${state.settings.accent === option.value ? "active" : ""}`}
-                type="button"
-                key={option.value}
-                aria-label={`Use ${option.label} accent`}
-                onClick={() => dispatch({ type: "settings/update", payload: { accent: option.value } })}
-              />
-            ))}
+            <span className="premium-badge">Stitch Blue</span>
           </div>
         </div>
         <div className="custom-card">

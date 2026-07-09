@@ -1,25 +1,25 @@
 :root {
   color-scheme: dark;
-  --bg: #02050a;
-  --bg-2: #06121a;
-  --surface: #08131a;
-  --surface-2: #0c1a22;
-  --surface-3: #122733;
-  --line: #1d3644;
-  --line-strong: #335a6b;
-  --text: #ecf8ff;
-  --muted: #8aa7b3;
-  --faint: #54717d;
-  --accent: #f2b84b;
-  --accent-rgb: 242 184 75;
-  --danger: #ff5e4d;
-  --green: #55d283;
-  --cyan: #4fe7ff;
-  --violet: #9b8cff;
-  --radius: 8px;
-  --shadow: 0 22px 80px rgb(0 0 0 / 0.42);
-  --glass: rgb(8 19 26 / 0.72);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --bg: #0a0e17;
+  --bg-2: #0e1422;
+  --surface: #121b2d;
+  --surface-2: #16223b;
+  --surface-3: #1e3157;
+  --line: rgba(59, 130, 246, 0.12);
+  --line-strong: rgba(59, 130, 246, 0.25);
+  --text: #f3f4f6;
+  --muted: #94a3b8;
+  --faint: #64748b;
+  --accent: #3b82f6;
+  --accent-rgb: 59 130 246;
+  --danger: #e11d48;
+  --green: #10b981;
+  --cyan: #06b6d4;
+  --violet: #6366f1;
+  --radius: 2.5rem;
+  --shadow: 0 40px 40px -15px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --glass: rgba(10, 14, 23, 0.75);
+  font-family: Outfit, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 * {
@@ -63,14 +63,21 @@ select {
 
 h1,
 h2,
-h3,
+h3 {
+  margin: 0;
+  font-family: Outfit, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
 p {
   margin: 0;
+  line-height: 1.65;
+  max-width: 65ch;
 }
 
 .deck-app {
-  --accent: #f2b84b;
-  --accent-rgb: 242 184 75;
   position: relative;
   isolation: isolate;
   display: grid;
@@ -79,40 +86,20 @@ p {
   overflow: hidden;
 }
 
-.deck-app[data-accent="cyan"] {
-  --accent: #4fe7ff;
-  --accent-rgb: 79 231 255;
-}
-
-.deck-app[data-accent="green"] {
-  --accent: #55d283;
-  --accent-rgb: 85 210 131;
-}
-
-.deck-app[data-accent="red"] {
-  --accent: #ff5e4d;
-  --accent-rgb: 255 94 77;
-}
-
-.deck-app[data-accent="pink"] {
-  --accent: #ff4fbf;
-  --accent-rgb: 255 79 191;
-}
-
 .deck-app[data-background="white"] {
   color-scheme: light;
-  --bg: #f6fbff;
-  --bg-2: #e8f2f7;
+  --bg: #f9fafb;
+  --bg-2: #f3f4f6;
   --surface: #ffffff;
-  --surface-2: #eef7fb;
-  --surface-3: #dbeaf1;
-  --line: #c9dbe5;
-  --line-strong: #88a9b8;
-  --text: #071017;
-  --muted: #455f6b;
-  --faint: #6f8792;
-  --shadow: 0 18px 60px rgb(22 48 62 / 0.13);
-  --glass: rgb(255 255 255 / 0.78);
+  --surface-2: #f9fafb;
+  --surface-3: #e5e7eb;
+  --line: rgba(59, 130, 246, 0.08);
+  --line-strong: rgba(59, 130, 246, 0.16);
+  --text: #18181b;
+  --muted: #71717a;
+  --faint: #94a3b8;
+  --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.05);
+  --glass: rgba(255, 255, 255, 0.8);
   background:
     radial-gradient(circle at 72% 8%, rgb(var(--accent-rgb) / 0.18), transparent 28rem),
     radial-gradient(circle at 16% 86%, rgb(79 231 255 / 0.15), transparent 24rem),
@@ -934,6 +921,7 @@ p {
   font-weight: 800;
 }
 
+.panel,
 .readiness-panel,
 .battery-card,
 .deck-panel,
@@ -946,8 +934,9 @@ p {
 .journal-card {
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(180deg, rgb(21 29 26 / 0.96), rgb(13 18 16 / 0.96));
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
   box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
 }
 
 .readiness-panel {
